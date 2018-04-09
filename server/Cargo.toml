@@ -1,0 +1,16 @@
+[package]
+authors = ["Colm Ó hIcí <colmohici@gmail.com>"]
+name = "server"
+version = "0.1.0"
+
+[dependencies]
+bytes = "0.4.6"
+futures = "0.1.20"
+serde_cbor = "0.8.2"
+tokio = "0.1.5"
+tokio-io = "0.1.6"
+tokio-serde-cbor = "0.2.1"
+tokio-serde-json = "0.0.0"
+
+[dependencies.common]
+path = "../common"
