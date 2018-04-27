@@ -7,6 +7,7 @@ extern crate tokio_io;
 extern crate tokio_serde_cbor;
 extern crate tokio_serde_json;
 extern crate indexmap;
+extern crate snowflake;
 
 mod server;
 
@@ -26,9 +27,27 @@ struct Connection<R: AsyncRead, W: AsyncWrite> {
 }
 
 fn main() {
-    let (srv, fut) = server::Server::start(&"127.0.0.1:2939".parse().unwrap());
+    let (srv, src, fut) = server::Server::start(&"127.0.0.1:2939".parse().unwrap());
 
-    let addr = "127.0.0.1:2978".parse().unwrap();
+    let proc_srv = srv.clone();
+    let process = src
+        .for_each(move |(id, msg)| {
+            println!("{}: {:?}", id, msg);
+            match msg {
+                messages::Server::Message(s) => {
+                    proc_srv.send_all(&messages::Client::Message(s));
+                },
+            };
+            Ok(())
+        });
+
+
+    let mut rt = tokio::runtime::Runtime::new().unwrap();
+    rt.spawn(fut);
+    rt.spawn(process);
+    rt.shutdown_on_idle().wait().unwrap();
+
+    /*let addr = "127.0.0.1:2978".parse().unwrap();
     let listener = TcpListener::bind(&addr).unwrap();
 
     let (rq_w, rq_r) = mpsc::unbounded();
@@ -97,5 +116,5 @@ fn main() {
             println!("accept error: {:?}", e);
         });
 
-    tokio::run(fut);
+    tokio::run(fut);*/
 }

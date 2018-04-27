@@ -1,6 +1,12 @@
 #define LIB_PATH "../target/debug/mclient.dll"
 
 /world/New()
-	for(var/i = 0; i < 10; i++)
-		world.log << json_encode(call(LIB_PATH, "hello")("[i]"))
+	call(LIB_PATH, "dibby_setup")()
+	while(TRUE)
+		var/ret = call(LIB_PATH, "dibby_recv")()
+		world.log << json_encode(ret)
+		if(ret == "")
+			break
+		sleep(10)
+	call(LIB_PATH, "dibby_shutdown")()
 	del(src)

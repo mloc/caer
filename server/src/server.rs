@@ -12,6 +12,7 @@ use common::messages;
 use bytes::BytesMut;
 use std::io;
 use serde_cbor;
+use snowflake::ProcessUniqueId;
 
 #[derive(Debug, Clone)]
 pub struct Server {
@@ -20,23 +21,22 @@ pub struct Server {
 
 #[derive(Debug)]
 pub struct ServerShared {
-    pub source: mpsc::UnboundedReceiver<messages::Server>,
-    sink: mpsc::UnboundedSender<messages::Client>,
+    sink: mpsc::UnboundedSender<(ProcessUniqueId, messages::Server)>,
 
-    clients: RwLock<IndexMap<SocketAddr, mpsc::UnboundedSender<BytesMut>>>,
+    pub clients: RwLock<IndexMap<ProcessUniqueId, mpsc::UnboundedSender<BytesMut>>>,
+    addrs: RwLock<IndexMap<ProcessUniqueId, SocketAddr>>,
 }
 
 impl Server {
-    pub fn start(addr: &SocketAddr) -> (Self, impl Future<Item = (), Error = ()> + Send) {
-        let (source_w, source_r) = mpsc::unbounded();
-        let (sink_w, sink_r) = mpsc::unbounded();
+    pub fn start(addr: &SocketAddr) -> (Self, impl Stream<Item = (ProcessUniqueId, messages::Server), Error = ()>, impl Future<Item = (), Error = ()> + Send) {
+        let (sink, source) = mpsc::unbounded();
 
         let server = Server {
             shared: Arc::new(ServerShared {
-                source: source_r,
-                sink: sink_w,
+                sink: sink,
 
                 clients: RwLock::new(IndexMap::new()),
+                addrs: RwLock::new(IndexMap::new()),
             }),
         };
 
@@ -57,7 +57,7 @@ impl Server {
             })
             .into_future();
 
-        (server, future)
+        (server, source, future)
     }
 
     fn process_connection(&self, sock: TcpStream) {
@@ -67,12 +67,13 @@ impl Server {
         let reader = length_delimited::FramedRead::new(recv);
         let writer = length_delimited::FramedWrite::new(send);
 
-        tokio::spawn(self.process_reader(&peer_addr, reader));
-        tokio::spawn(self.process_writer(&peer_addr, writer));
+        let id = ProcessUniqueId::new();
+
+        tokio::spawn(self.process_reader(id, reader));
+        tokio::spawn(self.process_writer(id, writer));
     }
 
-    fn process_reader(&self, peer_addr: &SocketAddr, reader: impl Stream<Item = BytesMut, Error = io::Error>) -> impl Future<Item = (), Error = ()> {
-        let peer_addr = peer_addr.clone();
+    fn process_reader(&self, id: ProcessUniqueId, reader: impl Stream<Item = BytesMut, Error = io::Error>) -> impl Future<Item = (), Error = ()> {
         let shared = self.shared.clone();
 
         reader
@@ -84,27 +85,29 @@ impl Server {
                     println!("decode error: {:?}", e);
                 })
             })
+            .map(move |x| {
+                (id, x)
+            })
             .forward(self.shared.sink.clone().sink_map_err(|e| {
                 println!("receive channel error: {:?}", e);
             }))
             .then(move |_| {
-                println!("{} disconnected", peer_addr);
+                println!("{} disconnected", id);
                 let mut clients = shared.clients.write().unwrap();
-                clients.remove(&peer_addr);
+                clients.remove(&id);
                 Ok(())
             })
     }
 
-    fn process_writer(&self, peer_addr: &SocketAddr, writer: impl Sink<SinkItem = BytesMut, SinkError = io::Error>) -> impl Future<Item = (), Error = ()> {
+    fn process_writer(&self, id: ProcessUniqueId, writer: impl Sink<SinkItem = BytesMut, SinkError = io::Error>) -> impl Future<Item = (), Error = ()> {
         let (client_w, client_r) = mpsc::unbounded();
 
         {
             let mut clients = self.shared.clients.write().unwrap();
-            clients.insert(peer_addr.clone(), client_w);
+            clients.insert(id, client_w);
         }
 
-        let peer_addr = peer_addr.clone();
-        println!("{} start", peer_addr);
+        println!("{} start", id);
 
         client_r
             .map_err(|e| {
@@ -118,10 +121,20 @@ impl Server {
             })
     }
 
-    pub fn send(&self, msg: &messages::Client) {
+    pub fn send(&self, id: ProcessUniqueId, msg: &messages::Client) {
+        let enc = BytesMut::from(serde_cbor::ser::to_vec(msg).unwrap()); // todo error type
+        let clients = self.shared.clients.read().unwrap();
+        if let Some(chan) = clients.get(&id) {
+            chan.unbounded_send(enc.clone()).unwrap();
+        } else {
+            // TODO errors
+        }
+    }
+
+    pub fn send_all(&self, msg: &messages::Client) {
         let enc = BytesMut::from(serde_cbor::ser::to_vec(msg).unwrap()); // todo error type
         for client in self.shared.clients.read().unwrap().values() {
-            client.unbounded_send(enc.clone());
+            client.unbounded_send(enc.clone()).unwrap();
         }
     }
 }
