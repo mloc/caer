@@ -1,0 +1,13 @@
+[package]
+name = "ldc"
+version = "0.1.0"
+authors = ["Colm Ó hIcí <colmohici@gmail.com>"]
+
+[dependencies]
+lalrpop-util = "0.16.1"
+regex = "0.2.0"
+llvm-sys-wrapper = { path = "../llvm-sys-wrapper" }
+dreammaker = { path = "../SpacemanDMM/src/dreammaker" }
+
+[build-dependencies]
+lalrpop = "0.16.1"

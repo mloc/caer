@@ -1,0 +1,28 @@
+use std::str::FromStr;
+use ast;
+
+grammar;
+
+pub Statements: Vec<ast::Statement> = {
+    (<Statement> ";")*,
+}
+
+Statement: ast::Statement = {
+    "var" <i:Id> => ast::Statement::Decl(i),
+    "put" <i:Id> => ast::Statement::Put(i),
+    <i:Id> "=" <e:Expr> => ast::Statement::Assignment(i, e),
+}
+
+Expr: ast::Expr = {
+    <t:Term> => ast::Expr::Term(t),
+    <l:Expr> "+" <r:Term> => ast::Expr::Add(l.into(), ast::Expr::Term(r).into()),
+    "(" <e:Expr> ")" => e,
+}
+
+Term: ast::Term = {
+    <n:Num> => ast::Term::Literal(n),
+    <i:Id> => ast::Term::Ref(i),
+};
+
+Id: String = <s:r"[a-zA-Z_][a-zA-Z0-9_]*"> => String::from(s);
+Num: i32 = <s:r"[0-9]+"> => i32::from_str(s).unwrap();
