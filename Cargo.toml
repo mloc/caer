@@ -6,7 +6,7 @@ authors = ["Colm Ó hIcí <colmohici@gmail.com>"]
 [dependencies]
 lalrpop-util = "0.16.1"
 regex = "0.2.0"
-llvm-sys-wrapper = { path = "../llvm-sys-wrapper" }
+inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "llvm7-0" }
 dreammaker = { path = "../SpacemanDMM/src/dreammaker" }
 
 [build-dependencies]
