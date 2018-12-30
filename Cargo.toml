@@ -1,13 +1,18 @@
 [package]
+authors = ["Colm Ó hIcí <colmohici@gmail.com>"]
+edition = "2018"
 name = "ldc"
 version = "0.1.0"
-authors = ["Colm Ó hIcí <colmohici@gmail.com>"]
 
 [dependencies]
-lalrpop-util = "0.16.1"
-regex = "0.2.0"
-inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "llvm7-0" }
-dreammaker = { path = "../SpacemanDMM/src/dreammaker" }
 
-[build-dependencies]
-lalrpop = "0.16.1"
+[dependencies.dreammaker]
+path = "../SpacemanDMM/src/dreammaker"
+
+[dependencies.indexed_vec]
+path = "../indexed_vec"
+default-features = false
+
+[dependencies.inkwell]
+branch = "llvm7-0"
+git = "https://github.com/TheDan64/inkwell"
