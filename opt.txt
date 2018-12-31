@@ -32,11 +32,14 @@ future optimizations:
             ideally we want Val to be less opaque so that we can do manipulations without hitting rt
 
     faster DM calls
-        create "type strict" versions of procs when we have full type info, and calling when possible
+        specialization!
+        create "type strict" versions of procs when we have full type info, call when possible
             "hard" procs? procs that only take hard values
         using standard cdecly functions + args
         absence masking to handle default args without having to wrap
         won't work for any proc that uses args list
+            but maybe we can specialize List<Val> to List<Int> or so
+            qdel will suffer -> but maybe that can be an intrinsic? we could just improve del
 
         separate from dynamic/static dispatch, only affects how args are passed
 

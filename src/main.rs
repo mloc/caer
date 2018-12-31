@@ -9,6 +9,7 @@ mod cfg;
 use crate::cfg::*;
 
 mod emit;
+mod frontend;
 
 fn main() {
     inkwell::targets::Target::initialize_native(&inkwell::targets::InitializationConfig::default()).unwrap();
@@ -32,18 +33,18 @@ fn main() {
 }
 
 fn build_statements(root: &Vec<ast::Statement>) -> Proc {
-    let mut proc = Proc::new();
+    // build, we have a single block
+    let mut builder = frontend::ProcBuilder::new();
 
     // finddecls
     for stmt in root.iter() {
         if let ast::Statement::Var(v) = stmt {
-            proc.add_local(Some(&v.name));
+            builder.proc.add_local(Some(&v.name));
         }
     }
 
-    // emit, we have a single block
-    let block = proc.build_block(&root);
-    proc.blocks.push(block);
+    let block = builder.build_block(&root);
+    builder.proc.blocks.push(block);
 
-    proc
+    builder.proc
 }
