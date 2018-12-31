@@ -1,13 +1,4 @@
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::Read;
-
-use dreammaker::ast;
-use indexed_vec::{IndexVec, newtype_index, Idx};
-
 mod cfg;
-use crate::cfg::*;
-
 mod emit;
 mod frontend;
 
@@ -23,28 +14,12 @@ fn main() {
     let tree = parser.parse_object_tree();
     let main_proc = &tree.root().get().procs["main"].value[0];
 
-    let proc = build_statements(&main_proc.body);
+    let proc_builder = frontend::ProcBuilder::new();
+    let proc = proc_builder.build_proc(main_proc);
     println!("{:?}", proc);
 
     let builder = emit::Builder::new();
     builder.emit_proc(&proc);
 
     println!("Hello, world!");
-}
-
-fn build_statements(root: &Vec<ast::Statement>) -> Proc {
-    // build, we have a single block
-    let mut builder = frontend::ProcBuilder::new();
-
-    // finddecls
-    for stmt in root.iter() {
-        if let ast::Statement::Var(v) = stmt {
-            builder.proc.add_local(Some(&v.name));
-        }
-    }
-
-    let block = builder.build_block(&root);
-    builder.proc.blocks.push(block);
-
-    builder.proc
 }

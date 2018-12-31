@@ -37,6 +37,7 @@ future optimizations:
             "hard" procs? procs that only take hard values
         using standard cdecly functions + args
         absence masking to handle default args without having to wrap
+            positional args might take some more hacking
         won't work for any proc that uses args list
             but maybe we can specialize List<Val> to List<Int> or so
             qdel will suffer -> but maybe that can be an intrinsic? we could just improve del
@@ -45,3 +46,5 @@ future optimizations:
 
         linting/annotations to ensure procs are used only strictly? "nosoft"
             affects call()() usage - that'll probably always use soft unless we keep md around
+            maybe not useful, we probably still want to use hard procs from soft context
+            alternatively act as a check for all values being hard?

@@ -1,8 +1,8 @@
 use crate::cfg;
-use dreammaker::ast;
+use dreammaker::{ast, objtree};
 
 pub struct ProcBuilder {
-    pub proc: cfg::Proc,
+    proc: cfg::Proc,
 }
 
 impl ProcBuilder {
@@ -11,7 +11,22 @@ impl ProcBuilder {
             proc: cfg::Proc::new(),
         }
     }
-    pub fn build_block(&mut self, stmts: &[ast::Statement]) -> cfg::Block {
+
+    pub fn build_proc(mut self, ast_proc: &objtree::ProcValue) -> cfg::Proc {
+        // finddecls
+        for stmt in ast_proc.body.iter() {
+            if let ast::Statement::Var(v) = stmt {
+                self.proc.add_local(Some(&v.name));
+            }
+        }
+
+        let block = self.build_block(&ast_proc.body);
+        self.proc.blocks.push(block);
+
+        self.proc
+    }
+
+    fn build_block(&mut self, stmts: &[ast::Statement]) -> cfg::Block {
         let mut block = cfg::Block::new();
 
         for stmt in stmts.iter() {
