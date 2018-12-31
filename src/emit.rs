@@ -150,11 +150,6 @@ impl Builder {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn dm_print_num(num: f32) {
-    println!("put: {}", num);
-}
-
 macro_rules! rt_funcs {
     ( $name:ident, [ $( ( $func:ident, $ret:ident, [ $( $arg:ident ),* $(,)* ] ) ),* $(,)* ] ) => {
         #[derive(Debug)]
