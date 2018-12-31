@@ -75,6 +75,7 @@ impl Proc {
         let mut block = Block::new();
 
         for stmt in stmts.iter() {
+            println!("{:?}", stmt);
             match stmt {
                 ast::Statement::Var(v) => {
                     if let Some(ref expr) = v.value {
@@ -131,9 +132,11 @@ impl Proc {
     fn build_expr(&mut self, expr: &ast::Expression, block: &mut Block) -> Expr {
         match expr {
             ast::Expression::Base { unary, term, follow } => {
+                let mut expr = self.build_term(term, block);
                 assert!(unary.len() == 0);
                 assert!(follow.len() == 0);
-                self.build_term(term)
+
+                expr
             },
 
             ast::Expression::BinaryOp { op, lhs, rhs } => {
@@ -146,17 +149,17 @@ impl Proc {
                         block.ops.push(Op::Add(local, lhs_expr, rhs_expr));
                     },
 
-                    _ => unimplemented!(),
+                    _ => unimplemented!("{:?}", op),
                 }
 
                 Expr::Place(Place::Local(local))
             },
 
-            _ => unimplemented!(),
+            _ => unimplemented!("{:?}", expr),
         }
     }
 
-    fn build_term(&self, term: &ast::Term) -> Expr {
+    fn build_term(&mut self, term: &ast::Term, block: &mut Block) -> Expr {
         match term {
             ast::Term::Int(x) => Expr::Literal(Literal::Num(*x as f32)),
             ast::Term::Float(x) => Expr::Literal(Literal::Num(*x)),
@@ -164,7 +167,16 @@ impl Proc {
                 let var_id = self.lookup_var(var_name).unwrap();
                 Expr::Place(Place::Local(var_id))
             },
-            _ => unimplemented!(),
+            ast::Term::Call(name, args) => {
+                let res = self.add_local(None);
+
+                let arg_exprs: Vec<Expr> = args.iter().map(|expr| self.build_expr(expr, block)).collect();
+
+                block.ops.push(Op::Call(res, name.clone(), arg_exprs));
+
+                Expr::Place(Place::Local(res))
+            },
+            _ => unimplemented!("{:?}", term),
         }
     }
 
@@ -212,6 +224,7 @@ enum Op {
     Mov(LocalId, Expr),
     Put(LocalId),
     Add(LocalId, Expr, Expr),
+    Call(LocalId, String, Vec<Expr>),
 }
 
 #[derive(Debug)]
@@ -267,15 +280,19 @@ struct Builder {
     ctx: inkwell::context::Context,
     builder: inkwell::builder::Builder,
     module: inkwell::module::Module,
+    rt: RtFuncs,
 }
 
 impl Builder {
     fn new() -> Self {
         let ctx = inkwell::context::Context::create();
+        let module = ctx.create_module("main");
+        let rt = RtFuncs::new(&ctx, &module);
         Self {
             builder: ctx.create_builder(),
-            module: ctx.create_module("main"),
+            module: module,
             ctx: ctx,
+            rt: rt,
         }
     }
 
@@ -370,6 +387,7 @@ impl Builder {
                     let val = self.builder.build_float_add(lhs_ref, rhs_ref, "sum");
                     self.builder.build_store(proc_emit.local_allocs[*id], val);
                 }
+                _ => unimplemented!("{:?}", op),
             }
         }
 
@@ -392,4 +410,53 @@ impl Builder {
 #[no_mangle]
 pub extern "C" fn dm_print_num(num: f32) {
     println!("put: {}", num);
+}
+
+macro_rules! rt_funcs {
+    ( $name:ident, [ $( ( $func:ident, $ret:ident, [ $( $arg:ident ),* $(,)* ] ) ),* $(,)* ] ) => {
+        #[derive(Debug)]
+        struct $name {
+            $(
+                $func: inkwell::values::FunctionValue,
+            )*
+        }
+
+        impl $name {
+            fn new(ctx: &inkwell::context::Context, module: &inkwell::module::Module) -> $name {
+                let ptr_type = ctx.opaque_struct_type("").ptr_type(inkwell::AddressSpace::Generic);
+
+                $name {
+                    $(
+                        $func: module.add_function(stringify!($func),
+                            rt_funcs!(@genty ctx ptr_type $ret).fn_type(&[
+                                $(
+                                    rt_funcs!(@genty ctx ptr_type $arg).into(),
+                                )*
+                            ], false),
+                        None),
+                    )*
+                }
+            }
+        }
+    };
+
+    ( @genty $ctx:ident $ptt:ident ptr_type) => (
+        $ptt
+    );
+
+    ( @genty $ctx:ident $ptt:ident $ret:ident) => (
+        $ctx.$ret()
+    );
+}
+
+rt_funcs!{
+    RtFuncs,
+    [
+        (rt_val_float, ptr_type, [f32_type]),
+        (rt_val_int, ptr_type, [i32_type]),
+        (rt_val_null, ptr_type, []),
+        (rt_val_add, ptr_type, [ptr_type, ptr_type]),
+        (rt_val_print, void_type, [ptr_type]),
+        (rt_val_drop, void_type, [ptr_type]),
+    ]
 }

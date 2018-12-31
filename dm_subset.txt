@@ -1,0 +1,11 @@
+no goto
+    mostly unused in modern ss13
+    allows jumping back out of spawn "closures" - hard to implement, espc. with llvm coros
+    jump to label is weird, WEIRD
+
+no icon procs or client << browse_rsc
+    for now. protocol doesn't support icons
+    might hack in enough to get nano/tg ui working
+
+spacemandmm limitations
+    no ..... / ......

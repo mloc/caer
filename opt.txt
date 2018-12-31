@@ -1,0 +1,44 @@
+values
+    soft and hard values
+        hard values have complete type info at compile time, some way or another
+            can be more directly operated on
+        soft are wrapped with type info, dynamic
+            need to be operated on using runtime helpers
+
+    softval structure
+        opaque enum? - for now, sure.
+            in future it'd be nicer to have something we can downcast hard->soft without runtime
+
+        problems abound
+            with current stub system, is heap allocated :(
+            future work for less opaque enum would help this; for now, need to remember to drop
+
+calling (global) procs
+
+runtime errors
+    current plan: llvm exceptions
+    but- we'd like to be able to propagate errors from the runtime
+    could have some rtcall wrapper but that adds overhead to all rtcalls
+
+concurrency
+    llvm coroutines? haven't looked into this enough
+
+future optimizations:
+    hard values + stack soft values
+        hard values need type inference (in future: annotations)
+
+        stack values are more interesting
+            starting point might be informing about size of rt::Val
+            ideally we want Val to be less opaque so that we can do manipulations without hitting rt
+
+    faster DM calls
+        create "type strict" versions of procs when we have full type info, and calling when possible
+            "hard" procs? procs that only take hard values
+        using standard cdecly functions + args
+        absence masking to handle default args without having to wrap
+        won't work for any proc that uses args list
+
+        separate from dynamic/static dispatch, only affects how args are passed
+
+        linting/annotations to ensure procs are used only strictly? "nosoft"
+            affects call()() usage - that'll probably always use soft unless we keep md around
