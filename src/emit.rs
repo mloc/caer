@@ -60,9 +60,9 @@ impl Builder {
         self.builder.build_unconditional_branch(&start);
     }
 
-    pub fn emit_proc(&self, proc: &Proc) {
+    pub fn emit_proc(&self, name: &str, proc: &Proc) {
         let func_type = self.ctx.f32_type().fn_type(&[], false);
-        let func = self.module.add_function("main", func_type, None);
+        let func = self.module.add_function(name, func_type, None);
         let mut proc_emit = ProcEmit::new(func);
         let entry_block = self.emit_entry_block(proc, &mut proc_emit);
 
@@ -78,7 +78,9 @@ impl Builder {
         }
 
         self.finalize_entry_block(&entry_block, &proc_emit.blocks[0]);
+    }
 
+    pub fn run(&self) {
         self.module.print_to_stderr();
 
         let engine = self.module.create_jit_execution_engine(inkwell::OptimizationLevel::None).unwrap();

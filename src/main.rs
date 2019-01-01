@@ -14,12 +14,13 @@ fn main() {
     let tree = parser.parse_object_tree();
     let main_proc = &tree.root().get().procs["main"].value[0];
 
-    let proc_builder = frontend::ProcBuilder::new();
-    let proc = proc_builder.build_proc(main_proc);
-    println!("{:?}", proc);
+    let frontend = frontend::Builder::new(&tree);
+    let procs = frontend.build_procs();
 
     let builder = emit::Builder::new();
-    builder.emit_proc(&proc);
+    for (name, proc) in procs.iter() {
+        builder.emit_proc(&name, &proc);
+    }
 
-    println!("Hello, world!");
+    builder.run();
 }

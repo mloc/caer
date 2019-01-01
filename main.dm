@@ -5,5 +5,5 @@
 	y = x + x + 4 + y
 	world << y + 4
 
-///proc/abc()
-	//world << 3
+/proc/abc()
+	world << 3

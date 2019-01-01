@@ -1,29 +1,54 @@
+use std::collections::HashMap;
 use crate::cfg;
 use dreammaker::{ast, objtree};
 
-pub struct ProcBuilder {
-    proc: cfg::Proc,
+pub struct Builder<'a> {
+    tree: &'a objtree::ObjectTree,
 }
 
-impl ProcBuilder {
-    pub fn new() -> Self {
+impl<'a> Builder<'a> {
+    pub fn new(tree: &'a objtree::ObjectTree) -> Self {
         Self {
-            proc: cfg::Proc::new(),
+            tree: tree,
         }
     }
 
-    pub fn build_proc(mut self, ast_proc: &objtree::ProcValue) -> cfg::Proc {
+    pub fn build_procs(&self) -> HashMap<String, cfg::Proc> {
+        self.tree.root().get().procs.iter().map(|(name, procs)| {
+            (name.clone(), ProcBuilder::build(&procs.value[0]))
+        }).collect()
+    }
+}
+
+struct ProcBuilder<'a> {
+    ast_proc: &'a objtree::ProcValue,
+    vars: HashMap<String, cfg::LocalId>,
+    proc: cfg::Proc,
+}
+
+impl<'a> ProcBuilder<'a> {
+    fn build(ast_proc: &'a objtree::ProcValue) -> cfg::Proc {
+        let mut builder = Self {
+            ast_proc: ast_proc,
+            vars: HashMap::new(),
+            proc: cfg::Proc::new(),
+        };
+
+        builder.build_proc();
+
+        builder.proc
+    }
+
+    fn build_proc(&mut self) {
         // finddecls
-        for stmt in ast_proc.body.iter() {
+        for stmt in self.ast_proc.body.iter() {
             if let ast::Statement::Var(v) = stmt {
                 self.proc.add_local(Some(&v.name));
             }
         }
 
-        let block = self.build_block(&ast_proc.body);
+        let block = self.build_block(&self.ast_proc.body);
         self.proc.blocks.push(block);
-
-        self.proc
     }
 
     fn build_block(&mut self, stmts: &[ast::Statement]) -> cfg::Block {
