@@ -16,10 +16,12 @@ fn main() {
     let frontend = frontend::Builder::new(&tree);
     let procs = frontend.build_procs();
 
-    let builder = emit::Emit::new();
+    let emit_ctx = emit::Context::new();
+    let mut builder = emit::Emit::new(&emit_ctx);
     for (name, proc) in procs.iter() {
-        builder.emit_proc(&name, &proc);
+        builder.add_proc(&name, &proc);
     }
 
+    builder.emit();
     builder.run();
 }

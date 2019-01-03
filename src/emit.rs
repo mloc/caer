@@ -3,37 +3,37 @@ use crate::cfg::*;
 
 #[derive(Debug)]
 struct ProcEmit<'a> {
+    ctx: &'a Context,
     local_allocs: IndexVec<LocalId, inkwell::values::PointerValue>,
     blocks: Vec<inkwell::basic_block::BasicBlock>,
     func: inkwell::values::FunctionValue,
     proc: &'a Proc,
-    emit: &'a Emit,
 }
 
 impl<'a> ProcEmit<'a> {
-    fn new(emit: &'a Emit, proc: &'a Proc, name: &str) -> Self {
-        let func_type = emit.ctx.f32_type().fn_type(&[], false);
-        let func = emit.module.add_function(name, func_type, None);
+    fn new(ctx: &'a Context, proc: &'a Proc, name: &str) -> Self {
+        let func_type = ctx.llvm_ctx.f32_type().fn_type(&[], false);
+        let func = ctx.module.add_function(name, func_type, None);
 
         Self {
+            ctx: ctx,
             local_allocs: IndexVec::new(),
             blocks: Vec::new(),
             func: func,
             proc: proc,
-            emit: emit,
         }
     }
 
     fn emit_entry_block(&mut self) -> inkwell::basic_block::BasicBlock {
         let block = self.func.append_basic_block("entry");
-        self.emit.builder.position_at_end(&block);
+        self.ctx.builder.position_at_end(&block);
 
         for local in self.proc.locals.iter() {
             let name = match local.name {
                 Some(ref s) => s,
                 None => "",
             };
-            let alloc = self.emit.builder.build_alloca(self.emit.rt.ptr_type, name);
+            let alloc = self.ctx.builder.build_alloca(self.ctx.rt.ptr_type, name);
             self.local_allocs.push(alloc);
         }
 
@@ -41,8 +41,8 @@ impl<'a> ProcEmit<'a> {
     }
 
     fn finalize_entry_block(&self, entry: &inkwell::basic_block::BasicBlock) {
-        self.emit.builder.position_at_end(&entry);
-        self.emit.builder.build_unconditional_branch(&self.blocks[0]);
+        self.ctx.builder.position_at_end(&entry);
+        self.ctx.builder.build_unconditional_branch(&self.blocks[0]);
     }
 
     fn emit_proc(&mut self) {
@@ -55,7 +55,7 @@ impl<'a> ProcEmit<'a> {
 
         for (id, block) in self.proc.blocks.iter().enumerate() {
             let ll_block = &self.blocks[id];
-            self.emit.builder.position_at_end(ll_block);
+            self.ctx.builder.position_at_end(ll_block);
             self.emit_block(block);
         }
 
@@ -64,11 +64,11 @@ impl<'a> ProcEmit<'a> {
 
     fn lit_to_val(&self, lit: &Literal) -> inkwell::values::BasicValueEnum {
         let val = match lit {
-            Literal::Num(x) => self.emit.ctx.f32_type().const_float(*x as f64).into(),
-            _ => self.emit.ctx.f32_type().const_float(0f64).into(),
+            Literal::Num(x) => self.ctx.llvm_ctx.f32_type().const_float(*x as f64).into(),
+            _ => self.ctx.llvm_ctx.f32_type().const_float(0f64).into(),
         };
 
-        self.emit.builder.build_call(self.emit.rt.rt_val_float, &[val], "val").try_as_basic_value().left().unwrap()
+        self.ctx.builder.build_call(self.ctx.rt.rt_val_float, &[val], "val").try_as_basic_value().left().unwrap()
     }
 
     fn load_expr(&self, expr: &Expr) -> inkwell::values::BasicValueEnum {
@@ -77,7 +77,7 @@ impl<'a> ProcEmit<'a> {
             Expr::Place(place) => {
                 match place {
                     Place::Local(id) => {
-                        self.emit.builder.build_load(self.local_allocs[*id], "").into()
+                        self.ctx.builder.build_load(self.local_allocs[*id], "").into()
                     },
                     Place::Global(_) => panic!("todo"),
                 }
@@ -90,18 +90,18 @@ impl<'a> ProcEmit<'a> {
             match op {
                 Op::Mov(id, expr) => {
                     let val = self.load_expr(expr);
-                    self.emit.builder.build_store(self.local_allocs[*id], val);
+                    self.ctx.builder.build_store(self.local_allocs[*id], val);
                 },
 
                 Op::Put(id) => {
-                    let val = self.emit.builder.build_load(self.local_allocs[*id], "put");
-                    self.emit.builder.build_call(self.emit.rt.rt_val_print, &mut [val], "put");
+                    let val = self.ctx.builder.build_load(self.local_allocs[*id], "put");
+                    self.ctx.builder.build_call(self.ctx.rt.rt_val_print, &mut [val], "put");
                 },
                 Op::Add(id, lhs, rhs) => {
                     let lhs_ref = self.load_expr(lhs);
                     let rhs_ref = self.load_expr(rhs);
-                    let res_val = self.emit.builder.build_call(self.emit.rt.rt_val_add, &[lhs_ref, rhs_ref], "sum").try_as_basic_value().left().unwrap();
-                    self.emit.builder.build_store(self.local_allocs[*id], res_val);
+                    let res_val = self.ctx.builder.build_call(self.ctx.rt.rt_val_add, &[lhs_ref, rhs_ref], "sum").try_as_basic_value().left().unwrap();
+                    self.ctx.builder.build_store(self.local_allocs[*id], res_val);
                 }
                 _ => unimplemented!("{:?}", op),
             }
@@ -109,11 +109,11 @@ impl<'a> ProcEmit<'a> {
 
         match &block.terminator {
             Terminator::Return => {
-                self.emit.builder.build_return(Some(&self.local_allocs[LocalId::new(0)]));
+                self.ctx.builder.build_return(Some(&self.local_allocs[LocalId::new(0)]));
             },
 
             Terminator::Jump(id) => {
-                self.emit.builder.build_unconditional_branch(&self.blocks[*id as usize]);
+                self.ctx.builder.build_unconditional_branch(&self.blocks[*id as usize]);
             },
 
             Terminator::Switch { discriminant, branches, default } => {
@@ -124,35 +124,34 @@ impl<'a> ProcEmit<'a> {
 }
 
 #[derive(Debug)]
-pub struct Emit {
-    ctx: inkwell::context::Context,
-    builder: inkwell::builder::Builder,
-    module: inkwell::module::Module,
-    rt: RtFuncs,
+pub struct Emit<'a> {
+    ctx: &'a Context,
+    procs: Vec<ProcEmit<'a>>,
 }
 
-impl Emit {
-    pub fn new() -> Self {
-        let ctx = inkwell::context::Context::create();
-        let module = ctx.create_module("main");
-        let rt = RtFuncs::new(&ctx, &module);
+impl<'a> Emit<'a> {
+    pub fn new(ctx: &'a Context) -> Self {
         Self {
-            builder: ctx.create_builder(),
-            module: module,
             ctx: ctx,
-            rt: rt,
+            procs: Vec::new(),
         }
     }
 
-    pub fn emit_proc(&self, name: &str, proc: &Proc) {
-        let mut proc_emit = ProcEmit::new(self, proc, name);
-        proc_emit.emit_proc();
+    pub fn add_proc(&mut self, name: &str, proc: &'a Proc) {
+        let mut proc_emit = ProcEmit::new(self.ctx, proc, name);
+        self.procs.push(proc_emit);
+    }
+
+    pub fn emit(&mut self) {
+        for proc_emit in self.procs.iter_mut() {
+            proc_emit.emit_proc();
+        }
     }
 
     pub fn run(&self) {
-        self.module.print_to_stderr();
+        self.ctx.module.print_to_stderr();
 
-        let engine = self.module.create_jit_execution_engine(inkwell::OptimizationLevel::None).unwrap();
+        let engine = self.ctx.module.create_jit_execution_engine(inkwell::OptimizationLevel::None).unwrap();
 
         unsafe {
             let func = engine.get_function::<unsafe extern "C" fn()>("main").unwrap();
@@ -160,6 +159,29 @@ impl Emit {
         }
     }
 
+}
+
+#[derive(Debug)]
+pub struct Context {
+    llvm_ctx: inkwell::context::Context,
+    builder: inkwell::builder::Builder,
+    module: inkwell::module::Module,
+    rt: RtFuncs,
+}
+
+impl Context {
+    pub fn new() -> Self {
+        let llvm_ctx = inkwell::context::Context::create();
+        let module = llvm_ctx.create_module("main");
+        let rt = RtFuncs::new(&llvm_ctx, &module);
+
+        Self {
+            builder: llvm_ctx.create_builder(),
+            module: module,
+            llvm_ctx: llvm_ctx,
+            rt: rt,
+        }
+    }
 }
 
 macro_rules! rt_funcs {
