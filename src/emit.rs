@@ -2,31 +2,136 @@ use indexed_vec::{IndexVec, Idx};
 use crate::cfg::*;
 
 #[derive(Debug)]
-struct ProcEmit {
+struct ProcEmit<'a> {
     local_allocs: IndexVec<LocalId, inkwell::values::PointerValue>,
     blocks: Vec<inkwell::basic_block::BasicBlock>,
     func: inkwell::values::FunctionValue,
+    proc: &'a Proc,
+    emit: &'a Emit,
 }
 
-impl ProcEmit {
-    fn new(func: inkwell::values::FunctionValue) -> Self {
+impl<'a> ProcEmit<'a> {
+    fn new(emit: &'a Emit, proc: &'a Proc, name: &str) -> Self {
+        let func_type = emit.ctx.f32_type().fn_type(&[], false);
+        let func = emit.module.add_function(name, func_type, None);
+
         Self {
             local_allocs: IndexVec::new(),
             blocks: Vec::new(),
             func: func,
+            proc: proc,
+            emit: emit,
+        }
+    }
+
+    fn emit_entry_block(&mut self) -> inkwell::basic_block::BasicBlock {
+        let block = self.func.append_basic_block("entry");
+        self.emit.builder.position_at_end(&block);
+
+        for local in self.proc.locals.iter() {
+            let name = match local.name {
+                Some(ref s) => s,
+                None => "",
+            };
+            let alloc = self.emit.builder.build_alloca(self.emit.rt.ptr_type, name);
+            self.local_allocs.push(alloc);
+        }
+
+        block
+    }
+
+    fn finalize_entry_block(&self, entry: &inkwell::basic_block::BasicBlock) {
+        self.emit.builder.position_at_end(&entry);
+        self.emit.builder.build_unconditional_branch(&self.blocks[0]);
+    }
+
+    fn emit_proc(&mut self) {
+        let entry_block = self.emit_entry_block();
+
+        for block_id in 0..self.proc.blocks.len() {
+            let block = self.func.append_basic_block(&format!("f{}", block_id));
+            self.blocks.push(block);
+        }
+
+        for (id, block) in self.proc.blocks.iter().enumerate() {
+            let ll_block = &self.blocks[id];
+            self.emit.builder.position_at_end(ll_block);
+            self.emit_block(block);
+        }
+
+        self.finalize_entry_block(&entry_block);
+    }
+
+    fn lit_to_val(&self, lit: &Literal) -> inkwell::values::BasicValueEnum {
+        let val = match lit {
+            Literal::Num(x) => self.emit.ctx.f32_type().const_float(*x as f64).into(),
+            _ => self.emit.ctx.f32_type().const_float(0f64).into(),
+        };
+
+        self.emit.builder.build_call(self.emit.rt.rt_val_float, &[val], "val").try_as_basic_value().left().unwrap()
+    }
+
+    fn load_expr(&self, expr: &Expr) -> inkwell::values::BasicValueEnum {
+        match expr {
+            Expr::Literal(lit) => self.lit_to_val(lit).into(),
+            Expr::Place(place) => {
+                match place {
+                    Place::Local(id) => {
+                        self.emit.builder.build_load(self.local_allocs[*id], "").into()
+                    },
+                    Place::Global(_) => panic!("todo"),
+                }
+            }
+        }
+    }
+
+    fn emit_block(&self, block: &Block) {
+        for op in block.ops.iter() {
+            match op {
+                Op::Mov(id, expr) => {
+                    let val = self.load_expr(expr);
+                    self.emit.builder.build_store(self.local_allocs[*id], val);
+                },
+
+                Op::Put(id) => {
+                    let val = self.emit.builder.build_load(self.local_allocs[*id], "put");
+                    self.emit.builder.build_call(self.emit.rt.rt_val_print, &mut [val], "put");
+                },
+                Op::Add(id, lhs, rhs) => {
+                    let lhs_ref = self.load_expr(lhs);
+                    let rhs_ref = self.load_expr(rhs);
+                    let res_val = self.emit.builder.build_call(self.emit.rt.rt_val_add, &[lhs_ref, rhs_ref], "sum").try_as_basic_value().left().unwrap();
+                    self.emit.builder.build_store(self.local_allocs[*id], res_val);
+                }
+                _ => unimplemented!("{:?}", op),
+            }
+        }
+
+        match &block.terminator {
+            Terminator::Return => {
+                self.emit.builder.build_return(Some(&self.local_allocs[LocalId::new(0)]));
+            },
+
+            Terminator::Jump(id) => {
+                self.emit.builder.build_unconditional_branch(&self.blocks[*id as usize]);
+            },
+
+            Terminator::Switch { discriminant, branches, default } => {
+                unimplemented!();
+            },
         }
     }
 }
 
 #[derive(Debug)]
-pub struct Builder {
+pub struct Emit {
     ctx: inkwell::context::Context,
     builder: inkwell::builder::Builder,
     module: inkwell::module::Module,
     rt: RtFuncs,
 }
 
-impl Builder {
+impl Emit {
     pub fn new() -> Self {
         let ctx = inkwell::context::Context::create();
         let module = ctx.create_module("main");
@@ -39,45 +144,9 @@ impl Builder {
         }
     }
 
-    fn emit_entry_block(&self, proc: &Proc, proc_emit: &mut ProcEmit) -> inkwell::basic_block::BasicBlock {
-        let block = proc_emit.func.append_basic_block("entry");
-        self.builder.position_at_end(&block);
-
-        for local in proc.locals.iter() {
-            let name = match local.name {
-                Some(ref s) => s,
-                None => "",
-            };
-            let alloc = self.builder.build_alloca(self.rt.ptr_type, name);
-            proc_emit.local_allocs.push(alloc);
-        }
-
-        block
-    }
-
-    fn finalize_entry_block(&self, entry: &inkwell::basic_block::BasicBlock, start: &inkwell::basic_block::BasicBlock) {
-        self.builder.position_at_end(&entry);
-        self.builder.build_unconditional_branch(&start);
-    }
-
     pub fn emit_proc(&self, name: &str, proc: &Proc) {
-        let func_type = self.ctx.f32_type().fn_type(&[], false);
-        let func = self.module.add_function(name, func_type, None);
-        let mut proc_emit = ProcEmit::new(func);
-        let entry_block = self.emit_entry_block(proc, &mut proc_emit);
-
-        for block_id in 0..proc.blocks.len() {
-            let block = proc_emit.func.append_basic_block(&format!("f{}", block_id));
-            proc_emit.blocks.push(block);
-        }
-
-        for (id, block) in proc.blocks.iter().enumerate() {
-            let ll_block = &proc_emit.blocks[id];
-            self.builder.position_at_end(ll_block);
-            self.emit_block(block, &proc_emit);
-        }
-
-        self.finalize_entry_block(&entry_block, &proc_emit.blocks[0]);
+        let mut proc_emit = ProcEmit::new(self, proc, name);
+        proc_emit.emit_proc();
     }
 
     pub fn run(&self) {
@@ -91,65 +160,6 @@ impl Builder {
         }
     }
 
-    fn lit_to_val(&self, lit: &Literal) -> inkwell::values::BasicValueEnum {
-        let val = match lit {
-            Literal::Num(x) => self.ctx.f32_type().const_float(*x as f64).into(),
-            _ => self.ctx.f32_type().const_float(0f64).into(),
-        };
-
-        self.builder.build_call(self.rt.rt_val_float, &[val], "val").try_as_basic_value().left().unwrap()
-    }
-
-    fn load_expr(&self, expr: &Expr, proc_emit: &ProcEmit) -> inkwell::values::BasicValueEnum {
-        match expr {
-            Expr::Literal(lit) => self.lit_to_val(lit).into(),
-            Expr::Place(place) => {
-                match place {
-                    Place::Local(id) => {
-                        self.builder.build_load(proc_emit.local_allocs[*id], "").into()
-                    },
-                    Place::Global(_) => panic!("todo"),
-                }
-            }
-        }
-    }
-
-    fn emit_block(&self, block: &Block, proc_emit: &ProcEmit) {
-        for op in block.ops.iter() {
-            match op {
-                Op::Mov(id, expr) => {
-                    let val = self.load_expr(expr, proc_emit);
-                    self.builder.build_store(proc_emit.local_allocs[*id], val);
-                },
-
-                Op::Put(id) => {
-                    let val = self.builder.build_load(proc_emit.local_allocs[*id], "put");
-                    self.builder.build_call(self.rt.rt_val_print, &mut [val], "put");
-                },
-                Op::Add(id, lhs, rhs) => {
-                    let lhs_ref = self.load_expr(lhs, proc_emit);
-                    let rhs_ref = self.load_expr(rhs, proc_emit);
-                    let res_val = self.builder.build_call(self.rt.rt_val_add, &[lhs_ref, rhs_ref], "sum").try_as_basic_value().left().unwrap();
-                    self.builder.build_store(proc_emit.local_allocs[*id], res_val);
-                }
-                _ => unimplemented!("{:?}", op),
-            }
-        }
-
-        match &block.terminator {
-            Terminator::Return => {
-                self.builder.build_return(Some(&proc_emit.local_allocs[LocalId::new(0)]));
-            },
-
-            Terminator::Jump(id) => {
-                self.builder.build_unconditional_branch(&proc_emit.blocks[*id as usize]);
-            },
-
-            Terminator::Switch { discriminant, branches, default } => {
-                unimplemented!();
-            },
-        }
-    }
 }
 
 macro_rules! rt_funcs {

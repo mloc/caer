@@ -14,7 +14,9 @@ impl<'a> Builder<'a> {
     }
 
     pub fn build_procs(&self) -> HashMap<String, cfg::Proc> {
-        self.tree.root().get().procs.iter().map(|(name, procs)| {
+        self.tree.root().get().procs.iter().filter(|(name, procs)| {
+            procs.value[0].body.len() != 0 // TODO REMOVE THIS
+        }).map(|(name, procs)| {
             (name.clone(), ProcBuilder::build(&procs.value[0]))
         }).collect()
     }

@@ -12,12 +12,11 @@ fn main() {
     parser.enable_procs();
 
     let tree = parser.parse_object_tree();
-    let main_proc = &tree.root().get().procs["main"].value[0];
 
     let frontend = frontend::Builder::new(&tree);
     let procs = frontend.build_procs();
 
-    let builder = emit::Builder::new();
+    let builder = emit::Emit::new();
     for (name, proc) in procs.iter() {
         builder.emit_proc(&name, &proc);
     }
