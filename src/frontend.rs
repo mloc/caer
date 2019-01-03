@@ -70,6 +70,8 @@ impl<'a> ProcBuilder<'a> {
                         ast::Expression::AssignOp { op, lhs, rhs } => {
                             let var = match lhs.as_ref() {
                                 ast::Expression::Base { unary, term, follow } => {
+                                    assert!(unary.len() == 0);
+                                    assert!(follow.len() == 0);
                                     match term {
                                         ast::Term::Ident(ref s) => s,
                                         _ => unimplemented!(),
@@ -93,6 +95,19 @@ impl<'a> ProcBuilder<'a> {
                                 _ => unimplemented!(),
                             };
                         },
+
+                        ast::Expression::Base { unary, term, follow } => {
+                            assert!(unary.len() == 0);
+                            assert!(follow.len() == 0);
+                            match term {
+                                ast::Term::Call(proc, args) => {
+                                    let local = self.proc.add_local(None);
+                                    block.ops.push(cfg::Op::Call(local, proc.to_string(), Vec::new()));
+                                },
+
+                                _ => unimplemented!(),
+                            }
+                        }
 
                         _ => unimplemented!(),
                     }

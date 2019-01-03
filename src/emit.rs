@@ -1,4 +1,5 @@
 use indexed_vec::{IndexVec, Idx};
+use std::collections::HashMap;
 use crate::cfg::*;
 
 #[derive(Debug)]
@@ -45,7 +46,7 @@ impl<'a> ProcEmit<'a> {
         self.ctx.builder.build_unconditional_branch(&self.blocks[0]);
     }
 
-    fn emit_proc(&mut self) {
+    fn emit_proc(&mut self, emit: &Emit) {
         let entry_block = self.emit_entry_block();
 
         for block_id in 0..self.proc.blocks.len() {
@@ -56,7 +57,7 @@ impl<'a> ProcEmit<'a> {
         for (id, block) in self.proc.blocks.iter().enumerate() {
             let ll_block = &self.blocks[id];
             self.ctx.builder.position_at_end(ll_block);
-            self.emit_block(block);
+            self.emit_block(block, emit);
         }
 
         self.finalize_entry_block(&entry_block);
@@ -85,7 +86,7 @@ impl<'a> ProcEmit<'a> {
         }
     }
 
-    fn emit_block(&self, block: &Block) {
+    fn emit_block(&self, block: &Block, emit: &Emit) {
         for op in block.ops.iter() {
             match op {
                 Op::Mov(id, expr) => {
@@ -102,7 +103,12 @@ impl<'a> ProcEmit<'a> {
                     let rhs_ref = self.load_expr(rhs);
                     let res_val = self.ctx.builder.build_call(self.ctx.rt.rt_val_add, &[lhs_ref, rhs_ref], "sum").try_as_basic_value().left().unwrap();
                     self.ctx.builder.build_store(self.local_allocs[*id], res_val);
-                }
+                },
+                Op::Call(id, name, args) => {
+                    assert!(args.len() == 0);
+                    let func = emit.sym[name];
+                    self.ctx.builder.build_call(func, &[], name);
+                },
                 _ => unimplemented!("{:?}", op),
             }
         }
@@ -127,6 +133,7 @@ impl<'a> ProcEmit<'a> {
 pub struct Emit<'a> {
     ctx: &'a Context,
     procs: Vec<ProcEmit<'a>>,
+    sym: HashMap<String, inkwell::values::FunctionValue>
 }
 
 impl<'a> Emit<'a> {
@@ -134,17 +141,19 @@ impl<'a> Emit<'a> {
         Self {
             ctx: ctx,
             procs: Vec::new(),
+            sym: HashMap::new(),
         }
     }
 
     pub fn add_proc(&mut self, name: &str, proc: &'a Proc) {
         let mut proc_emit = ProcEmit::new(self.ctx, proc, name);
+        self.sym.insert(name.to_string(), proc_emit.func.clone());
         self.procs.push(proc_emit);
     }
 
     pub fn emit(&mut self) {
-        for proc_emit in self.procs.iter_mut() {
-            proc_emit.emit_proc();
+        for mut proc_emit in self.procs.drain(..).collect::<Vec<_>>().drain(..) {
+            proc_emit.emit_proc(self);
         }
     }
 

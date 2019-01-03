@@ -1,5 +1,5 @@
 /proc/main()
-	//abc()
+	abc()
 	var/x = 7
 	var/y = 3
 	y = x + x + 4 + y
