@@ -96,20 +96,9 @@ impl<'a> ProcBuilder<'a> {
                             };
                         },
 
-                        ast::Expression::Base { unary, term, follow } => {
-                            assert!(unary.len() == 0);
-                            assert!(follow.len() == 0);
-                            match term {
-                                ast::Term::Call(proc, args) => {
-                                    let local = self.proc.add_local(None);
-                                    block.ops.push(cfg::Op::Call(local, proc.to_string(), Vec::new()));
-                                },
-
-                                _ => unimplemented!(),
-                            }
+                        expr => {
+                            self.build_expr(expr, &mut block);
                         }
-
-                        _ => unimplemented!(),
                     }
                 },
 

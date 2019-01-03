@@ -1,3 +1,5 @@
+missing error for assignemnt in expr position without surrounding ()
+
 no goto
     mostly unused in modern ss13
     allows jumping back out of spawn "closures" - hard to implement, espc. with llvm coros
