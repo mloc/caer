@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use crate::cfg;
 use dreammaker::{ast, objtree};
+use indexed_vec::Idx;
 
 pub struct Builder<'a> {
     tree: &'a objtree::ObjectTree,
@@ -99,6 +100,13 @@ impl<'a> ProcBuilder<'a> {
                         expr => {
                             self.build_expr(expr, &mut block);
                         }
+                    }
+                },
+
+                ast::Statement::Return(val) => {
+                    if let Some(val) = val {
+                        let val_expr = self.build_expr(val, &mut block);
+                        block.ops.push(cfg::Op::Mov(cfg::LocalId::new(0), val_expr));
                     }
                 },
 

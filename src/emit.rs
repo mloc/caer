@@ -13,7 +13,7 @@ struct ProcEmit<'a> {
 
 impl<'a> ProcEmit<'a> {
     fn new(ctx: &'a Context, proc: &'a Proc, name: &str) -> Self {
-        let func_type = ctx.llvm_ctx.f32_type().fn_type(&[], false);
+        let func_type = ctx.rt.ptr_type.fn_type(&[], false);
         let func = ctx.module.add_function(name, func_type, None);
 
         Self {
@@ -107,7 +107,8 @@ impl<'a> ProcEmit<'a> {
                 Op::Call(id, name, args) => {
                     assert!(args.len() == 0);
                     let func = emit.sym[name];
-                    self.ctx.builder.build_call(func, &[], name);
+                    let res_val = self.ctx.builder.build_call(func, &[], name).try_as_basic_value().left().unwrap();
+                    self.ctx.builder.build_store(self.local_allocs[*id], res_val);
                 },
                 _ => unimplemented!("{:?}", op),
             }
@@ -115,7 +116,8 @@ impl<'a> ProcEmit<'a> {
 
         match &block.terminator {
             Terminator::Return => {
-                self.ctx.builder.build_return(Some(&self.local_allocs[LocalId::new(0)]));
+                let ret = self.ctx.builder.build_load(self.local_allocs[LocalId::new(0)], "ret");
+                self.ctx.builder.build_return(Some(&ret));
             },
 
             Terminator::Jump(id) => {
@@ -152,7 +154,7 @@ impl<'a> Emit<'a> {
     }
 
     pub fn emit(&mut self) {
-        for mut proc_emit in self.procs.drain(..).collect::<Vec<_>>().drain(..) {
+        for mut proc_emit in self.procs.drain(..).collect::<Vec<_>>() { // TODO no
             proc_emit.emit_proc(self);
         }
     }
