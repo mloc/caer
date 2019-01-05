@@ -23,5 +23,5 @@ fn main() {
     }
 
     builder.emit();
-    builder.run();
+    builder.run(true);
 }

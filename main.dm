@@ -7,5 +7,10 @@
 	world << y + 4
 
 /proc/abc()
-	world << 3
+	if(3)
+		world << 3.14
+	else if(7)
+		world << 999
+	else
+		world << 382
 	return 3

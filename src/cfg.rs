@@ -2,12 +2,32 @@ use std::collections::HashMap;
 use dreammaker::ast;
 use indexed_vec::{IndexVec, newtype_index, Idx};
 
-impl Proc {
+newtype_index!(LocalId {pub idx});
+newtype_index!(BlockId {pub idx});
+
+#[derive(Debug)]
+pub struct Local {
+    pub id: LocalId,
+    pub name: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct Proc {
+    pub locals: IndexVec<LocalId, Local>,
+    pub vars: HashMap<String, LocalId>,
+    pub blocks: IndexVec<BlockId, Block>,
+
+    pub next_block_id: usize,
+}
+
+impl<'a> Proc {
     pub fn new() -> Self {
         let mut new = Self {
             locals: IndexVec::new(),
             vars: HashMap::new(),
-            blocks: Vec::new(),
+            blocks: IndexVec::new(),
+
+            next_block_id: 0,
         };
         new.add_local(None); // return
         new
@@ -30,36 +50,33 @@ impl Proc {
         id
     }
 
+    pub fn new_block(&mut self) -> Block {
+        let id = self.next_block_id;
+        self.next_block_id += 1;
+        Block::new(BlockId::new(id))
+    }
+
+    pub fn add_block(&mut self, block: Block) {
+        assert!(block.id == BlockId::new(self.blocks.len()));
+        self.blocks.push(block);
+    }
+
     pub fn lookup_var(&self, var: &str) -> Option<LocalId> {
         self.vars.get(var).map(|id| *id)
     }
 }
 
-newtype_index!(LocalId {pub idx});
-
-#[derive(Debug)]
-pub struct Local {
-    pub id: LocalId,
-    pub name: Option<String>,
-}
-
-#[derive(Debug)]
-pub struct Proc {
-    pub locals: IndexVec<LocalId, Local>,
-    pub vars: HashMap<String, LocalId>,
-
-    pub blocks: Vec<Block>,
-}
-
 #[derive(Debug)]
 pub struct Block {
+    pub id: BlockId,
     pub ops: Vec<Op>,
     pub terminator: Terminator,
 }
 
 impl Block {
-    pub fn new() -> Self {
+    pub fn new(id: BlockId) -> Self {
         Self {
+            id: id,
             ops: Vec::new(),
             terminator: Terminator::Return,
         }
@@ -97,10 +114,10 @@ pub enum Place {
 #[derive(Debug)]
 pub enum Terminator {
     Return,
-    Jump(u32),
+    Jump(BlockId),
     Switch {
         discriminant: Place,
-        branches: Vec<(Literal, u32)>,
-        default: Option<u32>,
+        branches: Vec<(u32, BlockId)>,
+        default: BlockId,
     },
 }

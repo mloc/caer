@@ -6,7 +6,7 @@ use crate::cfg::*;
 struct ProcEmit<'a> {
     ctx: &'a Context,
     local_allocs: IndexVec<LocalId, inkwell::values::PointerValue>,
-    blocks: Vec<inkwell::basic_block::BasicBlock>,
+    blocks: IndexVec<BlockId, inkwell::basic_block::BasicBlock>,
     func: inkwell::values::FunctionValue,
     proc: &'a Proc,
 }
@@ -19,7 +19,7 @@ impl<'a> ProcEmit<'a> {
         Self {
             ctx: ctx,
             local_allocs: IndexVec::new(),
-            blocks: Vec::new(),
+            blocks: IndexVec::new(),
             func: func,
             proc: proc,
         }
@@ -43,7 +43,7 @@ impl<'a> ProcEmit<'a> {
 
     fn finalize_entry_block(&self, entry: &inkwell::basic_block::BasicBlock) {
         self.ctx.builder.position_at_end(&entry);
-        self.ctx.builder.build_unconditional_branch(&self.blocks[0]);
+        self.ctx.builder.build_unconditional_branch(&self.blocks[BlockId::new(0)]);
     }
 
     fn emit_proc(&mut self, emit: &Emit) {
@@ -54,8 +54,8 @@ impl<'a> ProcEmit<'a> {
             self.blocks.push(block);
         }
 
-        for (id, block) in self.proc.blocks.iter().enumerate() {
-            let ll_block = &self.blocks[id];
+        for (id, block) in self.proc.blocks.iter().enumerate() { // TODO port iter_enumerated
+            let ll_block = &self.blocks[BlockId::new(id)];
             self.ctx.builder.position_at_end(ll_block);
             self.emit_block(block, emit);
         }
@@ -75,14 +75,16 @@ impl<'a> ProcEmit<'a> {
     fn load_expr(&self, expr: &Expr) -> inkwell::values::BasicValueEnum {
         match expr {
             Expr::Literal(lit) => self.lit_to_val(lit).into(),
-            Expr::Place(place) => {
-                match place {
-                    Place::Local(id) => {
-                        self.ctx.builder.build_load(self.local_allocs[*id], "").into()
-                    },
-                    Place::Global(_) => panic!("todo"),
-                }
-            }
+            Expr::Place(place) => self.load_place(place),
+        }
+    }
+
+    fn load_place(&self, place: &Place) -> inkwell::values::BasicValueEnum {
+        match place {
+            Place::Local(id) => {
+                self.ctx.builder.build_load(self.local_allocs[*id], "").into()
+            },
+            Place::Global(_) => unimplemented!("global place"),
         }
     }
 
@@ -121,11 +123,20 @@ impl<'a> ProcEmit<'a> {
             },
 
             Terminator::Jump(id) => {
-                self.ctx.builder.build_unconditional_branch(&self.blocks[*id as usize]);
+                self.ctx.builder.build_unconditional_branch(&self.blocks[*id]);
             },
 
             Terminator::Switch { discriminant, branches, default } => {
-                unimplemented!();
+                let disc_val = self.load_place(discriminant);
+                let disc_bool = self.ctx.builder.build_call(self.ctx.rt.rt_val_to_bool, &[disc_val], "disc").try_as_basic_value().left().unwrap();
+                let disc_int = disc_bool.as_int_value();
+
+                let llvm_branches = branches.iter().map(|(lit, target)| {
+                    let val = self.ctx.llvm_ctx.i64_type().const_int((*lit).into(), false);
+                    (val, &self.blocks[*target])
+                }).collect::<Vec<_>>();
+
+                self.ctx.builder.build_switch(*disc_int, &self.blocks[*default], &llvm_branches[..]);
             },
         }
     }
@@ -159,10 +170,22 @@ impl<'a> Emit<'a> {
         }
     }
 
-    pub fn run(&self) {
+    pub fn run(&self, opt: bool) {
         self.ctx.module.print_to_stderr();
 
         let engine = self.ctx.module.create_jit_execution_engine(inkwell::OptimizationLevel::None).unwrap();
+
+        if opt {
+            let pm_builder = inkwell::passes::PassManagerBuilder::create();
+            pm_builder.set_optimization_level(inkwell::OptimizationLevel::Aggressive);
+            let pm = inkwell::passes::PassManager::create_for_module();
+            pm.initialize();
+            pm_builder.populate_function_pass_manager(&pm);
+            pm.run_on_module(&self.ctx.module);
+            pm.finalize();
+
+            self.ctx.module.print_to_stderr();
+        }
 
         unsafe {
             let func = engine.get_function::<unsafe extern "C" fn()>("main").unwrap();
@@ -241,6 +264,7 @@ rt_funcs!{
         (rt_val_int, ptr_type, [i32_type]),
         (rt_val_null, ptr_type, []),
         (rt_val_add, ptr_type, [ptr_type, ptr_type]),
+        (rt_val_to_bool, bool_type, [ptr_type]),
         (rt_val_print, void_type, [ptr_type]),
         (rt_val_drop, void_type, [ptr_type]),
     ]

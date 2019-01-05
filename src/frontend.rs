@@ -27,6 +27,8 @@ struct ProcBuilder<'a> {
     ast_proc: &'a objtree::ProcValue,
     vars: HashMap<String, cfg::LocalId>,
     proc: cfg::Proc,
+
+    finished_blocks: Vec<cfg::Block>,
 }
 
 impl<'a> ProcBuilder<'a> {
@@ -35,6 +37,8 @@ impl<'a> ProcBuilder<'a> {
             ast_proc: ast_proc,
             vars: HashMap::new(),
             proc: cfg::Proc::new(),
+
+            finished_blocks: Vec::new(),
         };
 
         builder.build_proc();
@@ -50,12 +54,16 @@ impl<'a> ProcBuilder<'a> {
             }
         }
 
-        let block = self.build_block(&self.ast_proc.body);
-        self.proc.blocks.push(block);
+        self.build_block(&self.ast_proc.body, None);
+
+        self.finished_blocks.sort_by_key(|b| b.id);
+        for block in self.finished_blocks.drain(..) {
+            self.proc.add_block(block);
+        }
     }
 
-    fn build_block(&mut self, stmts: &[ast::Statement]) -> cfg::Block {
-        let mut block = cfg::Block::new();
+    fn build_block(&mut self, stmts: &[ast::Statement], next_block: Option<cfg::BlockId>) -> cfg::BlockId {
+        let mut block = self.proc.new_block();
 
         for stmt in stmts.iter() {
             println!("{:?}", stmt);
@@ -110,11 +118,51 @@ impl<'a> ProcBuilder<'a> {
                     }
                 },
 
+                ast::Statement::If(branches, else_branch) => {
+                    let if_end = self.proc.new_block();
+
+                    for (condition, body) in branches.iter() {
+                        let cond_expr = self.build_expr(condition, &mut block);
+                        let cond_local = self.proc.add_local(None);
+                        block.ops.push(cfg::Op::Mov(cond_local, cond_expr));
+
+                        let body_block_id = self.build_block(&body[..], Some(if_end.id));
+
+                        let continuation = self.proc.new_block();
+
+                        block.terminator = cfg::Terminator::Switch {
+                            discriminant: cfg::Place::Local(cond_local),
+                            branches: vec![(1, body_block_id)],
+                            default: continuation.id,
+                        };
+
+                        self.finished_blocks.push(block);
+                        block = continuation;
+                    }
+
+                    let mut next = if_end.id;
+                    if let Some(body) = else_branch {
+                        next = self.build_block(&body[..], Some(if_end.id));
+                    }
+
+                    // adds a redundant jump if we have no else case, but simplifies code
+                    // will be optimized out anyway
+                    block.terminator = cfg::Terminator::Jump(next);
+
+                    self.finished_blocks.push(if_end);
+                }
+
                 _ => unimplemented!(),
             }
         }
 
-        block
+        if let Some(next) = next_block {
+            block.terminator = cfg::Terminator::Jump(next);
+        }
+
+        let id = block.id;
+        self.finished_blocks.push(block);
+        id
     }
 
     fn build_assign(&mut self, var: &str, expr: &ast::Expression, block: &mut cfg::Block) {
@@ -126,7 +174,7 @@ impl<'a> ProcBuilder<'a> {
     fn build_expr(&mut self, expr: &ast::Expression, block: &mut cfg::Block) -> cfg::Expr {
         match expr {
             ast::Expression::Base { unary, term, follow } => {
-                let mut expr = self.build_term(term, block);
+                let expr = self.build_term(term, block);
                 assert!(unary.len() == 0);
                 assert!(follow.len() == 0);
 
@@ -173,5 +221,4 @@ impl<'a> ProcBuilder<'a> {
             _ => unimplemented!("{:?}", term),
         }
     }
-
 }
