@@ -7,10 +7,12 @@
 	world << y + 4
 
 /proc/abc()
+	var/x
 	if(3)
-		world << 3.14
+		x = 3
+		world.log << 3
 	else if(7)
-		world << 999
+		x = 999
 	else
-		world << 382
-	return 3
+		x = 39
+	return x

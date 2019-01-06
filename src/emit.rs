@@ -1,6 +1,7 @@
 use indexed_vec::{IndexVec, Idx};
 use std::collections::HashMap;
 use crate::cfg::*;
+use std::fs;
 
 #[derive(Debug)]
 struct ProcEmit<'a> {
@@ -128,15 +129,21 @@ impl<'a> ProcEmit<'a> {
 
             Terminator::Switch { discriminant, branches, default } => {
                 let disc_val = self.load_place(discriminant);
-                let disc_bool = self.ctx.builder.build_call(self.ctx.rt.rt_val_to_bool, &[disc_val], "disc").try_as_basic_value().left().unwrap();
-                let disc_int = disc_bool.as_int_value();
 
+                // call runtime to convert value to bool
+                let disc_bool = self.ctx.builder.build_call(self.ctx.rt.rt_val_to_bool, &[disc_val], "disc").try_as_basic_value().left().unwrap();
+
+                // bool we get is i1 but we use i32 for switch, so cast/extend
+                // TODO see if this can be eliminated
+                let disc_int = self.ctx.builder.build_int_z_extend_or_bit_cast(*disc_bool.as_int_value(), self.ctx.llvm_ctx.i32_type(), "disc");
+
+                // convert branches to use llvm blocks
                 let llvm_branches = branches.iter().map(|(lit, target)| {
-                    let val = self.ctx.llvm_ctx.i64_type().const_int((*lit).into(), false);
+                    let val = self.ctx.llvm_ctx.i32_type().const_int((*lit).into(), false);
                     (val, &self.blocks[*target])
                 }).collect::<Vec<_>>();
 
-                self.ctx.builder.build_switch(*disc_int, &self.blocks[*default], &llvm_branches[..]);
+                self.ctx.builder.build_switch(disc_int, &self.blocks[*default], &llvm_branches[..]);
             },
         }
     }
@@ -172,6 +179,7 @@ impl<'a> Emit<'a> {
 
     pub fn run(&self, opt: bool) {
         self.ctx.module.print_to_stderr();
+        self.dump_module("unopt");
 
         let engine = self.ctx.module.create_jit_execution_engine(inkwell::OptimizationLevel::None).unwrap();
 
@@ -185,12 +193,18 @@ impl<'a> Emit<'a> {
             pm.finalize();
 
             self.ctx.module.print_to_stderr();
+            self.dump_module("opt");
         }
 
         unsafe {
             let func = engine.get_function::<unsafe extern "C" fn()>("main").unwrap();
             func.call();
         }
+    }
+
+    pub fn dump_module(&self, name: &str) {
+        let buf = self.ctx.module.print_to_string().to_string();
+        fs::write(format!("{}.ll", name), buf).unwrap();
     }
 
 }

@@ -145,11 +145,12 @@ impl<'a> ProcBuilder<'a> {
                         next = self.build_block(&body[..], Some(if_end.id));
                     }
 
-                    // adds a redundant jump if we have no else case, but simplifies code
+                    // adds a redundant jupm, but simplifies code.
                     // will be optimized out anyway
                     block.terminator = cfg::Terminator::Jump(next);
 
-                    self.finished_blocks.push(if_end);
+                    self.finished_blocks.push(block);
+                    block = if_end;
                 }
 
                 _ => unimplemented!(),
