@@ -16,3 +16,9 @@
 	else
 		x = 39
 	return x
+
+/proc/loopy()
+	var/x = 0
+	while(3)
+		x = x + 1
+	return x

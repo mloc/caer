@@ -17,6 +17,11 @@ version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "dot"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
 name = "dreammaker"
 version = "0.1.0"
 dependencies = [
@@ -89,6 +94,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "ldc"
 version = "0.1.0"
 dependencies = [
+ "dot 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "dreammaker 0.1.0",
  "indexed_vec 1.0.2",
  "inkwell 0.1.0 (git+https://github.com/TheDan64/inkwell?branch=llvm7-0)",
@@ -267,6 +273,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum aho-corasick 0.6.9 (registry+https://github.com/rust-lang/crates.io-index)" = "1e9a933f4e58658d7b12defcf96dc5c720f20832deebe3e0a19efd3b6aaeeb9e"
 "checksum bitflags 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)" = "228047a76f468627ca71776ecdebd732a3423081fcf5125585bcd7c49886ce12"
 "checksum cfg-if 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)" = "082bb9b28e00d3c9d39cc03e64ce4cea0f1bb9b3fde493f0cbc008472d22bdf4"
+"checksum dot 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "a74b6c4d4a1cff5f454164363c16b72fa12463ca6b31f4b5f2035a65fa3d5906"
 "checksum either 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3be565ca5c557d7f59e7cfcf1844f9e3033650c929c6566f511e8005f205c1d0"
 "checksum enum-methods 0.0.8 (registry+https://github.com/rust-lang/crates.io-index)" = "7798e7da2d4cb0d6d6fc467e8d6b5bf247e9e989f786dde1732d79899c32bb10"
 "checksum fixedbitset 0.1.9 (registry+https://github.com/rust-lang/crates.io-index)" = "86d4de0081402f5e88cdac65c8dcdcc73118c1a7a465e2a05f0da05843a8ea33"

@@ -1,3 +1,7 @@
+BIG TODO: switch is broken rn, always casts to bool before checking. basically acts as br
+    FIXED probably, by inverting meaning of switches
+    replaced rt_val_to_bool with rt_val_to_switch_disc, which casts to u32
+
 values
     soft and hard values
         hard values have complete type info at compile time, some way or another

@@ -5,13 +5,14 @@ name = "ldc"
 version = "0.1.0"
 
 [dependencies]
+dot = "0.1.4"
 
 [dependencies.dreammaker]
 path = "../SpacemanDMM/src/dreammaker"
 
 [dependencies.indexed_vec]
-path = "../indexed_vec"
 default-features = false
+path = "../indexed_vec"
 
 [dependencies.inkwell]
 branch = "llvm7-0"

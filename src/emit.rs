@@ -131,7 +131,7 @@ impl<'a> ProcEmit<'a> {
                 let disc_val = self.load_place(discriminant);
 
                 // call runtime to convert value to bool
-                let disc_bool = self.ctx.builder.build_call(self.ctx.rt.rt_val_to_bool, &[disc_val], "disc").try_as_basic_value().left().unwrap();
+                let disc_bool = self.ctx.builder.build_call(self.ctx.rt.rt_val_to_switch_disc, &[disc_val], "disc").try_as_basic_value().left().unwrap();
 
                 // bool we get is i1 but we use i32 for switch, so cast/extend
                 // TODO see if this can be eliminated
@@ -278,7 +278,7 @@ rt_funcs!{
         (rt_val_int, ptr_type, [i32_type]),
         (rt_val_null, ptr_type, []),
         (rt_val_add, ptr_type, [ptr_type, ptr_type]),
-        (rt_val_to_bool, bool_type, [ptr_type]),
+        (rt_val_to_switch_disc, i32_type, [ptr_type]),
         (rt_val_print, void_type, [ptr_type]),
         (rt_val_drop, void_type, [ptr_type]),
     ]

@@ -18,7 +18,7 @@ impl<'a> Builder<'a> {
         self.tree.root().get().procs.iter().filter(|(name, procs)| {
             procs.value[0].body.len() != 0 // TODO REMOVE THIS
         }).map(|(name, procs)| {
-            (name.clone(), ProcBuilder::build(&procs.value[0]))
+            (name.clone(), ProcBuilder::build(&name, &procs.value[0]))
         }).collect()
     }
 }
@@ -32,11 +32,11 @@ struct ProcBuilder<'a> {
 }
 
 impl<'a> ProcBuilder<'a> {
-    fn build(ast_proc: &'a objtree::ProcValue) -> cfg::Proc {
+    fn build(name: &str, ast_proc: &'a objtree::ProcValue) -> cfg::Proc {
         let mut builder = Self {
             ast_proc: ast_proc,
             vars: HashMap::new(),
-            proc: cfg::Proc::new(),
+            proc: cfg::Proc::new(name.to_string()),
 
             finished_blocks: Vec::new(),
         };
@@ -60,6 +60,8 @@ impl<'a> ProcBuilder<'a> {
         for block in self.finished_blocks.drain(..) {
             self.proc.add_block(block);
         }
+
+        self.proc.dot()
     }
 
     fn build_block(&mut self, stmts: &[ast::Statement], next_block: Option<cfg::BlockId>) -> cfg::BlockId {
@@ -132,8 +134,8 @@ impl<'a> ProcBuilder<'a> {
 
                         block.terminator = cfg::Terminator::Switch {
                             discriminant: cfg::Place::Local(cond_local),
-                            branches: vec![(1, body_block_id)],
-                            default: continuation.id,
+                            branches: vec![(0, continuation.id)],
+                            default: body_block_id,
                         };
 
                         self.finished_blocks.push(block);
@@ -145,13 +147,37 @@ impl<'a> ProcBuilder<'a> {
                         next = self.build_block(&body[..], Some(if_end.id));
                     }
 
-                    // adds a redundant jupm, but simplifies code.
+                    // adds a redundant jump, but simplifies code.
                     // will be optimized out anyway
                     block.terminator = cfg::Terminator::Jump(next);
 
                     self.finished_blocks.push(block);
                     block = if_end;
-                }
+                },
+
+                ast::Statement::While(cond, body) => {
+                    let mut cond_block = self.proc.new_block();
+                    let while_end = self.proc.new_block();
+
+                    let body_block_id = self.build_block(&body[..], Some(cond_block.id));
+
+                    let cond_expr = self.build_expr(cond, &mut cond_block);
+                    let cond_local = self.proc.add_local(None);
+                    cond_block.ops.push(cfg::Op::Mov(cond_local, cond_expr));
+
+                    cond_block.terminator = cfg::Terminator::Switch {
+                        discriminant: cfg::Place::Local(cond_local),
+                        branches: vec![(0, while_end.id)],
+                        default: body_block_id,
+                    };
+
+                    block.terminator = cfg::Terminator::Jump(cond_block.id);
+
+                    self.finished_blocks.push(block);
+                    self.finished_blocks.push(cond_block);
+
+                    block = while_end;
+                },
 
                 _ => unimplemented!(),
             }
