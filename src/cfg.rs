@@ -6,11 +6,13 @@ use dot;
 
 newtype_index!(LocalId {pub idx});
 newtype_index!(BlockId {pub idx});
+newtype_index!(ScopeId {pub idx});
 
 #[derive(Debug)]
 pub struct Local {
     pub id: LocalId,
     pub name: Option<String>,
+    pub scope: ScopeId,
 }
 
 #[derive(Debug)]
@@ -20,46 +22,62 @@ pub struct Proc {
     pub locals: IndexVec<LocalId, Local>,
     pub vars: HashMap<String, LocalId>,
     pub blocks: IndexVec<BlockId, Block>,
+    pub scopes: IndexVec<ScopeId, Scope>,
+
+    pub global_scope: ScopeId,
 
     pub next_block_id: usize,
 }
 
 impl<'a> Proc {
     pub fn new(name: String) -> Self {
+        // ids map to indices in the scopes list; we can assume this scope will have id 0
+        // TODO sounder way to handle this + locals?
+        let global_scope = Scope::new(ScopeId::new(0), None);
+        let mut scopes = IndexVec::new();
+        scopes.push(global_scope);
+
         let mut new = Self {
             name: name,
 
             locals: IndexVec::new(),
             vars: HashMap::new(),
             blocks: IndexVec::new(),
+            scopes: scopes,
+
+            global_scope: ScopeId::new(0),
 
             next_block_id: 0,
         };
-        new.add_local(None); // return
+
+        new.add_local(new.global_scope, None); // return
         new
     }
 
-    pub fn add_local(&mut self, name: Option<&str>) -> LocalId {
+    pub fn add_local(&mut self, scope: ScopeId, name: Option<&str>) -> LocalId {
         let id = LocalId::new(self.locals.len());
 
         let local = Local {
             id: id,
             name: Some(name.map_or_else(|| {format!("local_{}", id.index())}, |s| {format!("var_{}", s.to_string())})),
+            scope: scope,
         };
 
         self.locals.push(local);
+        self.scopes[scope].locals.push(id);
 
         if let Some(var) = name {
             self.vars.insert(var.into(), id);
+            self.scopes[scope].vars.insert(var.into(), id);
         }
 
         id
     }
 
-    pub fn new_block(&mut self) -> Block {
+    pub fn new_block(&mut self, scope: ScopeId) -> Block {
         let id = self.next_block_id;
         self.next_block_id += 1;
-        Block::new(BlockId::new(id))
+        Block::new(BlockId::new(id), scope)
     }
 
     pub fn add_block(&mut self, block: Block) {
@@ -67,8 +85,29 @@ impl<'a> Proc {
         self.blocks.push(block);
     }
 
-    pub fn lookup_var(&self, var: &str) -> Option<LocalId> {
-        self.vars.get(var).map(|id| *id)
+    // scope tree search to find matching var
+    pub fn lookup_var(&self, root_scope: ScopeId, var: &str) -> Option<LocalId> {
+        let var = var.to_string();
+        let mut cur_scope = root_scope;
+        loop {
+            let scope = &self.scopes[cur_scope];
+            match scope.vars.get(&var) {
+                Some(local) => return Some(*local),
+                None => match scope.parent {
+                    Some(parent) => cur_scope = parent,
+                    None => break,
+                }
+            }
+        }
+
+        None
+    }
+
+    pub fn new_scope(&mut self, parent: ScopeId) -> ScopeId {
+        let id = ScopeId::new(self.scopes.len());
+        let scope = Scope::new(id, Some(parent));
+        self.scopes.push(scope);
+        id
     }
 
     pub fn dot(&self) {
@@ -151,14 +190,39 @@ pub struct Block {
     pub id: BlockId,
     pub ops: Vec<Op>,
     pub terminator: Terminator,
+    pub scope: ScopeId,
+    pub scope_end: bool,
 }
 
 impl Block {
-    pub fn new(id: BlockId) -> Self {
+    pub fn new(id: BlockId, scope: ScopeId) -> Self {
         Self {
             id: id,
             ops: Vec::new(),
             terminator: Terminator::Return,
+            scope: scope,
+            scope_end: false,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Scope {
+    pub id: ScopeId,
+    pub parent: Option<ScopeId>,
+    pub locals: Vec<LocalId>,
+    pub vars: HashMap<String, LocalId>,
+    pub blocks: Vec<BlockId>,
+}
+
+impl Scope {
+    fn new(id: ScopeId, parent: Option<ScopeId>) -> Self {
+        Self {
+            id: id,
+            parent: parent,
+            locals: Vec::new(),
+            vars: HashMap::new(),
+            blocks: Vec::new(),
         }
     }
 }

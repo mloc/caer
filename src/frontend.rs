@@ -50,11 +50,11 @@ impl<'a> ProcBuilder<'a> {
         // finddecls
         for stmt in self.ast_proc.body.iter() {
             if let ast::Statement::Var(v) = stmt {
-                self.proc.add_local(Some(&v.name));
+                self.proc.add_local(self.proc.global_scope, Some(&v.name));
             }
         }
 
-        self.build_block(&self.ast_proc.body, None);
+        self.build_block(&self.ast_proc.body, self.proc.global_scope, None);
 
         self.finished_blocks.sort_by_key(|b| b.id);
         for block in self.finished_blocks.drain(..) {
@@ -64,8 +64,9 @@ impl<'a> ProcBuilder<'a> {
         self.proc.dot()
     }
 
-    fn build_block(&mut self, stmts: &[ast::Statement], next_block: Option<cfg::BlockId>) -> cfg::BlockId {
-        let mut block = self.proc.new_block();
+    fn build_block(&mut self, stmts: &[ast::Statement], parent_scope: cfg::ScopeId, next_block: Option<cfg::BlockId>) -> cfg::BlockId {
+        let scope = self.proc.new_scope(parent_scope);
+        let mut block = self.proc.new_block(scope);
 
         for stmt in stmts.iter() {
             println!("{:?}", stmt);
@@ -96,7 +97,7 @@ impl<'a> ProcBuilder<'a> {
                         },
 
                         ast::Expression::BinaryOp { op, lhs, rhs } => {
-                            let local = self.proc.add_local(None);
+                            let local = self.proc.add_local(scope, None);
                             let res = self.build_expr(rhs, &mut block);
                             block.ops.push(cfg::Op::Mov(local, res));
                             match op {
@@ -121,16 +122,16 @@ impl<'a> ProcBuilder<'a> {
                 },
 
                 ast::Statement::If(branches, else_branch) => {
-                    let if_end = self.proc.new_block();
+                    let if_end = self.proc.new_block(scope);
 
                     for (condition, body) in branches.iter() {
                         let cond_expr = self.build_expr(condition, &mut block);
-                        let cond_local = self.proc.add_local(None);
+                        let cond_local = self.proc.add_local(scope, None);
                         block.ops.push(cfg::Op::Mov(cond_local, cond_expr));
 
-                        let body_block_id = self.build_block(&body[..], Some(if_end.id));
+                        let body_block_id = self.build_block(&body[..], scope, Some(if_end.id));
 
-                        let continuation = self.proc.new_block();
+                        let continuation = self.proc.new_block(scope);
 
                         block.terminator = cfg::Terminator::Switch {
                             discriminant: cfg::Place::Local(cond_local),
@@ -144,7 +145,7 @@ impl<'a> ProcBuilder<'a> {
 
                     let mut next = if_end.id;
                     if let Some(body) = else_branch {
-                        next = self.build_block(&body[..], Some(if_end.id));
+                        next = self.build_block(&body[..], scope, Some(if_end.id));
                     }
 
                     // adds a redundant jump, but simplifies code.
@@ -156,13 +157,13 @@ impl<'a> ProcBuilder<'a> {
                 },
 
                 ast::Statement::While(cond, body) => {
-                    let mut cond_block = self.proc.new_block();
-                    let while_end = self.proc.new_block();
+                    let mut cond_block = self.proc.new_block(scope);
+                    let while_end = self.proc.new_block(scope);
 
-                    let body_block_id = self.build_block(&body[..], Some(cond_block.id));
+                    let body_block_id = self.build_block(&body[..], scope, Some(cond_block.id));
 
                     let cond_expr = self.build_expr(cond, &mut cond_block);
-                    let cond_local = self.proc.add_local(None);
+                    let cond_local = self.proc.add_local(scope, None);
                     cond_block.ops.push(cfg::Op::Mov(cond_local, cond_expr));
 
                     cond_block.terminator = cfg::Terminator::Switch {
@@ -183,6 +184,8 @@ impl<'a> ProcBuilder<'a> {
             }
         }
 
+        block.scope_end = true;
+
         if let Some(next) = next_block {
             block.terminator = cfg::Terminator::Jump(next);
         }
@@ -193,7 +196,8 @@ impl<'a> ProcBuilder<'a> {
     }
 
     fn build_assign(&mut self, var: &str, expr: &ast::Expression, block: &mut cfg::Block) {
-        let var_id = self.proc.lookup_var(var).unwrap();
+        println!("{:?} {:?}", var, block.scope);
+        let var_id = self.proc.lookup_var(block.scope, var).unwrap();
         let asg_expr = self.build_expr(expr, block);
         block.ops.push(cfg::Op::Mov(var_id, asg_expr));
     }
@@ -211,7 +215,7 @@ impl<'a> ProcBuilder<'a> {
             ast::Expression::BinaryOp { op, lhs, rhs } => {
                 let lhs_expr = self.build_expr(lhs, block);
                 let rhs_expr = self.build_expr(rhs, block);
-                let local = self.proc.add_local(None);
+                let local = self.proc.add_local(block.scope, None);
 
                 match op {
                     ast::BinaryOp::Add => {
@@ -233,11 +237,11 @@ impl<'a> ProcBuilder<'a> {
             ast::Term::Int(x) => cfg::Expr::Literal(cfg::Literal::Num(*x as f32)),
             ast::Term::Float(x) => cfg::Expr::Literal(cfg::Literal::Num(*x)),
             ast::Term::Ident(var_name) => {
-                let var_id = self.proc.lookup_var(var_name).unwrap();
+                let var_id = self.proc.lookup_var(block.scope, var_name).unwrap();
                 cfg::Expr::Place(cfg::Place::Local(var_id))
             },
             ast::Term::Call(name, args) => {
-                let res = self.proc.add_local(None);
+                let res = self.proc.add_local(block.scope, None);
 
                 let arg_exprs: Vec<cfg::Expr> = args.iter().map(|expr| self.build_expr(expr, block)).collect();
 

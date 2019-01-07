@@ -1,6 +1,13 @@
+scratchpad
+
 BIG TODO: switch is broken rn, always casts to bool before checking. basically acts as br
     FIXED probably, by inverting meaning of switches
     replaced rt_val_to_bool with rt_val_to_switch_disc, which casts to u32
+
+scoping issues
+    stuff can be descoped before we use it in a terminator
+
+----
 
 values
     soft and hard values
@@ -17,7 +24,20 @@ values
             with current stub system, is heap allocated :(
             future work for less opaque enum would help this; for now, need to remember to drop
 
+scopes
+    sketchbook musings:
+        scopes are more granular than blocks? but can span blocks
+        maybe not- the only case I can think of where this matters is temporary literals in if conds
+        but we can assign them to the outer scope and clean up later, since they can't define vars
+        only cond-ish thing that makes vars is for(;;), but this will be a block anyway
+        so are scopes aligned with blocks? hopefully. if not, maybe we can split blocks up instead
+        this might also help unwind cleanup
+            oh yikes- how will that work? a cleanup block for every block?
+        can llvm help at all?
+
 calling (global) procs
+    deferred thinking about this until we have a better idea on errors
+    need to think about: args
 
 runtime errors
     current plan: llvm exceptions

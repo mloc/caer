@@ -50,8 +50,8 @@ impl<'a> ProcEmit<'a> {
     fn emit_proc(&mut self, emit: &Emit) {
         let entry_block = self.emit_entry_block();
 
-        for block_id in 0..self.proc.blocks.len() {
-            let block = self.func.append_basic_block(&format!("f{}", block_id));
+        for cfg_block in self.proc.blocks.iter() {
+            let block = self.func.append_basic_block(&format!("s{}b{}", cfg_block.scope.index(), cfg_block.id.index()));
             self.blocks.push(block);
         }
 
@@ -117,6 +117,13 @@ impl<'a> ProcEmit<'a> {
             }
         }
 
+        if block.scope_end {
+            for local in self.proc.scopes[block.scope].locals.iter() {
+                let local_val = self.load_place(&Place::Local(*local));
+                self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[local_val], "");
+            }
+        }
+
         match &block.terminator {
             Terminator::Return => {
                 let ret = self.ctx.builder.build_load(self.local_allocs[LocalId::new(0)], "ret");
@@ -135,7 +142,7 @@ impl<'a> ProcEmit<'a> {
 
                 // bool we get is i1 but we use i32 for switch, so cast/extend
                 // TODO see if this can be eliminated
-                let disc_int = self.ctx.builder.build_int_z_extend_or_bit_cast(*disc_bool.as_int_value(), self.ctx.llvm_ctx.i32_type(), "disc");
+                let disc_int = *disc_bool.as_int_value();
 
                 // convert branches to use llvm blocks
                 let llvm_branches = branches.iter().map(|(lit, target)| {
