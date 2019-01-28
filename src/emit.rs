@@ -92,8 +92,14 @@ impl<'a> ProcEmit<'a> {
     fn emit_block(&self, block: &Block, emit: &Emit) {
         for op in block.ops.iter() {
             match op {
-                Op::Mov(id, expr) => {
-                    let val = self.load_expr(expr);
+                Op::Mov(id, place) => {
+                    let val = self.load_place(place);
+                    let cloned_val = self.ctx.builder.build_call(self.ctx.rt.rt_val_clone, &[val], "clone").try_as_basic_value().left().unwrap();
+                    self.ctx.builder.build_store(self.local_allocs[*id], cloned_val);
+                },
+
+                Op::Literal(id, literal) => {
+                    let val = self.lit_to_val(literal);
                     self.ctx.builder.build_store(self.local_allocs[*id], val);
                 },
 
@@ -101,33 +107,42 @@ impl<'a> ProcEmit<'a> {
                     let val = self.ctx.builder.build_load(self.local_allocs[*id], "put");
                     self.ctx.builder.build_call(self.ctx.rt.rt_val_print, &mut [val], "put");
                 },
+
                 Op::Add(id, lhs, rhs) => {
-                    let lhs_ref = self.load_expr(lhs);
-                    let rhs_ref = self.load_expr(rhs);
+                    let lhs_ref = self.load_place(lhs);
+                    let rhs_ref = self.load_place(rhs);
                     let res_val = self.ctx.builder.build_call(self.ctx.rt.rt_val_add, &[lhs_ref, rhs_ref], "sum").try_as_basic_value().left().unwrap();
                     self.ctx.builder.build_store(self.local_allocs[*id], res_val);
                 },
+
                 Op::Call(id, name, args) => {
                     assert!(args.len() == 0);
                     let func = emit.sym[name];
                     let res_val = self.ctx.builder.build_call(func, &[], name).try_as_basic_value().left().unwrap();
                     self.ctx.builder.build_store(self.local_allocs[*id], res_val);
                 },
+
                 _ => unimplemented!("{:?}", op),
             }
         }
 
         if block.scope_end {
-            for local in self.proc.scopes[block.scope].locals.iter() {
+            for local in self.proc.scopes[block.scope].destruct_locals.iter() {
                 let local_val = self.load_place(&Place::Local(*local));
                 self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[local_val], "");
             }
         }
 
         match &block.terminator {
-            Terminator::Return => {
-                let ret = self.ctx.builder.build_load(self.local_allocs[LocalId::new(0)], "ret");
-                self.ctx.builder.build_return(Some(&ret));
+            Terminator::Return(ret_val) => {
+                match ret_val {
+                    Some(place) => self.ctx.builder.build_return(Some(&self.load_place(&place))),
+                    None => {
+                        let val = self.lit_to_val(&Literal::Null);
+                        self.ctx.builder.build_return(Some(&val))
+                    },
+                };
+                //self.ctx.builder.build_return(ret_val.map(|p| &self.load_place(&p)));
             },
 
             Terminator::Jump(id) => {
@@ -140,8 +155,6 @@ impl<'a> ProcEmit<'a> {
                 // call runtime to convert value to bool
                 let disc_bool = self.ctx.builder.build_call(self.ctx.rt.rt_val_to_switch_disc, &[disc_val], "disc").try_as_basic_value().left().unwrap();
 
-                // bool we get is i1 but we use i32 for switch, so cast/extend
-                // TODO see if this can be eliminated
                 let disc_int = *disc_bool.as_int_value();
 
                 // convert branches to use llvm blocks
@@ -185,7 +198,7 @@ impl<'a> Emit<'a> {
     }
 
     pub fn run(&self, opt: bool) {
-        self.ctx.module.print_to_stderr();
+        //self.ctx.module.print_to_stderr();
         self.dump_module("unopt");
 
         let engine = self.ctx.module.create_jit_execution_engine(inkwell::OptimizationLevel::None).unwrap();
@@ -199,7 +212,7 @@ impl<'a> Emit<'a> {
             pm.run_on_module(&self.ctx.module);
             pm.finalize();
 
-            self.ctx.module.print_to_stderr();
+            //self.ctx.module.print_to_stderr();
             self.dump_module("opt");
         }
 
@@ -211,7 +224,8 @@ impl<'a> Emit<'a> {
 
     pub fn dump_module(&self, name: &str) {
         let buf = self.ctx.module.print_to_string().to_string();
-        fs::write(format!("{}.ll", name), buf).unwrap();
+        fs::create_dir_all("dbgout/llvm/").unwrap();
+        fs::write(format!("dbgout/llvm/{}.ll", name), buf).unwrap();
     }
 
 }
@@ -287,6 +301,7 @@ rt_funcs!{
         (rt_val_add, ptr_type, [ptr_type, ptr_type]),
         (rt_val_to_switch_disc, i32_type, [ptr_type]),
         (rt_val_print, void_type, [ptr_type]),
+        (rt_val_clone, ptr_type, [ptr_type]),
         (rt_val_drop, void_type, [ptr_type]),
     ]
 }

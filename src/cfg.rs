@@ -1,7 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use dreammaker::ast;
 use indexed_vec::{IndexVec, newtype_index, Idx};
 use std::fs::{self, File};
+use std::cmp;
 use dot;
 
 newtype_index!(LocalId {pub idx});
@@ -11,8 +12,34 @@ newtype_index!(ScopeId {pub idx});
 #[derive(Debug)]
 pub struct Local {
     pub id: LocalId,
+    // TODO replace
+    pub val_root: bool,
     pub name: Option<String>,
-    pub scope: ScopeId,
+    pub construct_scope: ScopeId,
+    // if a value is moved, it won't be destructed with this local
+    pub destruct_scope: Option<ScopeId>,
+}
+
+#[derive(Debug)]
+pub struct LocalFlow {
+    pub id: LocalId,
+
+    pub reads: i32,
+    pub takes: i32,
+
+    // new destruct scope
+    pub promote_scope: Option<ScopeId>,
+}
+
+impl LocalFlow {
+    fn new(id: LocalId) -> Self {
+        Self {
+            id: id,
+            reads: 0,
+            takes: 0,
+            promote_scope: None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -59,12 +86,15 @@ impl<'a> Proc {
 
         let local = Local {
             id: id,
+            val_root: name.is_none(),
             name: Some(name.map_or_else(|| {format!("local_{}", id.index())}, |s| {format!("var_{}", s.to_string())})),
-            scope: scope,
+            construct_scope: scope,
+            destruct_scope: Some(scope),
         };
 
         self.locals.push(local);
         self.scopes[scope].locals.push(id);
+        self.scopes[scope].destruct_locals.insert(id);
 
         if let Some(var) = name {
             self.vars.insert(var.into(), id);
@@ -105,15 +135,80 @@ impl<'a> Proc {
 
     pub fn new_scope(&mut self, parent: ScopeId) -> ScopeId {
         let id = ScopeId::new(self.scopes.len());
-        let scope = Scope::new(id, Some(parent));
+        let scope = Scope::new(id, Some((parent, self.scopes[parent].depth)));
         self.scopes.push(scope);
         id
     }
 
+    // analysis procs
+    // TODO split up, move out of Proc maybe, and track as we build
+    // TODO a smarter analysis method; this works but misses a lot
+    pub fn analyze(&mut self) {
+        let mut flow: IndexVec<_, _> = self.locals.iter().map(|l| {
+            LocalFlow::new(l.id)
+        }).collect();
+
+        for block in self.blocks.iter() {
+            for op in block.ops.iter() {
+                match op {
+                    Op::Mov(dest, Place::Local(src)) => {
+                        /*let dest_local = &self.locals[*dest];
+
+                        let src_flow = &mut flow[*src];
+                        let src_local = &self.locals[*src];
+                        src_flow.takes += 1;
+
+                        // we assume dest's scope will be an ancestor of src's if they don't
+                        // match.
+                        if src_local.construct_scope > dest_local.construct_scope {
+                            println!("yeet {:?}", op);
+                            src_flow.promote_scope = match src_flow.promote_scope {
+                                None => Some(dest_local.construct_scope),
+                                Some(scope) => Some(cmp::min(dest_local.construct_scope, scope)),
+                            }
+                        }*/
+                    },
+
+                    Op::Literal(dest, _) => {
+                        //self.locals[*dest].move_in += 1;
+                    }
+
+                    // irrelevant ops
+                    _ => {},
+                }
+            }
+
+            match block.terminator {
+                Terminator::Return(Some(Place::Local(local))) => {
+                    let local_flow = &mut flow[local];
+                    local_flow.promote_scope = Some(ScopeId::new(0));
+                },
+                _ => {},
+            }
+        }
+
+        println!("{:#?}", flow);
+
+        // promote scopes
+        for local_flow in flow.iter() {
+            if let Some(new_scope_id) = local_flow.promote_scope {
+                let local = &mut self.locals[local_flow.id];
+
+                let old_scope = &mut self.scopes[local.destruct_scope.unwrap()];
+                old_scope.destruct_locals.remove(&local_flow.id);
+
+                let new_scope = &mut self.scopes[new_scope_id];
+                new_scope.destruct_locals.insert(local_flow.id);
+
+                local.destruct_scope = Some(new_scope_id);
+            }
+        }
+    }
+
     pub fn dot(&self) {
         // TODO bad, for now we assume procs have unique names
-        fs::create_dir_all("dotout/").unwrap();
-        let mut f = File::create(format!("dotout/cfg_{}.dot", self.name)).unwrap();
+        fs::create_dir_all("dbgout/dot/tino_cfg/").unwrap();
+        let mut f = File::create(format!("dbgout/dot/tino_cfg/cfg_{}.dot", self.name)).unwrap();
         dot::render(self, &mut f).unwrap();
     }
 }
@@ -131,7 +226,7 @@ impl<'a> dot::Labeller<'a, BlockId, (BlockId, BlockId, String)> for Proc {
         let block = &self.blocks[*n];
 
         let term_str = match &block.terminator {
-            Terminator::Return => "return".into(),
+            Terminator::Return(val) => format!("return {:?}", val),
             Terminator::Jump(_) => "jump".into(),
             Terminator::Switch { discriminant, branches: _, default: _ } => format!("switch {:?}", discriminant),
         };
@@ -161,7 +256,7 @@ impl<'a> dot::GraphWalk<'a, BlockId, (BlockId, BlockId, String)> for Proc {
     fn edges(&self) -> dot::Edges<'a, (BlockId, BlockId, String)> {
         self.blocks.iter().flat_map(|block| {
             match &block.terminator {
-                Terminator::Return => {vec![]},
+                Terminator::Return(_) => {vec![]},
                 Terminator::Jump(target) => vec![(block.id, *target, "".into())],
                 Terminator::Switch { discriminant: _, branches, default } => {
                     let mut out = vec![(block.id, *default, "default".into())];
@@ -199,7 +294,7 @@ impl Block {
         Self {
             id: id,
             ops: Vec::new(),
-            terminator: Terminator::Return,
+            terminator: Terminator::Return(None),
             scope: scope,
             scope_end: false,
         }
@@ -210,17 +305,21 @@ impl Block {
 pub struct Scope {
     pub id: ScopeId,
     pub parent: Option<ScopeId>,
+    pub depth: i32,
     pub locals: Vec<LocalId>,
+    pub destruct_locals: HashSet<LocalId>,
     pub vars: HashMap<String, LocalId>,
     pub blocks: Vec<BlockId>,
 }
 
 impl Scope {
-    fn new(id: ScopeId, parent: Option<ScopeId>) -> Self {
+    fn new(id: ScopeId, parent: Option<(ScopeId, i32)>) -> Self {
         Self {
             id: id,
-            parent: parent,
+            parent: parent.map(|(id, _)| id),
+            depth: parent.map_or(0, |(_, d)| d + 1),
             locals: Vec::new(),
+            destruct_locals: HashSet::new(),
             vars: HashMap::new(),
             blocks: Vec::new(),
         }
@@ -229,10 +328,11 @@ impl Scope {
 
 #[derive(Debug)]
 pub enum Op {
-    Mov(LocalId, Expr),
+    Mov(LocalId, Place),
+    Literal(LocalId, Literal),
     Put(LocalId),
-    Add(LocalId, Expr, Expr),
-    Call(LocalId, String, Vec<Expr>),
+    Add(LocalId, Place, Place),
+    Call(LocalId, String, Vec<Place>),
 }
 
 #[derive(Debug)]
@@ -257,7 +357,7 @@ pub enum Place {
 
 #[derive(Debug)]
 pub enum Terminator {
-    Return,
+    Return(Option<Place>),
     Jump(BlockId),
     Switch {
         discriminant: Place,

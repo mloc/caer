@@ -1,4 +1,4 @@
 /target
 **/*.rs.bk
-*.ll
-*.dot
+dbgout
+*.so
