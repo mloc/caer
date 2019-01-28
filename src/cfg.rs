@@ -12,8 +12,7 @@ newtype_index!(ScopeId {pub idx});
 #[derive(Debug)]
 pub struct Local {
     pub id: LocalId,
-    // TODO replace
-    pub val_root: bool,
+    pub movable: bool,
     pub name: Option<String>,
     pub construct_scope: ScopeId,
     // if a value is moved, it won't be destructed with this local
@@ -26,18 +25,15 @@ pub struct LocalFlow {
 
     pub reads: i32,
     pub takes: i32,
-
-    // new destruct scope
-    pub promote_scope: Option<ScopeId>,
 }
 
 impl LocalFlow {
-    fn new(id: LocalId) -> Self {
+    fn new(local: &Local) -> Self {
         Self {
-            id: id,
+            id: local.id,
+
             reads: 0,
             takes: 0,
-            promote_scope: None,
         }
     }
 }
@@ -86,7 +82,7 @@ impl<'a> Proc {
 
         let local = Local {
             id: id,
-            val_root: name.is_none(),
+            movable: false,
             name: Some(name.map_or_else(|| {format!("local_{}", id.index())}, |s| {format!("var_{}", s.to_string())})),
             construct_scope: scope,
             destruct_scope: Some(scope),
@@ -144,54 +140,60 @@ impl<'a> Proc {
     // TODO split up, move out of Proc maybe, and track as we build
     // TODO a smarter analysis method; this works but misses a lot
     pub fn analyze(&mut self) {
-        /*let mut flow: IndexVec<_, _> = self.locals.iter().map(|l| {
-            LocalFlow::new(l.id)
+        let mut flow: IndexVec<_, _> = self.locals.iter().map(|l| {
+            LocalFlow::new(l)
         }).collect();
 
         for block in self.blocks.iter() {
             for op in block.ops.iter() {
                 match op {
-                    Op::Mov(dest, Place::Local(src)) => {
-                        /*let dest_local = &self.locals[*dest];
-
-                        let src_flow = &mut flow[*src];
-                        let src_local = &self.locals[*src];
-                        src_flow.takes += 1;
-
-                        // we assume dest's scope will be an ancestor of src's if they don't
-                        // match.
-                        if src_local.construct_scope > dest_local.construct_scope {
-                            println!("yeet {:?}", op);
-                            src_flow.promote_scope = match src_flow.promote_scope {
-                                None => Some(dest_local.construct_scope),
-                                Some(scope) => Some(cmp::min(dest_local.construct_scope, scope)),
-                            }
-                        }*/
+                    Op::Mov(_, src) => {
+                        flow[*src].takes += 1;
                     },
 
-                    Op::Literal(dest, _) => {
-                        //self.locals[*dest].move_in += 1;
+                    Op::Literal(_, _) => {
+                        // hmmm
+                    },
+
+                    Op::Put(src) => {
+                        flow[*src].reads += 1;
+                    },
+
+                    Op::Add(_, lhs, rhs) => {
+                        flow[*lhs].reads += 1;
+                        flow[*rhs].reads += 1;
                     }
 
-                    // irrelevant ops
-                    _ => {},
+                    Op::Call(_, _, args) => {
+                        for arg in args.iter() {
+                            flow[*arg].reads += 1;
+                        }
+                    }
                 }
             }
 
-            /*match block.terminator {
-                Terminator::Return(Some(Place::Local(local))) => {
-                    let local_flow = &mut flow[local];
-                    local_flow.promote_scope = Some(ScopeId::new(0));
+            match block.terminator {
+                Terminator::Switch { discriminant, branches: _, default: _ } => {
+                    flow[discriminant].reads += 1;
                 },
                 _ => {},
-            }*/
+            }
         }
 
         println!("{:#?}", flow);
 
         // promote scopes
         for local_flow in flow.iter() {
-            if let Some(new_scope_id) = local_flow.promote_scope {
+            let local = &mut self.locals[local_flow.id];
+
+            if local_flow.reads == 0 && local_flow.takes == 1 {
+                // move case
+                let old_scope = &mut self.scopes[local.destruct_scope.unwrap()];
+                old_scope.destruct_locals.remove(&local_flow.id);
+                local.movable = true;
+            }
+
+            /*if let Some(new_scope_id) = local_flow.promote_scope {
                 let local = &mut self.locals[local_flow.id];
 
                 let old_scope = &mut self.scopes[local.destruct_scope.unwrap()];
@@ -201,8 +203,8 @@ impl<'a> Proc {
                 new_scope.destruct_locals.insert(local_flow.id);
 
                 local.destruct_scope = Some(new_scope_id);
-            }
-        }*/
+            }*/
+        }
     }
 
     pub fn dot(&self) {

@@ -83,7 +83,13 @@ impl<'a> ProcEmit<'a> {
             match op {
                 Op::Mov(id, local) => {
                     let val = self.load_local(local);
-                    let cloned_val = self.ctx.builder.build_call(self.ctx.rt.rt_val_clone, &[val], "clone").try_as_basic_value().left().unwrap();
+
+                    let cloned_val = if self.proc.locals[*local].movable {
+                        val
+                    } else {
+                        self.ctx.builder.build_call(self.ctx.rt.rt_val_clone, &[val], "clone").try_as_basic_value().left().unwrap()
+                    };
+
                     self.ctx.builder.build_store(self.local_allocs[*id], cloned_val);
                 },
 

@@ -9,8 +9,7 @@ scoping issues
     fixed by cloning everywhere - we should have been doing this anyway
     next up: figuring out where we can avoid clones
         single-copy no-read cases, move and remove drop
-        only-read cases we can just promote drop
-            we already do this
+            basics done- need better scope analysis to find some cases
 
 ----
 
