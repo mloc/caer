@@ -21,6 +21,6 @@
 
 /proc/loopy()
 	var/x = 0 + 8 + 3.4
-	while(x)
-		x = x + 1
+	while(x + 8)
+		x = x - 1
 	return x

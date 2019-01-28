@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use crate::cfg;
 use dreammaker::{ast, objtree};
 use indexed_vec::Idx;
+use ludo::op::BinaryOp;
 
 pub struct Builder<'a> {
     tree: &'a objtree::ObjectTree,
@@ -114,6 +115,9 @@ impl<'a> ProcBuilder<'a> {
                     if let Some(val) = val {
                         let val_expr = self.build_expr(val, &mut block);
                         block.ops.push(cfg::Op::Mov(cfg::LocalId::new(0), val_expr));
+                        // TODO make sure we check the rest of the ops somehow?
+                        // create an unreachable block and continue? need a more robust builder
+                        break;
                     }
                 },
 
@@ -213,13 +217,15 @@ impl<'a> ProcBuilder<'a> {
                 let rhs_expr = self.build_expr(rhs, block);
                 let local = self.proc.add_local(block.scope, None);
 
-                match op {
-                    ast::BinaryOp::Add => {
-                        block.ops.push(cfg::Op::Add(local, lhs_expr, rhs_expr));
-                    },
+                let l_op = match op {
+                    ast::BinaryOp::Add => BinaryOp::Add,
+                    ast::BinaryOp::Sub => BinaryOp::Sub,
+                    ast::BinaryOp::Mul => BinaryOp::Mul,
+                    ast::BinaryOp::Div => BinaryOp::Div,
+                    _ => unimplemented!("binary op {:?}", op),
+                };
 
-                    _ => unimplemented!("{:?}", op),
-                }
+                block.ops.push(cfg::Op::Binary(local, l_op, lhs_expr, rhs_expr));
 
                 local
             },

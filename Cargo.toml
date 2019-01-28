@@ -10,6 +10,9 @@ dot = "0.1.4"
 [dependencies.dreammaker]
 path = "../SpacemanDMM/src/dreammaker"
 
+[dependencies.ludo]
+path = "../ludo"
+
 [dependencies.indexed_vec]
 default-features = false
 path = "../indexed_vec"

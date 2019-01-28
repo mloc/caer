@@ -3,6 +3,7 @@ use dreammaker::ast;
 use indexed_vec::{IndexVec, newtype_index, Idx};
 use std::fs::{self, File};
 use std::cmp;
+use ludo;
 use dot;
 
 newtype_index!(LocalId {pub idx});
@@ -159,7 +160,7 @@ impl<'a> Proc {
                         flow[*src].reads += 1;
                     },
 
-                    Op::Add(_, lhs, rhs) => {
+                    Op::Binary(_, _, lhs, rhs) => {
                         flow[*lhs].reads += 1;
                         flow[*rhs].reads += 1;
                     }
@@ -190,20 +191,10 @@ impl<'a> Proc {
                 // move case
                 let old_scope = &mut self.scopes[local.destruct_scope.unwrap()];
                 old_scope.destruct_locals.remove(&local_flow.id);
+
                 local.movable = true;
+                local.destruct_scope = None;
             }
-
-            /*if let Some(new_scope_id) = local_flow.promote_scope {
-                let local = &mut self.locals[local_flow.id];
-
-                let old_scope = &mut self.scopes[local.destruct_scope.unwrap()];
-                old_scope.destruct_locals.remove(&local_flow.id);
-
-                let new_scope = &mut self.scopes[new_scope_id];
-                new_scope.destruct_locals.insert(local_flow.id);
-
-                local.destruct_scope = Some(new_scope_id);
-            }*/
         }
     }
 
@@ -333,7 +324,7 @@ pub enum Op {
     Mov(LocalId, LocalId),
     Literal(LocalId, Literal),
     Put(LocalId),
-    Add(LocalId, LocalId, LocalId),
+    Binary(LocalId, ludo::op::BinaryOp, LocalId, LocalId),
     Call(LocalId, String, Vec<LocalId>),
 }
 

@@ -103,10 +103,12 @@ impl<'a> ProcEmit<'a> {
                     self.ctx.builder.build_call(self.ctx.rt.rt_val_print, &mut [val], "put");
                 },
 
-                Op::Add(id, lhs, rhs) => {
+                Op::Binary(id, op, lhs, rhs) => {
                     let lhs_ref = self.load_local(lhs);
                     let rhs_ref = self.load_local(rhs);
-                    let res_val = self.ctx.builder.build_call(self.ctx.rt.rt_val_add, &[lhs_ref, rhs_ref], "sum").try_as_basic_value().left().unwrap();
+                    let op_var = self.ctx.llvm_ctx.i32_type().const_int(*op as u64, false).into();
+
+                    let res_val = self.ctx.builder.build_call(self.ctx.rt.rt_val_binary_op, &[op_var, lhs_ref, rhs_ref], "sum").try_as_basic_value().left().unwrap();
                     self.ctx.builder.build_store(self.local_allocs[*id], res_val);
                 },
 
@@ -287,7 +289,7 @@ rt_funcs!{
         (rt_val_float, ptr_type, [f32_type]),
         (rt_val_int, ptr_type, [i32_type]),
         (rt_val_null, ptr_type, []),
-        (rt_val_add, ptr_type, [ptr_type, ptr_type]),
+        (rt_val_binary_op, ptr_type, [i32_type, ptr_type, ptr_type]),
         (rt_val_to_switch_disc, i32_type, [ptr_type]),
         (rt_val_print, void_type, [ptr_type]),
         (rt_val_clone, ptr_type, [ptr_type]),
