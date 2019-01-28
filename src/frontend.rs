@@ -62,8 +62,6 @@ impl<'a> ProcBuilder<'a> {
         let scope = self.proc.new_scope(parent_scope);
         let mut block = self.proc.new_block(scope);
 
-        let mut return_val = None;
-
         for stmt in stmts.iter() {
             println!("{:?}", stmt);
             match stmt {
@@ -115,7 +113,7 @@ impl<'a> ProcBuilder<'a> {
                 ast::Statement::Return(val) => {
                     if let Some(val) = val {
                         let val_expr = self.build_expr(val, &mut block);
-                        return_val = Some(val_expr);
+                        block.ops.push(cfg::Op::Mov(cfg::LocalId::new(0), val_expr));
                     }
                 },
 
@@ -184,9 +182,7 @@ impl<'a> ProcBuilder<'a> {
 
         block.scope_end = true;
 
-        if let Some(val) = return_val {
-            block.terminator = cfg::Terminator::Return(Some(val));
-        } else if let Some(next) = next_block {
+        if let Some(next) = next_block {
             block.terminator = cfg::Terminator::Jump(next);
         }
 

@@ -144,7 +144,7 @@ impl<'a> Proc {
     // TODO split up, move out of Proc maybe, and track as we build
     // TODO a smarter analysis method; this works but misses a lot
     pub fn analyze(&mut self) {
-        let mut flow: IndexVec<_, _> = self.locals.iter().map(|l| {
+        /*let mut flow: IndexVec<_, _> = self.locals.iter().map(|l| {
             LocalFlow::new(l.id)
         }).collect();
 
@@ -178,13 +178,13 @@ impl<'a> Proc {
                 }
             }
 
-            match block.terminator {
+            /*match block.terminator {
                 Terminator::Return(Some(Place::Local(local))) => {
                     let local_flow = &mut flow[local];
                     local_flow.promote_scope = Some(ScopeId::new(0));
                 },
                 _ => {},
-            }
+            }*/
         }
 
         println!("{:#?}", flow);
@@ -202,7 +202,7 @@ impl<'a> Proc {
 
                 local.destruct_scope = Some(new_scope_id);
             }
-        }
+        }*/
     }
 
     pub fn dot(&self) {
@@ -226,7 +226,7 @@ impl<'a> dot::Labeller<'a, BlockId, (BlockId, BlockId, String)> for Proc {
         let block = &self.blocks[*n];
 
         let term_str = match &block.terminator {
-            Terminator::Return(val) => format!("return {:?}", val),
+            Terminator::Return => "return".into(),
             Terminator::Jump(_) => "jump".into(),
             Terminator::Switch { discriminant, branches: _, default: _ } => format!("switch {:?}", discriminant),
         };
@@ -256,7 +256,7 @@ impl<'a> dot::GraphWalk<'a, BlockId, (BlockId, BlockId, String)> for Proc {
     fn edges(&self) -> dot::Edges<'a, (BlockId, BlockId, String)> {
         self.blocks.iter().flat_map(|block| {
             match &block.terminator {
-                Terminator::Return(_) => {vec![]},
+                Terminator::Return => {vec![]},
                 Terminator::Jump(target) => vec![(block.id, *target, "".into())],
                 Terminator::Switch { discriminant: _, branches, default } => {
                     let mut out = vec![(block.id, *default, "default".into())];
@@ -294,7 +294,7 @@ impl Block {
         Self {
             id: id,
             ops: Vec::new(),
-            terminator: Terminator::Return(None),
+            terminator: Terminator::Return,
             scope: scope,
             scope_end: false,
         }
@@ -357,7 +357,7 @@ pub enum Place {
 
 #[derive(Debug)]
 pub enum Terminator {
-    Return(Option<Place>),
+    Return,
     Jump(BlockId),
     Switch {
         discriminant: Place,

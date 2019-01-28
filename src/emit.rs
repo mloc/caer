@@ -134,15 +134,9 @@ impl<'a> ProcEmit<'a> {
         }
 
         match &block.terminator {
-            Terminator::Return(ret_val) => {
-                match ret_val {
-                    Some(place) => self.ctx.builder.build_return(Some(&self.load_place(&place))),
-                    None => {
-                        let val = self.lit_to_val(&Literal::Null);
-                        self.ctx.builder.build_return(Some(&val))
-                    },
-                };
-                //self.ctx.builder.build_return(ret_val.map(|p| &self.load_place(&p)));
+            Terminator::Return => {
+                let ret = self.ctx.builder.build_load(self.local_allocs[LocalId::new(0)], "ret");
+                self.ctx.builder.build_return(Some(&ret));
             },
 
             Terminator::Jump(id) => {
