@@ -328,11 +328,11 @@ impl Scope {
 
 #[derive(Debug)]
 pub enum Op {
-    Mov(LocalId, Place),
+    Mov(LocalId, LocalId),
     Literal(LocalId, Literal),
     Put(LocalId),
-    Add(LocalId, Place, Place),
-    Call(LocalId, String, Vec<Place>),
+    Add(LocalId, LocalId, LocalId),
+    Call(LocalId, String, Vec<LocalId>),
 }
 
 #[derive(Debug)]
@@ -344,23 +344,11 @@ pub enum Literal {
 }
 
 #[derive(Debug)]
-pub enum Expr {
-    Literal(Literal),
-    Place(Place),
-}
-
-#[derive(Debug)]
-pub enum Place {
-    Local(LocalId),
-    Global(u32),
-}
-
-#[derive(Debug)]
 pub enum Terminator {
     Return,
     Jump(BlockId),
     Switch {
-        discriminant: Place,
+        discriminant: LocalId,
         branches: Vec<(u32, BlockId)>,
         default: BlockId,
     },

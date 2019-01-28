@@ -2,6 +2,7 @@ use indexed_vec::{IndexVec, Idx};
 use std::collections::HashMap;
 use crate::cfg::*;
 use std::fs;
+use std::borrow::Borrow;
 
 #[derive(Debug)]
 struct ProcEmit<'a> {
@@ -73,27 +74,15 @@ impl<'a> ProcEmit<'a> {
         self.ctx.builder.build_call(self.ctx.rt.rt_val_float, &[val], "val").try_as_basic_value().left().unwrap()
     }
 
-    fn load_expr(&self, expr: &Expr) -> inkwell::values::BasicValueEnum {
-        match expr {
-            Expr::Literal(lit) => self.lit_to_val(lit).into(),
-            Expr::Place(place) => self.load_place(place),
-        }
-    }
-
-    fn load_place(&self, place: &Place) -> inkwell::values::BasicValueEnum {
-        match place {
-            Place::Local(id) => {
-                self.ctx.builder.build_load(self.local_allocs[*id], "").into()
-            },
-            Place::Global(_) => unimplemented!("global place"),
-        }
+    fn load_local<L: Borrow<LocalId>>(&self, local: L) -> inkwell::values::BasicValueEnum {
+        self.ctx.builder.build_load(self.local_allocs[*local.borrow()], "").into()
     }
 
     fn emit_block(&self, block: &Block, emit: &Emit) {
         for op in block.ops.iter() {
             match op {
-                Op::Mov(id, place) => {
-                    let val = self.load_place(place);
+                Op::Mov(id, local) => {
+                    let val = self.load_local(local);
                     let cloned_val = self.ctx.builder.build_call(self.ctx.rt.rt_val_clone, &[val], "clone").try_as_basic_value().left().unwrap();
                     self.ctx.builder.build_store(self.local_allocs[*id], cloned_val);
                 },
@@ -109,8 +98,8 @@ impl<'a> ProcEmit<'a> {
                 },
 
                 Op::Add(id, lhs, rhs) => {
-                    let lhs_ref = self.load_place(lhs);
-                    let rhs_ref = self.load_place(rhs);
+                    let lhs_ref = self.load_local(lhs);
+                    let rhs_ref = self.load_local(rhs);
                     let res_val = self.ctx.builder.build_call(self.ctx.rt.rt_val_add, &[lhs_ref, rhs_ref], "sum").try_as_basic_value().left().unwrap();
                     self.ctx.builder.build_store(self.local_allocs[*id], res_val);
                 },
@@ -128,7 +117,7 @@ impl<'a> ProcEmit<'a> {
 
         if block.scope_end {
             for local in self.proc.scopes[block.scope].destruct_locals.iter() {
-                let local_val = self.load_place(&Place::Local(*local));
+                let local_val = self.load_local(local);
                 self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[local_val], "");
             }
         }
@@ -144,7 +133,7 @@ impl<'a> ProcEmit<'a> {
             },
 
             Terminator::Switch { discriminant, branches, default } => {
-                let disc_val = self.load_place(discriminant);
+                let disc_val = self.load_local(discriminant);
 
                 // call runtime to convert value to bool
                 let disc_bool = self.ctx.builder.build_call(self.ctx.rt.rt_val_to_switch_disc, &[disc_val], "disc").try_as_basic_value().left().unwrap();

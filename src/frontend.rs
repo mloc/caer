@@ -130,7 +130,7 @@ impl<'a> ProcBuilder<'a> {
                         let continuation = self.proc.new_block(scope);
 
                         block.terminator = cfg::Terminator::Switch {
-                            discriminant: cfg::Place::Local(cond_local),
+                            discriminant: cond_local,
                             branches: vec![(0, continuation.id)],
                             default: body_block_id,
                         };
@@ -163,7 +163,7 @@ impl<'a> ProcBuilder<'a> {
                     cond_block.ops.push(cfg::Op::Mov(cond_local, cond_expr));
 
                     cond_block.terminator = cfg::Terminator::Switch {
-                        discriminant: cfg::Place::Local(cond_local),
+                        discriminant: cond_local,
                         branches: vec![(0, while_end.id)],
                         default: body_block_id,
                     };
@@ -198,7 +198,7 @@ impl<'a> ProcBuilder<'a> {
         block.ops.push(cfg::Op::Mov(var_id, asg_expr));
     }
 
-    fn build_expr(&mut self, expr: &ast::Expression, block: &mut cfg::Block) -> cfg::Place {
+    fn build_expr(&mut self, expr: &ast::Expression, block: &mut cfg::Block) -> cfg::LocalId {
         match expr {
             ast::Expression::Base { unary, term, follow } => {
                 let expr = self.build_term(term, block);
@@ -221,35 +221,35 @@ impl<'a> ProcBuilder<'a> {
                     _ => unimplemented!("{:?}", op),
                 }
 
-                cfg::Place::Local(local)
+                local
             },
 
             _ => unimplemented!("{:?}", expr),
         }
     }
 
-    fn build_literal(&mut self, lit: cfg::Literal, block: &mut cfg::Block) -> cfg::Place {
+    fn build_literal(&mut self, lit: cfg::Literal, block: &mut cfg::Block) -> cfg::LocalId {
         let local = self.proc.add_local(block.scope, None);
         block.ops.push(cfg::Op::Literal(local, lit));
-        cfg::Place::Local(local)
+        local
     }
 
-    fn build_term(&mut self, term: &ast::Term, block: &mut cfg::Block) -> cfg::Place {
+    fn build_term(&mut self, term: &ast::Term, block: &mut cfg::Block) -> cfg::LocalId {
         match term {
             ast::Term::Int(x) => self.build_literal(cfg::Literal::Num(*x as f32), block),
             ast::Term::Float(x) => self.build_literal(cfg::Literal::Num(*x), block),
             ast::Term::Ident(var_name) => {
                 let var_id = self.proc.lookup_var(block.scope, var_name).unwrap();
-                cfg::Place::Local(var_id)
+                var_id
             },
             ast::Term::Call(name, args) => {
                 let res = self.proc.add_local(block.scope, None);
 
-                let arg_exprs: Vec<cfg::Place> = args.iter().map(|expr| self.build_expr(expr, block)).collect();
+                let arg_exprs: Vec<_> = args.iter().map(|expr| self.build_expr(expr, block)).collect();
 
                 block.ops.push(cfg::Op::Call(res, name.clone(), arg_exprs));
 
-                cfg::Place::Local(res)
+                res
             },
             _ => unimplemented!("{:?}", term),
         }
