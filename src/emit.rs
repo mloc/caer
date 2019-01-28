@@ -40,6 +40,10 @@ impl<'a> ProcEmit<'a> {
             self.local_allocs.push(alloc);
         }
 
+        // TODO eww fix me
+        let null_init = self.ctx.builder.build_call(self.ctx.rt.rt_val_null, &[], "val").try_as_basic_value().left().unwrap();
+        self.ctx.builder.build_store(self.local_allocs[LocalId::new(0)], null_init);
+
         block
     }
 
@@ -66,12 +70,16 @@ impl<'a> ProcEmit<'a> {
     }
 
     fn lit_to_val(&self, lit: &Literal) -> inkwell::values::BasicValueEnum {
-        let val = match lit {
-            Literal::Num(x) => self.ctx.llvm_ctx.f32_type().const_float(*x as f64).into(),
-            _ => self.ctx.llvm_ctx.f32_type().const_float(0f64).into(),
-        };
-
-        self.ctx.builder.build_call(self.ctx.rt.rt_val_float, &[val], "val").try_as_basic_value().left().unwrap()
+        match lit {
+            Literal::Num(x) => {
+                let val = self.ctx.llvm_ctx.f32_type().const_float(*x as f64).into();
+                self.ctx.builder.build_call(self.ctx.rt.rt_val_float, &[val], "val").try_as_basic_value().left().unwrap()
+            },
+            Literal::Null => {
+                self.ctx.builder.build_call(self.ctx.rt.rt_val_null, &[], "val").try_as_basic_value().left().unwrap()
+            }
+            _ => unimplemented!("{:?}", lit),
+        }
     }
 
     fn load_local<L: Borrow<LocalId>>(&self, local: L) -> inkwell::values::BasicValueEnum {
@@ -83,6 +91,11 @@ impl<'a> ProcEmit<'a> {
             match op {
                 Op::Mov(id, local) => {
                     let val = self.load_local(local);
+
+                    if !self.proc.locals[*id].ssa {
+                        let dest_val = self.load_local(id);
+                        self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[dest_val], "");
+                    }
 
                     let cloned_val = if self.proc.locals[*local].movable {
                         val
@@ -119,7 +132,7 @@ impl<'a> ProcEmit<'a> {
                     self.ctx.builder.build_store(self.local_allocs[*id], res_val);
                 },
 
-                _ => unimplemented!("{:?}", op),
+                //_ => unimplemented!("{:?}", op),
             }
         }
 

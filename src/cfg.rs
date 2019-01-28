@@ -14,6 +14,7 @@ newtype_index!(ScopeId {pub idx});
 pub struct Local {
     pub id: LocalId,
     pub movable: bool,
+    pub ssa: bool,
     pub name: Option<String>,
     pub construct_scope: ScopeId,
     // if a value is moved, it won't be destructed with this local
@@ -74,16 +75,17 @@ impl<'a> Proc {
             next_block_id: 0,
         };
 
-        new.add_local(new.global_scope, None); // return
+        new.add_local(new.global_scope, None, false); // return
         new
     }
 
-    pub fn add_local(&mut self, scope: ScopeId, name: Option<&str>) -> LocalId {
+    pub fn add_local(&mut self, scope: ScopeId, name: Option<&str>, ssa: bool) -> LocalId {
         let id = LocalId::new(self.locals.len());
 
         let local = Local {
             id: id,
             movable: false,
+            ssa: ssa,
             name: Some(name.map_or_else(|| {format!("local_{}", id.index())}, |s| {format!("var_{}", s.to_string())})),
             construct_scope: scope,
             destruct_scope: Some(scope),
@@ -180,8 +182,6 @@ impl<'a> Proc {
                 _ => {},
             }
         }
-
-        println!("{:#?}", flow);
 
         // promote scopes
         for local_flow in flow.iter() {
