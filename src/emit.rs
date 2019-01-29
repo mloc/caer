@@ -7,7 +7,8 @@ use std::borrow::Borrow;
 #[derive(Debug)]
 struct ProcEmit<'a> {
     ctx: &'a Context,
-    local_allocs: IndexVec<LocalId, inkwell::values::PointerValue>,
+    local_allocs: HashMap<LocalId, inkwell::values::PointerValue>,
+    local_vals: IndexVec<LocalId, Option<inkwell::values::BasicValueEnum>>,
     blocks: IndexVec<BlockId, inkwell::basic_block::BasicBlock>,
     func: inkwell::values::FunctionValue,
     proc: &'a Proc,
@@ -18,9 +19,12 @@ impl<'a> ProcEmit<'a> {
         let func_type = ctx.rt.ptr_type.fn_type(&[], false);
         let func = ctx.module.add_function(name, func_type, None);
 
+        let local_vals = proc.locals.iter().map(|_| None).collect();
+
         Self {
             ctx: ctx,
-            local_allocs: IndexVec::new(),
+            local_allocs: HashMap::new(),
+            local_vals: local_vals,
             blocks: IndexVec::new(),
             func: func,
             proc: proc,
@@ -32,17 +36,19 @@ impl<'a> ProcEmit<'a> {
         self.ctx.builder.position_at_end(&block);
 
         for local in self.proc.locals.iter() {
-            let name = match local.name {
-                Some(ref s) => s,
-                None => "",
-            };
-            let alloc = self.ctx.builder.build_alloca(self.ctx.rt.ptr_type, name);
-            self.local_allocs.push(alloc);
+            if local.var {
+                let name = match local.name {
+                    Some(ref s) => s,
+                    None => "",
+                };
+                let alloc = self.ctx.builder.build_alloca(self.ctx.rt.ptr_type, name);
+                self.local_allocs.insert(local.id, alloc);
+            }
         }
 
         // TODO eww fix me
         let null_init = self.ctx.builder.build_call(self.ctx.rt.rt_val_null, &[], "val").try_as_basic_value().left().unwrap();
-        self.ctx.builder.build_store(self.local_allocs[LocalId::new(0)], null_init);
+        self.ctx.builder.build_store(self.local_allocs[&LocalId::new(0)], null_init);
 
         block
     }
@@ -83,30 +89,34 @@ impl<'a> ProcEmit<'a> {
     }
 
     fn load_local<L: Borrow<LocalId>>(&self, local: L) -> inkwell::values::BasicValueEnum {
-        self.ctx.builder.build_load(self.local_allocs[*local.borrow()], "").into()
+        self.local_vals[*local.borrow()].unwrap()
     }
 
-    fn emit_block(&self, block: &Block, emit: &Emit) {
+    fn load_var(&self, var: &LocalId) -> inkwell::values::BasicValueEnum {
+        self.ctx.builder.build_load(self.local_allocs[var], "load")
+    }
+
+    fn emit_block(&mut self, block: &Block, emit: &Emit) {
         for op in block.ops.iter() {
             match op {
-                Op::Literal(id, literal) => {
+                Op::Literal(local, literal) => {
                     let val = self.lit_to_val(literal);
-                    self.ctx.builder.build_store(self.local_allocs[*id], val);
+                    self.local_vals[*local] = Some(val);
                 },
 
                 Op::MkVar(var) => {
                     let null_init = self.ctx.builder.build_call(self.ctx.rt.rt_val_null, &[], "val").try_as_basic_value().left().unwrap();
-                    self.ctx.builder.build_store(self.local_allocs[*var], null_init);
+                    self.ctx.builder.build_store(self.local_allocs[var], null_init);
                 }
 
                 Op::Load(local, var) => {
-                    let val = self.load_local(var);
+                    let val = self.load_var(var);
                     let cloned_val = self.ctx.builder.build_call(self.ctx.rt.rt_val_clone, &[val], "clone").try_as_basic_value().left().unwrap();
-                    self.ctx.builder.build_store(self.local_allocs[*local], cloned_val);
+                    self.local_vals[*local] = Some(cloned_val);
                 },
 
                 Op::Store(var, local) => {
-                    let old_val = self.load_local(var);
+                    let old_val = self.load_var(var);
                     self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[old_val], "");
 
                     let new_val = self.load_local(local);
@@ -115,28 +125,28 @@ impl<'a> ProcEmit<'a> {
                     } else {
                         self.ctx.builder.build_call(self.ctx.rt.rt_val_clone, &[new_val], "clone").try_as_basic_value().left().unwrap()
                     };
-                    self.ctx.builder.build_store(self.local_allocs[*var], cloned_val);
+                    self.ctx.builder.build_store(self.local_allocs[var], cloned_val);
                 },
 
                 Op::Put(id) => {
-                    let val = self.ctx.builder.build_load(self.local_allocs[*id], "put");
+                    let val = self.load_local(id);
                     self.ctx.builder.build_call(self.ctx.rt.rt_val_print, &mut [val], "put");
                 },
 
-                Op::Binary(id, op, lhs, rhs) => {
+                Op::Binary(local, op, lhs, rhs) => {
                     let lhs_ref = self.load_local(lhs);
                     let rhs_ref = self.load_local(rhs);
                     let op_var = self.ctx.llvm_ctx.i32_type().const_int(*op as u64, false).into();
 
                     let res_val = self.ctx.builder.build_call(self.ctx.rt.rt_val_binary_op, &[op_var, lhs_ref, rhs_ref], "sum").try_as_basic_value().left().unwrap();
-                    self.ctx.builder.build_store(self.local_allocs[*id], res_val);
+                    self.local_vals[*local] = Some(res_val);
                 },
 
-                Op::Call(id, name, args) => {
+                Op::Call(local, name, args) => {
                     assert!(args.len() == 0);
                     let func = emit.sym[name];
                     let res_val = self.ctx.builder.build_call(func, &[], name).try_as_basic_value().left().unwrap();
-                    self.ctx.builder.build_store(self.local_allocs[*id], res_val);
+                    self.local_vals[*local] = Some(res_val);
                 },
 
                 //_ => unimplemented!("{:?}", op),
@@ -146,7 +156,7 @@ impl<'a> ProcEmit<'a> {
         match &block.terminator {
             Terminator::Return => {
                 self.finalize_block(block);
-                let ret = self.ctx.builder.build_load(self.local_allocs[LocalId::new(0)], "ret");
+                let ret = self.load_var(&LocalId::new(0));
                 self.ctx.builder.build_return(Some(&ret));
             },
 
@@ -179,7 +189,12 @@ impl<'a> ProcEmit<'a> {
     fn finalize_block(&self, block: &Block) {
         if block.scope_end {
             for local in self.proc.scopes[block.scope].destruct_locals.iter() {
-                let local_val = self.load_local(local);
+                let local_val = if self.proc.locals[*local].var {
+                    self.load_var(local)
+                } else {
+                    self.load_local(local)
+                };
+
                 self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[local_val], "");
             }
         }
