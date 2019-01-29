@@ -11,6 +11,15 @@ scoping issues
         single-copy no-read cases, move and remove drop
             basics done- need better scope analysis to find some cases
 
+big bad idea
+    all locals are SSA
+    vars are "pointers" on SSA locals with special ops
+        do we lose too much simplicity?
+        is this too low level? too close to what LLVM does?
+        
+        maybe! but let's try it
+        it'll make some interactions less messy
+
 ----
 
 values

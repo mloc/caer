@@ -14,7 +14,7 @@ newtype_index!(ScopeId {pub idx});
 pub struct Local {
     pub id: LocalId,
     pub movable: bool,
-    pub ssa: bool,
+    pub var:  bool,
     pub name: Option<String>,
     pub construct_scope: ScopeId,
     // if a value is moved, it won't be destructed with this local
@@ -75,17 +75,17 @@ impl<'a> Proc {
             next_block_id: 0,
         };
 
-        new.add_local(new.global_scope, None, false); // return
+        new.add_local(new.global_scope, None, true); // return
         new
     }
 
-    pub fn add_local(&mut self, scope: ScopeId, name: Option<&str>, ssa: bool) -> LocalId {
+    pub fn add_local(&mut self, scope: ScopeId, name: Option<&str>, var: bool) -> LocalId {
         let id = LocalId::new(self.locals.len());
 
         let local = Local {
             id: id,
             movable: false,
-            ssa: ssa,
+            var: var,
             name: Some(name.map_or_else(|| {format!("local_{}", id.index())}, |s| {format!("var_{}", s.to_string())})),
             construct_scope: scope,
             destruct_scope: Some(scope),
@@ -95,9 +95,11 @@ impl<'a> Proc {
         self.scopes[scope].locals.push(id);
         self.scopes[scope].destruct_locals.insert(id);
 
-        if let Some(var) = name {
-            self.vars.insert(var.into(), id);
-            self.scopes[scope].vars.insert(var.into(), id);
+        if var {
+            if let Some(var) = name {
+                self.vars.insert(var.into(), id);
+                self.scopes[scope].vars.insert(var.into(), id);
+            }
         }
 
         id
@@ -151,12 +153,20 @@ impl<'a> Proc {
             for op in block.ops.iter() {
                 match op {
                     Op::Mov(_, src) => {
-                        flow[*src].takes += 1;
+                        flow[*src].reads += 1;
                     },
 
                     Op::Literal(_, _) => {
                         // hmmm
                     },
+
+                    Op::MkVar(_) => {},
+
+                    Op::Load(_, src) => {
+                        flow[*src].takes += 1;
+                    },
+
+                    Op::Store(_, _) => {},
 
                     Op::Put(src) => {
                         flow[*src].reads += 1;
@@ -323,6 +333,11 @@ impl Scope {
 pub enum Op {
     Mov(LocalId, LocalId),
     Literal(LocalId, Literal),
+
+    MkVar(LocalId),
+    Load(LocalId, LocalId),
+    Store(LocalId, LocalId),
+
     Put(LocalId),
     Binary(LocalId, ludo::op::BinaryOp, LocalId, LocalId),
     Call(LocalId, String, Vec<LocalId>),

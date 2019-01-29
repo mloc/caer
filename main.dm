@@ -1,12 +1,12 @@
 /proc/main()
-	//var/xx = abc() + 8 + abc()
-	//world << xx
-	//var/x = 7
-	//var/y = 3
-	//y = x + x + 4 + y
-	//world << loopy()
+	var/xx = abc() + 8 + abc()
+	world << xx
+	var/x = 7
+	var/y = 3
+	y = x + x + 4 + y
+	world << loopy()
 	world  << simple()
-	//world << y + 4
+	world << y + 4
 
 /proc/abc()
 	var/x
@@ -21,9 +21,10 @@
 	return x
 
 /proc/loopy()
-	var/x = 0 + 8 + 3.4
+	var/x = 0
 	while(x + 8)
 		x = x - 1
+		world << x
 	return x
 
 /proc/simple()

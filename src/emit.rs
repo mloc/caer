@@ -91,24 +91,41 @@ impl<'a> ProcEmit<'a> {
             match op {
                 Op::Mov(id, local) => {
                     let val = self.load_local(local);
-
-                    if !self.proc.locals[*id].ssa {
-                        let dest_val = self.load_local(id);
-                        self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[dest_val], "");
-                    }
-
                     let cloned_val = if self.proc.locals[*local].movable {
                         val
                     } else {
                         self.ctx.builder.build_call(self.ctx.rt.rt_val_clone, &[val], "clone").try_as_basic_value().left().unwrap()
                     };
-
                     self.ctx.builder.build_store(self.local_allocs[*id], cloned_val);
                 },
 
                 Op::Literal(id, literal) => {
                     let val = self.lit_to_val(literal);
                     self.ctx.builder.build_store(self.local_allocs[*id], val);
+                },
+
+                Op::MkVar(var) => {
+                    let null_init = self.ctx.builder.build_call(self.ctx.rt.rt_val_null, &[], "val").try_as_basic_value().left().unwrap();
+                    self.ctx.builder.build_store(self.local_allocs[*var], null_init);
+                }
+
+                Op::Load(local, var) => {
+                    let val = self.load_local(var);
+                    let cloned_val = self.ctx.builder.build_call(self.ctx.rt.rt_val_clone, &[val], "clone").try_as_basic_value().left().unwrap();
+                    self.ctx.builder.build_store(self.local_allocs[*local], cloned_val);
+                },
+
+                Op::Store(var, local) => {
+                    let old_val = self.load_local(var);
+                    self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[old_val], "");
+
+                    let new_val = self.load_local(local);
+                    let cloned_val = if self.proc.locals[*local].movable {
+                        new_val
+                    } else {
+                        self.ctx.builder.build_call(self.ctx.rt.rt_val_clone, &[new_val], "clone").try_as_basic_value().left().unwrap()
+                    };
+                    self.ctx.builder.build_store(self.local_allocs[*var], cloned_val);
                 },
 
                 Op::Put(id) => {
@@ -136,20 +153,15 @@ impl<'a> ProcEmit<'a> {
             }
         }
 
-        if block.scope_end {
-            for local in self.proc.scopes[block.scope].destruct_locals.iter() {
-                let local_val = self.load_local(local);
-                self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[local_val], "");
-            }
-        }
-
         match &block.terminator {
             Terminator::Return => {
+                self.finalize_block(block);
                 let ret = self.ctx.builder.build_load(self.local_allocs[LocalId::new(0)], "ret");
                 self.ctx.builder.build_return(Some(&ret));
             },
 
             Terminator::Jump(id) => {
+                self.finalize_block(block);
                 self.ctx.builder.build_unconditional_branch(&self.blocks[*id]);
             },
 
@@ -161,6 +173,8 @@ impl<'a> ProcEmit<'a> {
 
                 let disc_int = *disc_bool.as_int_value();
 
+                self.finalize_block(block);
+
                 // convert branches to use llvm blocks
                 let llvm_branches = branches.iter().map(|(lit, target)| {
                     let val = self.ctx.llvm_ctx.i32_type().const_int((*lit).into(), false);
@@ -169,6 +183,15 @@ impl<'a> ProcEmit<'a> {
 
                 self.ctx.builder.build_switch(disc_int, &self.blocks[*default], &llvm_branches[..]);
             },
+        }
+    }
+
+    fn finalize_block(&self, block: &Block) {
+        if block.scope_end {
+            for local in self.proc.scopes[block.scope].destruct_locals.iter() {
+                let local_val = self.load_local(local);
+                self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[local_val], "");
+            }
         }
     }
 }
