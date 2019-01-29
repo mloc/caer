@@ -121,24 +121,17 @@ impl<'a> ProcBuilder<'a> {
                 },
 
                 ast::Statement::If(branches, else_branch) => {
-                    let mut if_end = self.proc.new_block(scope);
-                    let mut if_cleanup = if_end.id;
+                    let if_end = self.proc.new_block(scope);
 
                     // TODO clean up this scope creation with better builder
                     for (condition, body) in branches.iter() {
-                        // scope to contain (effective) if/else pair
                         let cond_scope = self.proc.new_scope(block.scope);
                         let mut cond_block = self.proc.new_block(cond_scope);
-
-                        // end block
-                        let mut cond_cleanup = self.proc.new_block(cond_scope);
-                        cond_cleanup.scope_end = true;
-                        cond_cleanup.terminator = cfg::Terminator::Jump(if_cleanup);
-                        if_cleanup = cond_cleanup.id;
+                        cond_block.scope_end = true;
 
                         let cond_expr = self.build_expr(condition, &mut cond_block);
 
-                        let body_block_id = self.build_block(&body[..], scope, Some(if_cleanup));
+                        let body_block_id = self.build_block(&body[..], scope, Some(if_end.id));
 
                         let continuation = self.proc.new_block(cond_scope);
 
@@ -150,14 +143,13 @@ impl<'a> ProcBuilder<'a> {
                         };
 
                         self.finished_blocks.push(cond_block);
-                        self.finished_blocks.push(cond_cleanup);
                         self.finished_blocks.push(block);
                         block = continuation;
                     }
 
                     let mut next = if_end.id;
                     if let Some(body) = else_branch {
-                        next = self.build_block(&body[..], scope, Some(if_cleanup));
+                        next = self.build_block(&body[..], scope, Some(if_end.id));
                     }
 
                     // adds a redundant jump, but simplifies code.
