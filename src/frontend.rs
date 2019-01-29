@@ -95,12 +95,10 @@ impl<'a> ProcBuilder<'a> {
                         },
 
                         ast::Expression::BinaryOp { op, lhs, rhs } => {
-                            let local = self.proc.add_local(scope, None, false);
                             let res = self.build_expr(rhs, &mut block);
-                            block.ops.push(cfg::Op::Mov(local, res));
                             match op {
                                 ast::BinaryOp::LShift => {
-                                    block.ops.push(cfg::Op::Put(local));
+                                    block.ops.push(cfg::Op::Put(res));
                                 },
                                 _ => unimplemented!(),
                             };
@@ -179,11 +177,9 @@ impl<'a> ProcBuilder<'a> {
                     let body_block_id = self.build_block(&body[..], scope, Some(cond_block.id));
 
                     let cond_expr = self.build_expr(cond, &mut cond_block);
-                    let cond_local = self.proc.add_local(cond_scope, None, false);
-                    cond_block.ops.push(cfg::Op::Mov(cond_local, cond_expr));
 
                     cond_block.terminator = cfg::Terminator::Switch {
-                        discriminant: cond_local,
+                        discriminant: cond_expr,
                         branches: vec![(0, while_end.id)],
                         default: body_block_id,
                     };

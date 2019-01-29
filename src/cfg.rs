@@ -152,10 +152,6 @@ impl<'a> Proc {
         for block in self.blocks.iter() {
             for op in block.ops.iter() {
                 match op {
-                    Op::Mov(_, src) => {
-                        flow[*src].reads += 1;
-                    },
-
                     Op::Literal(_, _) => {
                         // hmmm
                     },
@@ -331,7 +327,6 @@ impl Scope {
 
 #[derive(Debug)]
 pub enum Op {
-    Mov(LocalId, LocalId),
     Literal(LocalId, Literal),
 
     MkVar(LocalId),

@@ -89,16 +89,6 @@ impl<'a> ProcEmit<'a> {
     fn emit_block(&self, block: &Block, emit: &Emit) {
         for op in block.ops.iter() {
             match op {
-                Op::Mov(id, local) => {
-                    let val = self.load_local(local);
-                    let cloned_val = if self.proc.locals[*local].movable {
-                        val
-                    } else {
-                        self.ctx.builder.build_call(self.ctx.rt.rt_val_clone, &[val], "clone").try_as_basic_value().left().unwrap()
-                    };
-                    self.ctx.builder.build_store(self.local_allocs[*id], cloned_val);
-                },
-
                 Op::Literal(id, literal) => {
                     let val = self.lit_to_val(literal);
                     self.ctx.builder.build_store(self.local_allocs[*id], val);
