@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use crate::cfg::*;
 use std::fs;
 use std::borrow::Borrow;
+use ludo;
+use std::mem::size_of;
 
 #[derive(Debug)]
 struct ProcEmit<'a> {
@@ -16,7 +18,7 @@ struct ProcEmit<'a> {
 
 impl<'a> ProcEmit<'a> {
     fn new(ctx: &'a Context, proc: &'a Proc, name: &str) -> Self {
-        let func_type = ctx.rt.ptr_type.fn_type(&[], false);
+        let func_type = ctx.rt.val_ptr_type.fn_type(&[], false);
         let func = ctx.module.add_function(name, func_type, None);
 
         let local_vals = proc.locals.iter().map(|_| None).collect();
@@ -35,20 +37,19 @@ impl<'a> ProcEmit<'a> {
         let block = self.func.append_basic_block("entry");
         self.ctx.builder.position_at_end(&block);
 
+        let null_val = self.ctx.rt.val_type.const_zero();
+
         for local in self.proc.locals.iter() {
             if local.var {
                 let name = match local.name {
                     Some(ref s) => s,
                     None => "",
                 };
-                let alloc = self.ctx.builder.build_alloca(self.ctx.rt.ptr_type, name);
+                let alloc = self.ctx.builder.build_alloca(self.ctx.rt.val_type, name);
+                self.ctx.builder.build_store(alloc, null_val);
                 self.local_allocs.insert(local.id, alloc);
             }
         }
-
-        // TODO eww fix me
-        let null_init = self.ctx.builder.build_call(self.ctx.rt.rt_val_null, &[], "val").try_as_basic_value().left().unwrap();
-        self.ctx.builder.build_store(self.local_allocs[&LocalId::new(0)], null_init);
 
         block
     }
@@ -289,7 +290,8 @@ macro_rules! rt_funcs {
     ( $name:ident, [ $( ( $func:ident, $ret:ident, [ $( $arg:ident ),* $(,)* ] ) ),* $(,)* ] ) => {
         #[derive(Debug)]
         struct $name {
-            ptr_type: inkwell::types::PointerType,
+            val_type: inkwell::types::StructType,
+            val_ptr_type: inkwell::types::PointerType,
             $(
                 $func: inkwell::values::FunctionValue,
             )*
@@ -297,15 +299,19 @@ macro_rules! rt_funcs {
 
         impl $name {
             fn new(ctx: &inkwell::context::Context, module: &inkwell::module::Module) -> $name {
-                let ptr_type = ctx.opaque_struct_type("opaque").ptr_type(inkwell::AddressSpace::Generic);
+                let padding_size = size_of::<ludo::val::Val>() - 4; // u32 discrim
+                let val_padding_type = ctx.i8_type().array_type(padding_size as u32);
+                let val_type = ctx.struct_type(&[ctx.i32_type().into(), val_padding_type.into()], true);
+                let val_ptr_type = val_type.ptr_type(inkwell::AddressSpace::Generic);
 
                 $name {
-                    ptr_type: ptr_type,
+                    val_type: val_type,
+                    val_ptr_type: val_ptr_type,
                     $(
                         $func: module.add_function(stringify!($func),
-                            rt_funcs!(@genty ctx ptr_type $ret).fn_type(&[
+                            rt_funcs!(@genty ctx val_ptr_type $ret).fn_type(&[
                                 $(
-                                    rt_funcs!(@genty ctx ptr_type $arg).into(),
+                                    rt_funcs!(@genty ctx val_ptr_type $arg).into(),
                                 )*
                             ], false),
                         None),
@@ -315,7 +321,7 @@ macro_rules! rt_funcs {
         }
     };
 
-    ( @genty $ctx:ident $ptt:ident ptr_type) => (
+    ( @genty $ctx:ident $ptt:ident val_ptr_type) => (
         $ptt
     );
 
@@ -327,13 +333,12 @@ macro_rules! rt_funcs {
 rt_funcs!{
     RtFuncs,
     [
-        (rt_val_float, ptr_type, [f32_type]),
-        (rt_val_int, ptr_type, [i32_type]),
-        (rt_val_null, ptr_type, []),
-        (rt_val_binary_op, ptr_type, [i32_type, ptr_type, ptr_type]),
-        (rt_val_to_switch_disc, i32_type, [ptr_type]),
-        (rt_val_print, void_type, [ptr_type]),
-        (rt_val_clone, ptr_type, [ptr_type]),
-        (rt_val_drop, void_type, [ptr_type]),
+        (rt_val_float, void_type, [val_ptr_type, f32_type]),
+        (rt_val_int, void_type, [val_ptr_type, i32_type]),
+        (rt_val_binary_op, val_ptr_type, [i32_type, val_ptr_type, val_ptr_type]),
+        (rt_val_to_switch_disc, i32_type, [val_ptr_type]),
+        (rt_val_print, void_type, [val_ptr_type]),
+        (rt_val_clone, val_ptr_type, [val_ptr_type]),
+        (rt_val_drop, void_type, [val_ptr_type]),
     ]
 }
