@@ -1,9 +1,5 @@
 scratchpad
 
-BIG TODO: switch is broken rn, always casts to bool before checking. basically acts as br
-    FIXED probably, by inverting meaning of switches
-    replaced rt_val_to_bool with rt_val_to_switch_disc, which casts to u32
-
 scoping issues
     stuff can be descoped before we use it in a terminator
     fixed by cloning everywhere - we should have been doing this anyway
@@ -11,16 +7,12 @@ scoping issues
         single-copy no-read cases, move and remove drop
             basics done- need better scope analysis to find some cases
 
-big bad idea
-    all locals are SSA
-    vars are "pointers" on SSA locals with special ops
-        do we lose too much simplicity?
-        is this too low level? too close to what LLVM does?
-        
-        maybe! but let's try it
-        it'll make some interactions less messy
+current val struct repr leads to very messy optimized code- probably because of the padding i8s?
+    is there a better way to represent the struct? some kind of min-size?
 
 ----
+
+entry point is currently /proc/entry(), main is a generated entry point that calls entry()
 
 values
     soft and hard values
@@ -36,6 +28,10 @@ values
         problems abound
             with current stub system, is heap allocated :(
             future work for less opaque enum would help this; for now, need to remember to drop
+
+        this is good now! still need to drop but we have the infra for that
+            half-opaque struct, only tag is exposed
+            we do some hopefully stable rust stuff to get the size
 
 scopes
     sketchbook musings:
@@ -85,3 +81,23 @@ future optimizations:
             affects call()() usage - that'll probably always use soft unless we keep md around
             maybe not useful, we probably still want to use hard procs from soft context
             alternatively act as a check for all values being hard?
+
+----
+
+old things
+
+BIG TODO: switch is broken rn, always casts to bool before checking. basically acts as br
+    FIXED probably, by inverting meaning of switches
+    replaced rt_val_to_bool with rt_val_to_switch_disc, which casts to u32
+
+big bad idea
+    all locals are SSA
+    vars are "pointers" on SSA locals with special ops
+        do we lose too much simplicity?
+        is this too low level? too close to what LLVM does?
+        
+        maybe! but let's try it
+        it'll make some interactions less messy
+        
+        this kinda worked out- but ssa locals are still stack pointers
+        makes more sense I guess
