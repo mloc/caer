@@ -13,11 +13,12 @@ struct ProcEmit<'a> {
     blocks: IndexVec<BlockId, inkwell::basic_block::BasicBlock>,
     func: inkwell::values::FunctionValue,
     proc: &'a Proc,
+    name: String,
 }
 
 impl<'a> ProcEmit<'a> {
     fn new(ctx: &'a Context, proc: &'a Proc, name: &str) -> Self {
-        let func_type = ctx.rt.val_ptr_type.fn_type(&[], false);
+        let func_type = ctx.rt.val_type.fn_type(&[], false);
         let func = ctx.module.add_function(name, func_type, None);
 
         Self {
@@ -26,6 +27,7 @@ impl<'a> ProcEmit<'a> {
             blocks: IndexVec::new(),
             func: func,
             proc: proc,
+            name: name.to_string(),
         }
     }
 
@@ -70,15 +72,13 @@ impl<'a> ProcEmit<'a> {
         self.finalize_entry_block(&entry_block);
     }
 
-    fn lit_to_val(&self, lit: &Literal) -> inkwell::values::BasicValueEnum {
+    fn assign_literal(&self, lit: &Literal, local: LocalId) {
         match lit {
             Literal::Num(x) => {
                 let val = self.ctx.llvm_ctx.f32_type().const_float(*x as f64).into();
-                self.ctx.builder.build_call(self.ctx.rt.rt_val_float, &[val], "val").try_as_basic_value().left().unwrap()
+                self.ctx.builder.build_call(self.ctx.rt.rt_val_float, &[self.local_allocs[local].into(), val], "val");;
             },
-            Literal::Null => {
-                self.ctx.builder.build_call(self.ctx.rt.rt_val_null, &[], "val").try_as_basic_value().left().unwrap()
-            }
+            Literal::Null => {}, // should already be null
             _ => unimplemented!("{:?}", lit),
         }
     }
@@ -91,46 +91,40 @@ impl<'a> ProcEmit<'a> {
         for op in block.ops.iter() {
             match op {
                 Op::Literal(id, literal) => {
-                    let val = self.lit_to_val(literal);
-                    self.ctx.builder.build_store(self.local_allocs[*id], val);
+                    self.assign_literal(literal, *id);
                 },
 
                 Op::MkVar(var) => {
-                    let null_init = self.ctx.builder.build_call(self.ctx.rt.rt_val_null, &[], "val").try_as_basic_value().left().unwrap();
-                    self.ctx.builder.build_store(self.local_allocs[*var], null_init);
+                    // nothing now - can we remove this?
                 }
 
                 Op::Load(local, var) => {
-                    let val = self.load_local(var);
-                    let cloned_val = self.ctx.builder.build_call(self.ctx.rt.rt_val_clone, &[val], "clone").try_as_basic_value().left().unwrap();
-                    self.ctx.builder.build_store(self.local_allocs[*local], cloned_val);
+                    let copy = self.load_local(var);
+                    self.ctx.builder.build_store(self.local_allocs[*local], copy);
+                    let cloned_val = self.ctx.builder.build_call(self.ctx.rt.rt_val_cloned, &[self.local_allocs[*local].into()], "");
                 },
 
                 Op::Store(var, local) => {
-                    let old_val = self.load_local(var);
-                    self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[old_val], "");
+                    self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[self.local_allocs[*var].into()], "");
 
-                    let new_val = self.load_local(local);
-                    let cloned_val = if self.proc.locals[*local].movable {
-                        new_val
-                    } else {
-                        self.ctx.builder.build_call(self.ctx.rt.rt_val_clone, &[new_val], "clone").try_as_basic_value().left().unwrap()
-                    };
-                    self.ctx.builder.build_store(self.local_allocs[*var], cloned_val);
+                    let copy = self.load_local(local);
+                    self.ctx.builder.build_store(self.local_allocs[*var], copy);
+
+                    if self.proc.locals[*local].movable {
+                        self.ctx.builder.build_call(self.ctx.rt.rt_val_cloned, &[self.local_allocs[*var].into()], "");
+                    }
                 },
 
                 Op::Put(id) => {
-                    let val = self.ctx.builder.build_load(self.local_allocs[*id], "put");
-                    self.ctx.builder.build_call(self.ctx.rt.rt_val_print, &mut [val], "put");
+                    self.ctx.builder.build_call(self.ctx.rt.rt_val_print, &[self.local_allocs[*id].into()], "put");
                 },
 
                 Op::Binary(id, op, lhs, rhs) => {
-                    let lhs_ref = self.load_local(lhs);
-                    let rhs_ref = self.load_local(rhs);
+                    let lhs_ref = self.local_allocs[*lhs].into();
+                    let rhs_ref = self.local_allocs[*rhs].into();
                     let op_var = self.ctx.llvm_ctx.i32_type().const_int(*op as u64, false).into();
 
-                    let res_val = self.ctx.builder.build_call(self.ctx.rt.rt_val_binary_op, &[op_var, lhs_ref, rhs_ref], "sum").try_as_basic_value().left().unwrap();
-                    self.ctx.builder.build_store(self.local_allocs[*id], res_val);
+                    self.ctx.builder.build_call(self.ctx.rt.rt_val_binary_op, &[self.local_allocs[*id].into(), op_var, lhs_ref, rhs_ref], "");
                 },
 
                 Op::Call(id, name, args) => {
@@ -157,10 +151,8 @@ impl<'a> ProcEmit<'a> {
             },
 
             Terminator::Switch { discriminant, branches, default } => {
-                let disc_val = self.load_local(discriminant);
-
                 // call runtime to convert value to bool
-                let disc_bool = self.ctx.builder.build_call(self.ctx.rt.rt_val_to_switch_disc, &[disc_val], "disc").try_as_basic_value().left().unwrap();
+                let disc_bool = self.ctx.builder.build_call(self.ctx.rt.rt_val_to_switch_disc, &[self.local_allocs[*discriminant].into()], "disc").try_as_basic_value().left().unwrap();
 
                 let disc_int = *disc_bool.as_int_value();
 
@@ -180,8 +172,7 @@ impl<'a> ProcEmit<'a> {
     fn finalize_block(&self, block: &Block) {
         if block.scope_end {
             for local in self.proc.scopes[block.scope].destruct_locals.iter() {
-                let local_val = self.load_local(local);
-                self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[local_val], "");
+                self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[self.local_allocs[*local].into()], "");
             }
         }
     }
@@ -210,9 +201,25 @@ impl<'a> Emit<'a> {
     }
 
     pub fn emit(&mut self) {
+        let mut main_proc = None;
         for mut proc_emit in self.procs.drain(..).collect::<Vec<_>>() { // TODO no
             proc_emit.emit_proc(self);
+            if proc_emit.name == "entry" {
+                main_proc = Some(proc_emit.func.clone());
+            }
         }
+
+        self.emit_main(main_proc.unwrap());
+    }
+
+    fn emit_main(&mut self, entry_func: inkwell::values::FunctionValue) {
+        let func_type = self.ctx.llvm_ctx.void_type().fn_type(&[], false);
+        let func = self.ctx.module.add_function("main", func_type, None);
+
+        let block = func.append_basic_block("entry");
+        self.ctx.builder.position_at_end(&block);
+        self.ctx.builder.build_call(entry_func, &[], "");
+        self.ctx.builder.build_return(None);
     }
 
     pub fn run(&self, opt: bool) {
@@ -320,10 +327,10 @@ rt_funcs!{
     [
         (rt_val_float, void_type, [val_ptr_type, f32_type]),
         (rt_val_int, void_type, [val_ptr_type, i32_type]),
-        (rt_val_binary_op, val_ptr_type, [i32_type, val_ptr_type, val_ptr_type]),
+        (rt_val_binary_op, void_type, [val_ptr_type, i32_type, val_ptr_type, val_ptr_type]),
         (rt_val_to_switch_disc, i32_type, [val_ptr_type]),
         (rt_val_print, void_type, [val_ptr_type]),
-        (rt_val_clone, val_ptr_type, [val_ptr_type]),
+        (rt_val_cloned, void_type, [val_ptr_type]),
         (rt_val_drop, void_type, [val_ptr_type]),
     ]
 }
