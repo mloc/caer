@@ -8,11 +8,23 @@ scoping issues
             basics done- need better scope analysis to find some cases
 
 current val struct repr leads to very messy optimized code- probably because of the padding i8s?
+    speed-wise it might be fine, but it's hard to debug "by eye". investigate disabling that opt
+        or hack it up and replace it with an i64 :D
     is there a better way to represent the struct? some kind of min-size?
+
+the joy of refactoring (ft. the frontend)
+    currently, statements are entirely built in build_block, in a big loop
+    this makes some assumptions; that the new block will be a child scope of given scope is the
+     most awkward
+    this makes for loops awkward; we want to build statements from another source, in a scope
+    so- refactor statement building out from block building? sure
+
+    at the same time; work on "block builder"?
 
 ----
 
 entry point is currently /proc/entry(), main is a generated entry point that calls entry()
+    helps debugging
 
 values
     soft and hard values

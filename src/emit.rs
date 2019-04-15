@@ -282,7 +282,9 @@ macro_rules! rt_funcs {
     ( $name:ident, [ $( ( $func:ident, $ret:ident, [ $( $arg:ident ),* $(,)* ] ) ),* $(,)* ] ) => {
         #[derive(Debug)]
         struct $name {
-            val_type: inkwell::types::StructType,
+            // TODO: undo this, it's a hack to clean up optimized output
+            //val_type: inkwell::types::StructType,
+            val_type: inkwell::types::IntType,
             val_ptr_type: inkwell::types::PointerType,
             $(
                 $func: inkwell::values::FunctionValue,
@@ -292,12 +294,15 @@ macro_rules! rt_funcs {
         impl $name {
             fn new(ctx: &inkwell::context::Context, module: &inkwell::module::Module) -> $name {
                 let padding_size = size_of::<ludo::val::Val>() - 4; // u32 discrim
-                let val_padding_type = ctx.i8_type().array_type(padding_size as u32);
-                let val_type = ctx.struct_type(&[ctx.i32_type().into(), val_padding_type.into()], true);
+                // TODO: undo this, it's a hack to clean up optimized output
+                //let val_padding_type = ctx.i8_type().array_type(padding_size as u32);
+                //let val_type = ctx.struct_type(&[ctx.i32_type().into(), val_padding_type.into()], true);
+                assert_eq!(padding_size, 4);
+                let val_type = ctx.i64_type();
                 let val_ptr_type = val_type.ptr_type(inkwell::AddressSpace::Generic);
 
                 $name {
-                    val_type: val_type,
+                    val_type: val_type.into(),
                     val_ptr_type: val_ptr_type,
                     $(
                         $func: module.add_function(stringify!($func),
