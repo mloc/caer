@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use dreammaker::ast;
 use indexed_vec::{IndexVec, newtype_index, Idx};
 use std::fs::{self, File};
+use std::io::{Seek, SeekFrom, Write};
 use std::cmp;
 use ludo;
 use dot;
@@ -106,9 +107,10 @@ impl<'a> Proc {
     }
 
     pub fn new_block(&mut self, scope: ScopeId) -> Block {
-        let id = self.next_block_id;
+        let id = BlockId::new(self.next_block_id);
         self.next_block_id += 1;
-        Block::new(BlockId::new(id), scope)
+        self.scopes[scope].blocks.push(id);
+        Block::new(id, scope)
     }
 
     pub fn add_block(&mut self, block: Block) {
@@ -136,6 +138,7 @@ impl<'a> Proc {
 
     pub fn new_scope(&mut self, parent: ScopeId) -> ScopeId {
         let id = ScopeId::new(self.scopes.len());
+        self.scopes[parent].children.push(id);
         let scope = Scope::new(id, Some((parent, self.scopes[parent].depth)));
         self.scopes.push(scope);
         id
@@ -209,6 +212,25 @@ impl<'a> Proc {
         fs::create_dir_all("dbgout/dot/tino_cfg/").unwrap();
         let mut f = File::create(format!("dbgout/dot/tino_cfg/cfg_{}.dot", self.name)).unwrap();
         dot::render(self, &mut f).unwrap();
+
+        f.seek(SeekFrom::End(-2)).unwrap();
+        //write!(f, "newrank=true;\n").unwrap();
+        self.dot_scope_cluster(&mut f, self.global_scope);
+        write!(&mut f, "}}\n").unwrap();
+    }
+
+    fn dot_scope_cluster(&self, f: &mut File, scope_id: ScopeId) {
+        let scope = &self.scopes[scope_id];
+        let locals = scope.locals.iter().map(|l| l.index().to_string()).collect::<Vec<_>>().join(", ");
+        write!(f, "subgraph cluster_scope{} {{\n", scope_id.index()).unwrap();
+        write!(f, "label=\"scope {} [{}]\";\n", scope.id.index(), locals).unwrap();
+        for block_id in scope.blocks.iter() {
+            write!(f, "block{};\n", block_id.index()).unwrap();
+        }
+        for child in scope.children.iter() {
+            self.dot_scope_cluster(f, *child);
+        }
+        write!(f, "graph[style=dotted];}}\n").unwrap();
     }
 }
 
@@ -230,11 +252,18 @@ impl<'a> dot::Labeller<'a, BlockId, (BlockId, BlockId, String)> for Proc {
             Terminator::Switch { discriminant, branches: _, default: _ } => format!("switch {:?}", discriminant),
         };
 
+        let end_str = if block.scope_end {
+            "END SCOPE\\l|"
+        } else {
+            ""
+        };
+
         dot::LabelText::escaped(
-            format!("{{{}\\l|{{{}}}}}", block.ops.iter()
+            format!("{{{}\\l|{}{{{}}}}}", block.ops.iter()
                 .map(|op| format!("{:?}", op).replace("\\", "\\\\"))
                 .collect::<Vec<_>>()
                 .join("\\l"),
+                end_str,
                 term_str))
     }
 
@@ -304,6 +333,7 @@ impl Block {
 pub struct Scope {
     pub id: ScopeId,
     pub parent: Option<ScopeId>,
+    pub children: Vec<ScopeId>,
     pub depth: i32,
     pub locals: Vec<LocalId>,
     pub destruct_locals: HashSet<LocalId>,
@@ -316,6 +346,7 @@ impl Scope {
         Self {
             id: id,
             parent: parent.map(|(id, _)| id),
+            children: Vec::new(),
             depth: parent.map_or(0, |(_, d)| d + 1),
             locals: Vec::new(),
             destruct_locals: HashSet::new(),

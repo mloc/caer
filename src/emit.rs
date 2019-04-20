@@ -75,8 +75,18 @@ impl<'a> ProcEmit<'a> {
     fn assign_literal(&self, lit: &Literal, local: LocalId) {
         match lit {
             Literal::Num(x) => {
-                let val = self.ctx.llvm_ctx.f32_type().const_float(*x as f64).into();
-                self.ctx.builder.build_call(self.ctx.rt.rt_val_float, &[self.local_allocs[local].into(), val], "val");;
+                let lit_val = self.ctx.llvm_ctx.f32_type().const_float(*x as f64);
+                let lit_val = self.ctx.builder.build_bitcast(lit_val, self.ctx.llvm_ctx.i32_type(), "lit");
+
+                let disc_val = self.ctx.llvm_ctx.i32_type().const_int(1, false);
+                let val = self.ctx.builder.build_load(self.local_allocs[local], "val");
+                let val_struct = val.as_struct_value();
+
+                let val_upd = self.ctx.builder.build_insert_value(*val_struct, disc_val, 0, "updval").unwrap();
+                let val_upd = self.ctx.builder.build_insert_value(val_upd, lit_val, 1, "updval").unwrap();
+
+                self.ctx.builder.build_store(self.local_allocs[local], val_upd);
+                //self.ctx.builder.build_call(self.ctx.rt.rt_val_float, &[self.local_allocs[local].into(), val], "val");
             },
             Literal::Null => {}, // should already be null
             _ => unimplemented!("{:?}", lit),
@@ -283,8 +293,8 @@ macro_rules! rt_funcs {
         #[derive(Debug)]
         struct $name {
             // TODO: undo this, it's a hack to clean up optimized output
-            //val_type: inkwell::types::StructType,
-            val_type: inkwell::types::IntType,
+            val_type: inkwell::types::StructType,
+            //val_type: inkwell::types::IntType,
             val_ptr_type: inkwell::types::PointerType,
             $(
                 $func: inkwell::values::FunctionValue,
@@ -295,10 +305,10 @@ macro_rules! rt_funcs {
             fn new(ctx: &inkwell::context::Context, module: &inkwell::module::Module) -> $name {
                 let padding_size = size_of::<ludo::val::Val>() - 4; // u32 discrim
                 // TODO: undo this, it's a hack to clean up optimized output
-                //let val_padding_type = ctx.i8_type().array_type(padding_size as u32);
-                //let val_type = ctx.struct_type(&[ctx.i32_type().into(), val_padding_type.into()], true);
+                let val_padding_type = ctx.i32_type();
+                let val_type = ctx.struct_type(&[ctx.i32_type().into(), val_padding_type.into()], true);
                 assert_eq!(padding_size, 4);
-                let val_type = ctx.i64_type();
+                //let val_type = ctx.i64_type();
                 let val_ptr_type = val_type.ptr_type(inkwell::AddressSpace::Generic);
 
                 $name {

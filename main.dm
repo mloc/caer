@@ -8,6 +8,7 @@
 	world << loopy()
 	world  << simple()
 	world << y + 4
+	forl()
 
 /proc/abc()
 	var/x
@@ -35,3 +36,8 @@
 	else
 		x = 4
 	return x
+
+/proc/forl()
+	for(var/i = 1; i - 4; i = i + 1)
+		for(var/j = 1; j - 4; j = j + 1)
+			world << i + j
