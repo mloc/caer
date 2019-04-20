@@ -137,7 +137,7 @@ impl<'a, 'p> BlockBuilder<'a, 'p> {
     fn build_stmt(&mut self, stmt: &ast::Statement) {
         match stmt {
             ast::Statement::Var(v) => {
-                let local = self.pb.proc.add_local(self.block.scope, Some(&v.name), true);
+                let local = self.pb.proc.add_local(self.block.scope, ludo::ty::Complex::Any, Some(&v.name), true);
                 self.push_op(cfg::Op::MkVar(local));
 
                 if let Some(expr) = &v.value {
@@ -326,7 +326,7 @@ impl<'a, 'p> BlockBuilder<'a, 'p> {
             ast::Expression::BinaryOp { op, lhs, rhs } => {
                 let lhs_expr = self.build_expr(lhs);
                 let rhs_expr = self.build_expr(rhs);
-                let local = self.pb.proc.add_local(self.block.scope, None, false);
+                let local = self.pb.proc.add_local(self.block.scope, ludo::ty::Complex::Any, None, false);
 
                 let l_op = match op {
                     ast::BinaryOp::Add => BinaryOp::Add,
@@ -346,7 +346,7 @@ impl<'a, 'p> BlockBuilder<'a, 'p> {
     }
 
     fn build_literal(&mut self, lit: cfg::Literal) -> cfg::LocalId {
-        let local = self.pb.proc.add_local(self.block.scope, None, false);
+        let local = self.pb.proc.add_local(self.block.scope, lit.get_ty(), None, false);
         self.push_op(cfg::Op::Literal(local, lit));
         local
     }
@@ -357,12 +357,13 @@ impl<'a, 'p> BlockBuilder<'a, 'p> {
             ast::Term::Float(x) => self.build_literal(cfg::Literal::Num(*x)),
             ast::Term::Ident(var_name) => {
                 let var_id = self.pb.proc.lookup_var(self.block.scope, var_name).unwrap();
-                let loaded = self.pb.proc.add_local(self.block.scope, None, false);
+                // TODO var ty fix
+                let loaded = self.pb.proc.add_local(self.block.scope, ludo::ty::Complex::Any, None, false);
                 self.block.ops.push(cfg::Op::Load(loaded, var_id));
                 loaded
             },
             ast::Term::Call(name, args) => {
-                let res = self.pb.proc.add_local(self.block.scope, None, false);
+                let res = self.pb.proc.add_local(self.block.scope, ludo::ty::Complex::Any, None, false);
 
                 let arg_exprs: Vec<_> = args.iter().map(|expr| self.build_expr(expr)).collect();
 

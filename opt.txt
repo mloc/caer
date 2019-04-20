@@ -21,6 +21,12 @@ the joy of refactoring (ft. the frontend)
 
     at the same time; work on "block builder"?
 
+    kinda done- not ideal, but a lot better. scope creation is still a bit meh but we have better
+     viz now
+
+typing
+    ho boy
+
 ----
 
 entry point is currently /proc/entry(), main is a generated entry point that calls entry()

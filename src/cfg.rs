@@ -14,6 +14,7 @@ newtype_index!(ScopeId {pub idx});
 #[derive(Debug)]
 pub struct Local {
     pub id: LocalId,
+    pub ty: ludo::ty::Complex,
     pub movable: bool,
     pub var:  bool,
     pub name: Option<String>,
@@ -76,15 +77,16 @@ impl<'a> Proc {
             next_block_id: 0,
         };
 
-        new.add_local(new.global_scope, None, true); // return
+        new.add_local(new.global_scope, ludo::ty::Complex::Any, None, true); // return
         new
     }
 
-    pub fn add_local(&mut self, scope: ScopeId, name: Option<&str>, var: bool) -> LocalId {
+    pub fn add_local(&mut self, scope: ScopeId, ty: ludo::ty::Complex, name: Option<&str>, var: bool) -> LocalId {
         let id = LocalId::new(self.locals.len());
 
         let local = Local {
             id: id,
+            ty: ty,
             movable: false,
             var: var,
             name: Some(name.map_or_else(|| {format!("local_{}", id.index())}, |s| {format!("var_{}", s.to_string())})),
@@ -375,6 +377,16 @@ pub enum Literal {
     Num(f32),
     String(String),
     List,
+}
+
+impl Literal {
+    pub fn get_ty(&self) -> ludo::ty::Complex {
+        match self {
+            Literal::Null => ludo::ty::Primitive::Null.into(),
+            Literal::Num(_) => ludo::ty::Primitive::Float.into(),
+            _ => unimplemented!(),
+        }
+    }
 }
 
 #[derive(Debug)]

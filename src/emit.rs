@@ -4,6 +4,7 @@ use crate::cfg::*;
 use std::fs;
 use std::borrow::Borrow;
 use ludo;
+use ludo::ty::Ty;
 use std::mem::size_of;
 
 #[derive(Debug)]
@@ -181,8 +182,11 @@ impl<'a> ProcEmit<'a> {
 
     fn finalize_block(&self, block: &Block) {
         if block.scope_end {
-            for local in self.proc.scopes[block.scope].destruct_locals.iter() {
-                self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[self.local_allocs[*local].into()], "");
+            for local_id in self.proc.scopes[block.scope].destruct_locals.iter() {
+                let local = &self.proc.locals[*local_id];
+                if local.ty.needs_destructor() {
+                    self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[self.local_allocs[*local_id].into()], "");
+                }
             }
         }
     }
