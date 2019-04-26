@@ -7,6 +7,23 @@ use ludo;
 use ludo::ty::Ty;
 use std::mem::size_of;
 
+struct Value {
+    val: Option<inkwell::values::BasicValueEnum>,
+    ty: ludo::ty::Complex,
+}
+
+impl Value {
+    fn new(val: Option<inkwell::values::BasicValueEnum>, ty: ludo::ty::Complex) -> Self {
+        if val == None && ty == ludo::ty::Primitive::Null.into() {
+            panic!("values with non-null ty must have a val")
+        }
+        Self {
+            val: val,
+            ty: ty,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct ProcEmit<'a> {
     ctx: &'a Context,
@@ -43,8 +60,15 @@ impl<'a> ProcEmit<'a> {
                 Some(ref s) => s,
                 None => "",
             };
-            let alloc = self.ctx.builder.build_alloca(self.ctx.rt.val_type, name);
-            self.ctx.builder.build_store(alloc, null_val);
+
+            let alloc = if local.ty.is_primitive(ludo::ty::Primitive::Float) {
+                self.ctx.builder.build_alloca(self.ctx.llvm_ctx.f32_type(), name)
+            } else {
+                let alloc = self.ctx.builder.build_alloca(self.ctx.rt.val_type, name);
+                self.ctx.builder.build_store(alloc, null_val);
+                alloc
+            };
+
             self.local_allocs.push(alloc);
         }
 
@@ -73,29 +97,92 @@ impl<'a> ProcEmit<'a> {
         self.finalize_entry_block(&entry_block);
     }
 
-    fn assign_literal(&self, lit: &Literal, local: LocalId) {
-        match lit {
+    fn assign_literal(&self, lit: &Literal, local_id: LocalId) {
+        let val = match lit {
             Literal::Num(x) => {
-                let lit_val = self.ctx.llvm_ctx.f32_type().const_float(*x as f64);
-                let lit_val = self.ctx.builder.build_bitcast(lit_val, self.ctx.llvm_ctx.i32_type(), "lit");
-
-                let disc_val = self.ctx.llvm_ctx.i32_type().const_int(1, false);
-                let val = self.ctx.builder.build_load(self.local_allocs[local], "val");
-                let val_struct = val.as_struct_value();
-
-                let val_upd = self.ctx.builder.build_insert_value(*val_struct, disc_val, 0, "updval").unwrap();
-                let val_upd = self.ctx.builder.build_insert_value(val_upd, lit_val, 1, "updval").unwrap();
-
-                self.ctx.builder.build_store(self.local_allocs[local], val_upd);
-                //self.ctx.builder.build_call(self.ctx.rt.rt_val_float, &[self.local_allocs[local].into(), val], "val");
+                let lit_val = self.ctx.llvm_ctx.f32_type().const_float(*x as f64).into();
+                Value::new(Some(lit_val), ludo::ty::Primitive::Float.into())
             },
-            Literal::Null => {}, // should already be null
+            Literal::Null => {
+                Value::new(None, ludo::ty::Primitive::Null.into())
+            },
             _ => unimplemented!("{:?}", lit),
-        }
+        };
+
+        self.store_local(local_id, &val);
     }
 
-    fn load_local<L: Borrow<LocalId>>(&self, local: L) -> inkwell::values::BasicValueEnum {
-        self.ctx.builder.build_load(self.local_allocs[*local.borrow()], "").into()
+    fn load_local<L: Borrow<LocalId>>(&self, local: L) -> Value {
+        let ty = self.proc.locals[*local.borrow()].ty.clone();
+        let val = self.ctx.builder.build_load(self.local_allocs[*local.borrow()], "").into();
+
+        Value::new(val, ty)
+    }
+
+    fn store_local<L: Borrow<LocalId>>(&self, local_id: L, val: &Value) {
+        let local_id = *local_id.borrow();
+        let local_ty = &self.proc.locals[local_id].ty;
+        let local_ptr = self.local_allocs[local_id];
+        self.store_val(val, local_ty, local_ptr);
+    }
+
+    fn convert_to_any(&self, local_id: LocalId) -> inkwell::values::PointerValue {
+        let local = &self.proc.locals[local_id];
+
+        if local.ty == ludo::ty::Complex::Any {
+            return self.local_allocs[local_id];
+        }
+
+        let val = self.load_local(local_id);
+        let temp_alloca = self.ctx.builder.build_alloca(self.ctx.rt.val_type, "temp");
+        self.store_val(&val, &ludo::ty::Complex::Any, temp_alloca);
+        temp_alloca
+    }
+
+    fn store_val(&self, val: &Value, ty: &ludo::ty::Complex, ptr: inkwell::values::PointerValue) {
+        // TODO revisit this as types expand, some assumptions are shaky
+        // the panics here indicate an error in type unification, not a user error
+        if *ty == val.ty {
+            if let Some(ll_val) = val.val {
+                self.ctx.builder.build_store(ptr, ll_val);
+            }
+        } else if val.ty == ludo::ty::Complex::Any {
+            panic!("attempted to store Any val in non-Any local")
+        } else if let Some(val_prim) = val.ty.as_primitive() {
+            if let Some(local_prim) = ty.as_primitive() {
+                // autocast?
+                // useless check, just for code clarity
+                if val_prim != local_prim {
+                    panic!("primitive val (ty {:?}) does not match primitive local (ty {:?})", val.ty, ty);
+                }
+            }
+            if ty.contains(val_prim) {
+                let local_val = self.ctx.builder.build_load(ptr, "val");
+                let local_struct = *local_val.as_struct_value();
+
+                let local_upd = match val_prim {
+                    ludo::ty::Primitive::Null => {
+                        let null_disc = self.ctx.llvm_ctx.i32_type().const_int(0, false);
+                        let upd = self.ctx.builder.build_insert_value(local_struct, null_disc, 0, "upd_disc").unwrap();
+                        upd
+                    },
+                    ludo::ty::Primitive::Float => {
+                        let float_disc = self.ctx.llvm_ctx.i32_type().const_int(1, false);
+                        let val_as_int = self.ctx.builder.build_bitcast(val.val.unwrap(), self.ctx.llvm_ctx.i32_type(), "pack_val");
+                        let upd = self.ctx.builder.build_insert_value(local_struct, float_disc, 0, "upd_disc").unwrap();
+                        let upd = self.ctx.builder.build_insert_value(upd, val_as_int, 1, "upd_val").unwrap();
+                        upd
+                    },
+                    _ => unimplemented!(),
+                };
+
+                self.ctx.builder.build_store(ptr, local_upd);
+            } else {
+                panic!("primitive val (ty {:?}) does not fit in local (ty {:?})", val.ty, ty);
+            }
+        } else {
+            unimplemented!("unimplemented store case: {:?} -> {:?}", val.ty, ty);
+        }
     }
 
     fn emit_block(&self, block: &Block, emit: &Emit) {
@@ -111,28 +198,32 @@ impl<'a> ProcEmit<'a> {
 
                 Op::Load(local, var) => {
                     let copy = self.load_local(var);
-                    self.ctx.builder.build_store(self.local_allocs[*local], copy);
-                    let cloned_val = self.ctx.builder.build_call(self.ctx.rt.rt_val_cloned, &[self.local_allocs[*local].into()], "");
+                    self.store_local(local, &copy);
+                    if copy.ty.needs_destructor() {
+                        self.ctx.builder.build_call(self.ctx.rt.rt_val_cloned, &[self.local_allocs[*local].into()], "");
+                    }
                 },
 
                 Op::Store(var, local) => {
                     self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[self.local_allocs[*var].into()], "");
 
                     let copy = self.load_local(local);
-                    self.ctx.builder.build_store(self.local_allocs[*var], copy);
+                    self.store_local(var, &copy);
 
-                    if self.proc.locals[*local].movable {
+                    if copy.ty.needs_destructor() && self.proc.locals[*local].movable {
                         self.ctx.builder.build_call(self.ctx.rt.rt_val_cloned, &[self.local_allocs[*var].into()], "");
                     }
                 },
 
                 Op::Put(id) => {
-                    self.ctx.builder.build_call(self.ctx.rt.rt_val_print, &[self.local_allocs[*id].into()], "put");
+                    let norm = self.convert_to_any(*id);
+
+                    self.ctx.builder.build_call(self.ctx.rt.rt_val_print, &[norm.into()], "put");
                 },
 
                 Op::Binary(id, op, lhs, rhs) => {
-                    let lhs_ref = self.local_allocs[*lhs].into();
-                    let rhs_ref = self.local_allocs[*rhs].into();
+                    let lhs_ref = self.convert_to_any(*lhs).into();
+                    let rhs_ref = self.convert_to_any(*rhs).into();
                     let op_var = self.ctx.llvm_ctx.i32_type().const_int(*op as u64, false).into();
 
                     self.ctx.builder.build_call(self.ctx.rt.rt_val_binary_op, &[self.local_allocs[*id].into(), op_var, lhs_ref, rhs_ref], "");
@@ -142,7 +233,8 @@ impl<'a> ProcEmit<'a> {
                     assert!(args.len() == 0);
                     let func = emit.sym[name];
                     let res_val = self.ctx.builder.build_call(func, &[], name).try_as_basic_value().left().unwrap();
-                    self.ctx.builder.build_store(self.local_allocs[*id], res_val);
+                    let val = Value::new(Some(res_val), ludo::ty::Complex::Any);
+                    self.store_local(id, &val);
                 },
 
                 //_ => unimplemented!("{:?}", op),
@@ -162,10 +254,23 @@ impl<'a> ProcEmit<'a> {
             },
 
             Terminator::Switch { discriminant, branches, default } => {
-                // call runtime to convert value to bool
-                let disc_bool = self.ctx.builder.build_call(self.ctx.rt.rt_val_to_switch_disc, &[self.local_allocs[*discriminant].into()], "disc").try_as_basic_value().left().unwrap();
+                let disc_local = &self.proc.locals[*discriminant];
 
-                let disc_int = *disc_bool.as_int_value();
+                let disc_int = if let Some(prim_ty) = disc_local.ty.as_primitive() {
+                    match prim_ty {
+                        ludo::ty::Primitive::Null => {
+                            self.ctx.llvm_ctx.i32_type().const_int(0, false)
+                        },
+                        ludo::ty::Primitive::Float => {
+                            let disc_val = self.ctx.builder.build_load(self.local_allocs[*discriminant], "disc_float");
+                            *self.ctx.builder.build_cast(inkwell::values::InstructionOpcode::FPToSI, disc_val, self.ctx.llvm_ctx.i32_type(), "disc").as_int_value()
+                        },
+                        _ => unimplemented!("{:?}", prim_ty),
+                    }
+                } else {
+                    let disc_val = self.ctx.builder.build_call(self.ctx.rt.rt_val_to_switch_disc, &[self.local_allocs[*discriminant].into()], "disc").try_as_basic_value().left().unwrap();
+                    *disc_val.as_int_value()
+                };
 
                 self.finalize_block(block);
 

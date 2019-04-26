@@ -1,4 +1,5 @@
 /proc/entry()
+	world << simple()
 	var/xx = abc() + 8 + abc()
 	world << xx
 	var/x = 7
@@ -6,7 +7,6 @@
 	world << y
 	y = x + x + 4 + y
 	world << loopy()
-	world  << simple()
 	world << y + 4
 	forl()
 
