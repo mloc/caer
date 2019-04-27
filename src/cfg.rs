@@ -5,6 +5,7 @@ use std::fs::{self, File};
 use std::io::{Seek, SeekFrom, Write};
 use std::cmp;
 use ludo;
+use crate::ty;
 use dot;
 
 newtype_index!(LocalId {pub idx});
@@ -14,7 +15,7 @@ newtype_index!(ScopeId {pub idx});
 #[derive(Debug)]
 pub struct Local {
     pub id: LocalId,
-    pub ty: ludo::ty::Complex,
+    pub ty: ty::Complex,
     pub movable: bool,
     pub var:  bool,
     pub name: Option<String>,
@@ -77,11 +78,11 @@ impl<'a> Proc {
             next_block_id: 0,
         };
 
-        new.add_local(new.global_scope, ludo::ty::Complex::Any, None, true); // return
+        new.add_local(new.global_scope, ty::Complex::Any, None, true); // return
         new
     }
 
-    pub fn add_local(&mut self, scope: ScopeId, ty: ludo::ty::Complex, name: Option<&str>, var: bool) -> LocalId {
+    pub fn add_local(&mut self, scope: ScopeId, ty: ty::Complex, name: Option<&str>, var: bool) -> LocalId {
         let id = LocalId::new(self.locals.len());
 
         let local = Local {
@@ -380,10 +381,10 @@ pub enum Literal {
 }
 
 impl Literal {
-    pub fn get_ty(&self) -> ludo::ty::Complex {
+    pub fn get_ty(&self) -> ty::Complex {
         match self {
-            Literal::Null => ludo::ty::Primitive::Null.into(),
-            Literal::Num(_) => ludo::ty::Primitive::Float.into(),
+            Literal::Null => ty::Primitive::Null.into(),
+            Literal::Num(_) => ty::Primitive::Float.into(),
             _ => unimplemented!(),
         }
     }

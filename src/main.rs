@@ -1,6 +1,7 @@
 mod cfg;
 mod emit;
 mod frontend;
+mod ty;
 
 fn main() {
     inkwell::targets::Target::initialize_native(&inkwell::targets::InitializationConfig::default()).unwrap();

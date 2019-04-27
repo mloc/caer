@@ -3,18 +3,17 @@ use std::collections::HashMap;
 use crate::cfg::*;
 use std::fs;
 use std::borrow::Borrow;
-use ludo;
-use ludo::ty::Ty;
+use crate::ty::{self, Ty};
 use std::mem::size_of;
 
 struct Value {
     val: Option<inkwell::values::BasicValueEnum>,
-    ty: ludo::ty::Complex,
+    ty: ty::Complex,
 }
 
 impl Value {
-    fn new(val: Option<inkwell::values::BasicValueEnum>, ty: ludo::ty::Complex) -> Self {
-        if val == None && ty == ludo::ty::Primitive::Null.into() {
+    fn new(val: Option<inkwell::values::BasicValueEnum>, ty: ty::Complex) -> Self {
+        if val == None && ty == ty::Primitive::Null.into() {
             panic!("values with non-null ty must have a val")
         }
         Self {
@@ -61,7 +60,7 @@ impl<'a> ProcEmit<'a> {
                 None => "",
             };
 
-            let alloc = if local.ty.is_primitive(ludo::ty::Primitive::Float) {
+            let alloc = if local.ty.is_primitive(ty::Primitive::Float) {
                 self.ctx.builder.build_alloca(self.ctx.llvm_ctx.f32_type(), name)
             } else {
                 let alloc = self.ctx.builder.build_alloca(self.ctx.rt.val_type, name);
@@ -101,10 +100,10 @@ impl<'a> ProcEmit<'a> {
         let val = match lit {
             Literal::Num(x) => {
                 let lit_val = self.ctx.llvm_ctx.f32_type().const_float(*x as f64).into();
-                Value::new(Some(lit_val), ludo::ty::Primitive::Float.into())
+                Value::new(Some(lit_val), ty::Primitive::Float.into())
             },
             Literal::Null => {
-                Value::new(None, ludo::ty::Primitive::Null.into())
+                Value::new(None, ty::Primitive::Null.into())
             },
             _ => unimplemented!("{:?}", lit),
         };
@@ -129,24 +128,24 @@ impl<'a> ProcEmit<'a> {
     fn convert_to_any(&self, local_id: LocalId) -> inkwell::values::PointerValue {
         let local = &self.proc.locals[local_id];
 
-        if local.ty == ludo::ty::Complex::Any {
+        if local.ty == ty::Complex::Any {
             return self.local_allocs[local_id];
         }
 
         let val = self.load_local(local_id);
         let temp_alloca = self.ctx.builder.build_alloca(self.ctx.rt.val_type, "temp");
-        self.store_val(&val, &ludo::ty::Complex::Any, temp_alloca);
+        self.store_val(&val, &ty::Complex::Any, temp_alloca);
         temp_alloca
     }
 
-    fn store_val(&self, val: &Value, ty: &ludo::ty::Complex, ptr: inkwell::values::PointerValue) {
+    fn store_val(&self, val: &Value, ty: &ty::Complex, ptr: inkwell::values::PointerValue) {
         // TODO revisit this as types expand, some assumptions are shaky
         // the panics here indicate an error in type unification, not a user error
         if *ty == val.ty {
             if let Some(ll_val) = val.val {
                 self.ctx.builder.build_store(ptr, ll_val);
             }
-        } else if val.ty == ludo::ty::Complex::Any {
+        } else if val.ty == ty::Complex::Any {
             panic!("attempted to store Any val in non-Any local")
         } else if let Some(val_prim) = val.ty.as_primitive() {
             if let Some(local_prim) = ty.as_primitive() {
@@ -161,12 +160,12 @@ impl<'a> ProcEmit<'a> {
                 let local_struct = *local_val.as_struct_value();
 
                 let local_upd = match val_prim {
-                    ludo::ty::Primitive::Null => {
+                    ty::Primitive::Null => {
                         let null_disc = self.ctx.llvm_ctx.i32_type().const_int(0, false);
                         let upd = self.ctx.builder.build_insert_value(local_struct, null_disc, 0, "upd_disc").unwrap();
                         upd
                     },
-                    ludo::ty::Primitive::Float => {
+                    ty::Primitive::Float => {
                         let float_disc = self.ctx.llvm_ctx.i32_type().const_int(1, false);
                         let val_as_int = self.ctx.builder.build_bitcast(val.val.unwrap(), self.ctx.llvm_ctx.i32_type(), "pack_val");
                         let upd = self.ctx.builder.build_insert_value(local_struct, float_disc, 0, "upd_disc").unwrap();
@@ -233,7 +232,7 @@ impl<'a> ProcEmit<'a> {
                     assert!(args.len() == 0);
                     let func = emit.sym[name];
                     let res_val = self.ctx.builder.build_call(func, &[], name).try_as_basic_value().left().unwrap();
-                    let val = Value::new(Some(res_val), ludo::ty::Complex::Any);
+                    let val = Value::new(Some(res_val), ty::Complex::Any);
                     self.store_local(id, &val);
                 },
 
@@ -258,10 +257,10 @@ impl<'a> ProcEmit<'a> {
 
                 let disc_int = if let Some(prim_ty) = disc_local.ty.as_primitive() {
                     match prim_ty {
-                        ludo::ty::Primitive::Null => {
+                        ty::Primitive::Null => {
                             self.ctx.llvm_ctx.i32_type().const_int(0, false)
                         },
-                        ludo::ty::Primitive::Float => {
+                        ty::Primitive::Float => {
                             let disc_val = self.ctx.builder.build_load(self.local_allocs[*discriminant], "disc_float");
                             *self.ctx.builder.build_cast(inkwell::values::InstructionOpcode::FPToSI, disc_val, self.ctx.llvm_ctx.i32_type(), "disc").as_int_value()
                         },
