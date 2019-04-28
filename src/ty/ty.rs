@@ -1,3 +1,7 @@
+use indexed_vec::{newtype_index, Idx};
+
+newtype_index!(TyId {pub idx});
+
 pub trait Ty {
     fn needs_destructor(&self) -> bool;
     fn as_primitive(&self) -> Option<Primitive>;
