@@ -19,6 +19,7 @@ pub enum Primitive {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Complex {
     Any,
+    List(Box<Complex>),
     Primitive(Primitive),
     OneOf(Vec<Complex>),
     Proc { args: Vec<Complex>, var_args: Option<Box<Complex>>, ret: Box<Complex> },
@@ -59,6 +60,7 @@ impl Ty for Complex {
             Complex::Primitive(p) => p.needs_destructor(),
             Complex::OneOf(tys) => tys.iter().any(|ty| ty.needs_destructor()),
             Complex::Proc { .. } => false,
+            _ => unimplemented!("{:?}", self),
         }
     }
 

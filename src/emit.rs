@@ -191,7 +191,7 @@ impl<'a> ProcEmit<'a> {
                     self.assign_literal(literal, *id);
                 },
 
-                Op::MkVar(var) => {
+                Op::MkVar(_) => {
                     // nothing now - can we remove this?
                 }
 
@@ -349,11 +349,9 @@ impl<'a> Emit<'a> {
         if opt {
             let pm_builder = inkwell::passes::PassManagerBuilder::create();
             pm_builder.set_optimization_level(inkwell::OptimizationLevel::Aggressive);
-            let pm = inkwell::passes::PassManager::create_for_module();
-            pm.initialize();
-            pm_builder.populate_function_pass_manager(&pm);
-            pm.run_on_module(&self.ctx.module);
-            pm.finalize();
+            let pm = inkwell::passes::PassManager::create(());
+            pm_builder.populate_module_pass_manager(&pm);
+            pm.run_on(&self.ctx.module);
 
             //self.ctx.module.print_to_stderr();
             self.dump_module("opt");

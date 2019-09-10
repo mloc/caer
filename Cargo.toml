@@ -18,5 +18,5 @@ default-features = false
 path = "../indexed_vec"
 
 [dependencies.inkwell]
-branch = "llvm7-0"
+branch = "llvm8-0"
 git = "https://github.com/TheDan64/inkwell"

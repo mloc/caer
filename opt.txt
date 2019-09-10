@@ -73,6 +73,7 @@ runtime errors
 
 concurrency
     llvm coroutines? haven't looked into this enough
+    no- libaco
 
 future optimizations:
     hard values + stack soft values
