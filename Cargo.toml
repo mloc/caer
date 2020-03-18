@@ -1,0 +1,14 @@
+[package]
+name = "ludo"
+version = "0.1.0"
+authors = ["Colm Ó hIcí <colmohici@gmail.com>"]
+edition = "2018"
+
+[lib]
+name = "ludo"
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+
+[dependencies.cstub_bindgen_macro]
+path = "../cstub_bindgen_macro"
