@@ -12,6 +12,9 @@ current val struct repr leads to very messy optimized code- probably because of 
         or hack it up and replace it with an i64 :D
     is there a better way to represent the struct? some kind of min-size?
 
+    since then, the val struct has grown (oh no), it's 128b now. ech.
+        things are messier, but we're on a [i32,i32,i32,i32] struct which seems to work ok. revisit
+
 the joy of refactoring (ft. the frontend)
     currently, statements are entirely built in build_block, in a big loop
     this makes some assumptions; that the new block will be a child scope of given scope is the
@@ -26,6 +29,7 @@ the joy of refactoring (ft. the frontend)
 
 typing
     ho boy
+    see below, see ty.txt
 
 ----
 
@@ -100,6 +104,9 @@ future optimizations:
             affects call()() usage - that'll probably always use soft unless we keep md around
             maybe not useful, we probably still want to use hard procs from soft context
             alternatively act as a check for all values being hard?
+
+typing & resolution
+    too big, new file, ty.txt
 
 ----
 

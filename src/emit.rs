@@ -6,13 +6,13 @@ use std::borrow::Borrow;
 use crate::ty::{self, Ty};
 use std::mem::size_of;
 
-struct Value {
-    val: Option<inkwell::values::BasicValueEnum>,
+struct Value<'a> {
+    val: Option<inkwell::values::BasicValueEnum<'a>>,
     ty: ty::Complex,
 }
 
-impl Value {
-    fn new(val: Option<inkwell::values::BasicValueEnum>, ty: ty::Complex) -> Self {
+impl<'a> Value<'a> {
+    fn new(val: Option<inkwell::values::BasicValueEnum<'a>>, ty: ty::Complex) -> Self {
         if val == None && ty == ty::Primitive::Null.into() {
             panic!("values with non-null ty must have a val")
         }
@@ -24,17 +24,17 @@ impl Value {
 }
 
 #[derive(Debug)]
-struct ProcEmit<'a> {
-    ctx: &'a Context,
-    local_allocs: IndexVec<LocalId, inkwell::values::PointerValue>,
-    blocks: IndexVec<BlockId, inkwell::basic_block::BasicBlock>,
-    func: inkwell::values::FunctionValue,
+struct ProcEmit<'a, 'ctx> {
+    ctx: &'a Context<'a, 'ctx>,
+    local_allocs: IndexVec<LocalId, inkwell::values::PointerValue<'ctx>>,
+    blocks: IndexVec<BlockId, inkwell::basic_block::BasicBlock<'ctx>>,
+    func: inkwell::values::FunctionValue<'ctx>,
     proc: &'a Proc,
     name: String,
 }
 
-impl<'a> ProcEmit<'a> {
-    fn new(ctx: &'a Context, proc: &'a Proc, name: &str) -> Self {
+impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
+    fn new(ctx: &'a Context<'a, 'ctx>, proc: &'a Proc, name: &str) -> Self {
         let func_type = ctx.rt.val_type.fn_type(&[], false);
         let func = ctx.module.add_function(name, func_type, None);
 
@@ -48,9 +48,9 @@ impl<'a> ProcEmit<'a> {
         }
     }
 
-    fn emit_entry_block(&mut self) -> inkwell::basic_block::BasicBlock {
-        let block = self.func.append_basic_block("entry");
-        self.ctx.builder.position_at_end(&block);
+    fn emit_entry_block(&mut self) -> inkwell::basic_block::BasicBlock<'a> {
+        let block = self.ctx.llvm_ctx.append_basic_block(self.func, "entry");
+        self.ctx.builder.position_at_end(block);
 
         let null_val = self.ctx.rt.val_type.const_zero();
 
@@ -74,26 +74,26 @@ impl<'a> ProcEmit<'a> {
         block
     }
 
-    fn finalize_entry_block(&self, entry: &inkwell::basic_block::BasicBlock) {
-        self.ctx.builder.position_at_end(&entry);
-        self.ctx.builder.build_unconditional_branch(&self.blocks[BlockId::new(0)]);
+    fn finalize_entry_block(&self, entry: inkwell::basic_block::BasicBlock) {
+        self.ctx.builder.position_at_end(entry);
+        self.ctx.builder.build_unconditional_branch(self.blocks[BlockId::new(0)]);
     }
 
     fn emit_proc(&mut self, emit: &Emit) {
-        let entry_block = self.emit_entry_block();
+        let entry_bb = self.emit_entry_block();
 
         for cfg_block in self.proc.blocks.iter() {
-            let block = self.func.append_basic_block(&format!("s{}b{}", cfg_block.scope.index(), cfg_block.id.index()));
+            let block = self.ctx.llvm_ctx.append_basic_block(self.func, &format!("s{}b{}", cfg_block.scope.index(), cfg_block.id.index()));
             self.blocks.push(block);
         }
 
         for (id, block) in self.proc.blocks.iter().enumerate() { // TODO port iter_enumerated
-            let ll_block = &self.blocks[BlockId::new(id)];
+            let ll_block = self.blocks[BlockId::new(id)];
             self.ctx.builder.position_at_end(ll_block);
             self.emit_block(block, emit);
         }
 
-        self.finalize_entry_block(&entry_block);
+        self.finalize_entry_block(entry_bb);
     }
 
     fn assign_literal(&self, lit: &Literal, local_id: LocalId) {
@@ -101,6 +101,11 @@ impl<'a> ProcEmit<'a> {
             Literal::Num(x) => {
                 let lit_val = self.ctx.llvm_ctx.f32_type().const_float(*x as f64).into();
                 Value::new(Some(lit_val), ty::Primitive::Float.into())
+            },
+            Literal::String(s) => {
+                //let lit_val = self.ctx.llvm_ctx.i64_type();
+                //let const_str = self.ctx.llvm_ctx.const_string(s.as_bytes(), false);
+                unimplemented!("string");
             },
             Literal::Null => {
                 Value::new(None, ty::Primitive::Null.into())
@@ -157,7 +162,7 @@ impl<'a> ProcEmit<'a> {
             }
             if ty.contains(val_prim) {
                 let local_val = self.ctx.builder.build_load(ptr, "val");
-                let local_struct = *local_val.as_struct_value();
+                let local_struct = local_val.into_struct_value();
 
                 let local_upd = match val_prim {
                     ty::Primitive::Null => {
@@ -169,7 +174,9 @@ impl<'a> ProcEmit<'a> {
                         let float_disc = self.ctx.llvm_ctx.i32_type().const_int(1, false);
                         let val_as_int = self.ctx.builder.build_bitcast(val.val.unwrap(), self.ctx.llvm_ctx.i32_type(), "pack_val");
                         let upd = self.ctx.builder.build_insert_value(local_struct, float_disc, 0, "upd_disc").unwrap();
-                        let upd = self.ctx.builder.build_insert_value(upd, val_as_int, 1, "upd_val").unwrap();
+                        // TODO: revisit this 2. it's here because of padding in the val struct -
+                        // use offset_of?
+                        let upd = self.ctx.builder.build_insert_value(upd, val_as_int, 2, "upd_val").unwrap();
                         upd
                     },
                     _ => unimplemented!(),
@@ -249,7 +256,7 @@ impl<'a> ProcEmit<'a> {
 
             Terminator::Jump(id) => {
                 self.finalize_block(block);
-                self.ctx.builder.build_unconditional_branch(&self.blocks[*id]);
+                self.ctx.builder.build_unconditional_branch(self.blocks[*id]);
             },
 
             Terminator::Switch { discriminant, branches, default } => {
@@ -262,13 +269,13 @@ impl<'a> ProcEmit<'a> {
                         },
                         ty::Primitive::Float => {
                             let disc_val = self.ctx.builder.build_load(self.local_allocs[*discriminant], "disc_float");
-                            *self.ctx.builder.build_cast(inkwell::values::InstructionOpcode::FPToSI, disc_val, self.ctx.llvm_ctx.i32_type(), "disc").as_int_value()
+                            self.ctx.builder.build_cast(inkwell::values::InstructionOpcode::FPToSI, disc_val, self.ctx.llvm_ctx.i32_type(), "disc").into_int_value()
                         },
                         _ => unimplemented!("{:?}", prim_ty),
                     }
                 } else {
                     let disc_val = self.ctx.builder.build_call(self.ctx.rt.rt_val_to_switch_disc, &[self.local_allocs[*discriminant].into()], "disc").try_as_basic_value().left().unwrap();
-                    *disc_val.as_int_value()
+                    disc_val.into_int_value()
                 };
 
                 self.finalize_block(block);
@@ -276,10 +283,10 @@ impl<'a> ProcEmit<'a> {
                 // convert branches to use llvm blocks
                 let llvm_branches = branches.iter().map(|(lit, target)| {
                     let val = self.ctx.llvm_ctx.i32_type().const_int((*lit).into(), false);
-                    (val, &self.blocks[*target])
+                    (val, self.blocks[*target])
                 }).collect::<Vec<_>>();
 
-                self.ctx.builder.build_switch(disc_int, &self.blocks[*default], &llvm_branches[..]);
+                self.ctx.builder.build_switch(disc_int, self.blocks[*default], &llvm_branches[..]);
             },
         }
     }
@@ -297,14 +304,14 @@ impl<'a> ProcEmit<'a> {
 }
 
 #[derive(Debug)]
-pub struct Emit<'a> {
-    ctx: &'a Context,
-    procs: Vec<ProcEmit<'a>>,
-    sym: HashMap<String, inkwell::values::FunctionValue>
+pub struct Emit<'a, 'ctx> {
+    ctx: &'a Context<'a, 'ctx>,
+    procs: Vec<ProcEmit<'a, 'ctx>>,
+    sym: HashMap<String, inkwell::values::FunctionValue<'ctx>>
 }
 
-impl<'a> Emit<'a> {
-    pub fn new(ctx: &'a Context) -> Self {
+impl<'a, 'ctx> Emit<'a, 'ctx> {
+    pub fn new(ctx: &'a Context<'a, 'ctx>) -> Self {
         Self {
             ctx: ctx,
             procs: Vec::new(),
@@ -334,8 +341,8 @@ impl<'a> Emit<'a> {
         let func_type = self.ctx.llvm_ctx.void_type().fn_type(&[], false);
         let func = self.ctx.module.add_function("main", func_type, None);
 
-        let block = func.append_basic_block("entry");
-        self.ctx.builder.position_at_end(&block);
+        let block = self.ctx.llvm_ctx.append_basic_block(func, "entry");
+        self.ctx.builder.position_at_end(block);
         self.ctx.builder.build_call(entry_func, &[], "");
         self.ctx.builder.build_return(None);
     }
@@ -372,59 +379,59 @@ impl<'a> Emit<'a> {
 }
 
 #[derive(Debug)]
-pub struct Context {
-    llvm_ctx: inkwell::context::Context,
-    builder: inkwell::builder::Builder,
-    module: inkwell::module::Module,
-    rt: RtFuncs,
+pub struct Context<'a, 'ctx> {
+    llvm_ctx: &'ctx inkwell::context::Context,
+    builder: &'a inkwell::builder::Builder<'ctx>,
+    module: &'a inkwell::module::Module<'ctx>,
+    rt: RtFuncs<'ctx>,
 }
 
-impl Context {
-    pub fn new() -> Self {
-        let llvm_ctx = inkwell::context::Context::create();
-        let module = llvm_ctx.create_module("main");
-        let rt = RtFuncs::new(&llvm_ctx, &module);
+impl<'a, 'ctx> Context<'a, 'ctx> {
+    pub fn new(llctx: &'ctx inkwell::context::Context, llmod: &'a inkwell::module::Module<'ctx>, llbuild: &'a inkwell::builder::Builder<'ctx>) -> Self {
+        let rt = RtFuncs::new(llctx, llmod);
 
         Self {
-            builder: llvm_ctx.create_builder(),
-            module: module,
-            llvm_ctx: llvm_ctx,
+            builder: llbuild,
+            module: llmod,
+            llvm_ctx: llctx,
             rt: rt,
         }
     }
 }
 
 macro_rules! rt_funcs {
-    ( $name:ident, [ $( ( $func:ident, $ret:ident, [ $( $arg:ident ),* $(,)* ] ) ),* $(,)* ] ) => {
+    ( $name:ident, [ $( ( $func:ident, $ret:ident ~ $retspec:ident, [ $( $arg:ident ~ $argspec:ident ),* $(,)* ] ) ),* $(,)* ] ) => {
         #[derive(Debug)]
-        struct $name {
+        struct $name <'a> {
             // TODO: undo this, it's a hack to clean up optimized output
-            val_type: inkwell::types::StructType,
+            val_type: inkwell::types::StructType<'a>,
             //val_type: inkwell::types::IntType,
-            val_ptr_type: inkwell::types::PointerType,
+            val_ptr_type: inkwell::types::PointerType<'a>,
             $(
-                $func: inkwell::values::FunctionValue,
+                $func: inkwell::values::FunctionValue<'a>,
             )*
         }
 
-        impl $name {
-            fn new(ctx: &inkwell::context::Context, module: &inkwell::module::Module) -> $name {
+        impl<'a> $name <'a> {
+            fn new(ctx: &'a inkwell::context::Context, module: &inkwell::module::Module<'a>) -> $name<'a> {
                 let padding_size = size_of::<ludo::val::Val>() - 4; // u32 discrim
                 // TODO: undo this, it's a hack to clean up optimized output
                 let val_padding_type = ctx.i32_type();
-                let val_type = ctx.struct_type(&[ctx.i32_type().into(), val_padding_type.into()], true);
-                assert_eq!(padding_size, 4);
+                let val_type = ctx.struct_type(&[ctx.i32_type().into(), val_padding_type.into(), val_padding_type.into(), val_padding_type.into()], true);
+                // safety net for me.
+                assert_eq!(padding_size, 12);
                 //let val_type = ctx.i64_type();
                 let val_ptr_type = val_type.ptr_type(inkwell::AddressSpace::Generic);
+                let val_type = val_type.into();
 
                 $name {
-                    val_type: val_type.into(),
+                    val_type: val_type,
                     val_ptr_type: val_ptr_type,
                     $(
                         $func: module.add_function(stringify!($func),
-                            rt_funcs!(@genty ctx val_ptr_type $ret).fn_type(&[
+                            rt_funcs!(@genty ctx val_type val_ptr_type $retspec $ret).fn_type(&[
                                 $(
-                                    rt_funcs!(@genty ctx val_ptr_type $arg).into(),
+                                    rt_funcs!(@genty ctx val_type val_ptr_type $argspec $arg).into(),
                                 )*
                             ], false),
                         None),
@@ -434,24 +441,35 @@ macro_rules! rt_funcs {
         }
     };
 
-    ( @genty $ctx:ident $ptt:ident val_ptr_type) => (
-        $ptt
+    ( @genty $ctx:ident $vt:ident $vtp:ident val val_type) => (
+        $vt
     );
 
-    ( @genty $ctx:ident $ptt:ident $ret:ident) => (
+    ( @genty $ctx:ident $vt:ident $vtp:ident ptr val_type) => (
+        $vtp
+    );
+
+    ( @genty $ctx:ident $vt:ident $vtp:ident val $ret:ident) => (
         $ctx.$ret()
+    );
+
+    ( @genty $ctx:ident $vt:ident $vtp:ident ptr $ret:ident) => (
+        $ctx.$ret().ptr_type(inkwell::AddressSpace::Generic)
     );
 }
 
 rt_funcs!{
     RtFuncs,
     [
-        (rt_val_float, void_type, [val_ptr_type, f32_type]),
-        (rt_val_int, void_type, [val_ptr_type, i32_type]),
-        (rt_val_binary_op, void_type, [val_ptr_type, i32_type, val_ptr_type, val_ptr_type]),
-        (rt_val_to_switch_disc, i32_type, [val_ptr_type]),
-        (rt_val_print, void_type, [val_ptr_type]),
-        (rt_val_cloned, void_type, [val_ptr_type]),
-        (rt_val_drop, void_type, [val_ptr_type]),
+        (rt_val_float, void_type~val, [val_type~ptr, f32_type~val]),
+        (rt_val_string, void_type~val, [val_type~ptr, i64_type~val]),
+        //(rt_val_int, void_type, [val_ptr_type, i32_type]),
+        (rt_val_binary_op, void_type~val, [val_type~ptr, i32_type~val, val_type~ptr, val_type~ptr]),
+        (rt_val_to_switch_disc, i32_type~val, [val_type~ptr]),
+        (rt_val_print, void_type~val, [val_type~ptr]),
+        (rt_val_cloned, void_type~val, [val_type~ptr]),
+        (rt_val_drop, void_type~val, [val_type~ptr]),
+
+        (rt_string_from_utf8, void_type~val, [i64_type~ptr, i8_type~ptr, i32_type~val]),
     ]
 }

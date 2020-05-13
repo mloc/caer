@@ -12,6 +12,7 @@ pub trait Ty {
 pub enum Primitive {
     Null,
     Float,
+    String,
     Int,
     Ref,
 }

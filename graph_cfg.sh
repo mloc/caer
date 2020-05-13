@@ -6,7 +6,7 @@ mkdir -p dbgout/dot/llvm_unopt
 mkdir -p dbgout/dot/llvm_opt
 
 cd dbgout/dot/llvm_unopt
-llvm-as-7 < ../../llvm/unopt.ll | opt-7 -analyze -dot-cfg
+llvm-as-8 < ../../llvm/unopt.ll | opt-8 -analyze -dot-cfg
 cd ../llvm_opt
-llvm-as-7 < ../../llvm/opt.ll | opt-7 -analyze -dot-cfg
+llvm-as-8 < ../../llvm/opt.ll | opt-8 -analyze -dot-cfg
 cd ..

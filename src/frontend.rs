@@ -356,6 +356,7 @@ impl<'a, 'p> BlockBuilder<'a, 'p> {
         match term {
             ast::Term::Int(x) => self.build_literal(cfg::Literal::Num(*x as f32)),
             ast::Term::Float(x) => self.build_literal(cfg::Literal::Num(*x)),
+            ast::Term::String(s) => self.build_literal(cfg::Literal::String(s.clone())),
             ast::Term::Ident(var_name) => {
                 let var_id = self.pb.proc.lookup_var(self.block.scope, var_name).unwrap();
                 // TODO var ty fix
