@@ -385,6 +385,7 @@ impl Literal {
         match self {
             Literal::Null => ty::Primitive::Null.into(),
             Literal::Num(_) => ty::Primitive::Float.into(),
+            Literal::String(_) => ty::Primitive::String.into(),
             _ => unimplemented!(),
         }
     }

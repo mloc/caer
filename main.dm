@@ -1,5 +1,8 @@
 /proc/entry()
-	world << simple()
+    var/s = "hey"
+    world << s + " there"
+    //world << 1 + 1
+	/*world << simple()
 	var/xx = abc() + 8 + abc()
 	world << xx
 	var/x = 7
@@ -40,4 +43,4 @@
 /proc/forl()
 	for(var/i = 1; i - 4; i = i + 1)
 		for(var/j = 1; j - 4; j = j + 1)
-			world << i + j
+			world << i + j*/

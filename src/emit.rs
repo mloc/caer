@@ -4,6 +4,7 @@ use crate::cfg::*;
 use std::fs;
 use std::borrow::Borrow;
 use crate::ty::{self, Ty};
+use std::convert::TryInto;
 use std::mem::size_of;
 
 struct Value<'a> {
@@ -26,6 +27,7 @@ impl<'a> Value<'a> {
 #[derive(Debug)]
 struct ProcEmit<'a, 'ctx> {
     ctx: &'a Context<'a, 'ctx>,
+    emit: &'a Emit<'a, 'ctx>,
     local_allocs: IndexVec<LocalId, inkwell::values::PointerValue<'ctx>>,
     blocks: IndexVec<BlockId, inkwell::basic_block::BasicBlock<'ctx>>,
     func: inkwell::values::FunctionValue<'ctx>,
@@ -34,12 +36,10 @@ struct ProcEmit<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
-    fn new(ctx: &'a Context<'a, 'ctx>, proc: &'a Proc, name: &str) -> Self {
-        let func_type = ctx.rt.val_type.fn_type(&[], false);
-        let func = ctx.module.add_function(name, func_type, None);
-
+    fn new(ctx: &'a Context<'a, 'ctx>, emit: &'a Emit<'a, 'ctx>, proc: &'a Proc, func: inkwell::values::FunctionValue<'ctx>, name: &str) -> Self {
         Self {
             ctx: ctx,
+            emit: emit,
             local_allocs: IndexVec::new(),
             blocks: IndexVec::new(),
             func: func,
@@ -52,7 +52,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         let block = self.ctx.llvm_ctx.append_basic_block(self.func, "entry");
         self.ctx.builder.position_at_end(block);
 
-        let null_val = self.ctx.rt.val_type.const_zero();
+        let null_val = self.ctx.rt.ty.val_type.const_zero();
 
         for local in self.proc.locals.iter() {
             let name = match local.name {
@@ -63,7 +63,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
             let alloc = if local.ty.is_primitive(ty::Primitive::Float) {
                 self.ctx.builder.build_alloca(self.ctx.llvm_ctx.f32_type(), name)
             } else {
-                let alloc = self.ctx.builder.build_alloca(self.ctx.rt.val_type, name);
+                let alloc = self.ctx.builder.build_alloca(self.ctx.rt.ty.val_type, name);
                 self.ctx.builder.build_store(alloc, null_val);
                 alloc
             };
@@ -103,9 +103,15 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 Value::new(Some(lit_val), ty::Primitive::Float.into())
             },
             Literal::String(s) => {
-                //let lit_val = self.ctx.llvm_ctx.i64_type();
-                //let const_str = self.ctx.llvm_ctx.const_string(s.as_bytes(), false);
-                unimplemented!("string");
+                let const_str = self.ctx.llvm_ctx.const_string(s.as_bytes(), false);
+                let tmp_local = self.ctx.builder.build_alloca(const_str.get_type(), "tmp_str");
+                self.ctx.builder.build_store(tmp_local, const_str);
+                let len_val = self.ctx.llvm_ctx.i32_type().const_int(s.len().try_into().unwrap(), false);
+
+                let rt_local = self.ctx.builder.build_load(self.emit.rt_global, "local_runtime");
+                let lit_val = self.ctx.builder.build_call(self.ctx.rt.rt_string_from_utf8, &[rt_local, tmp_local.into(), len_val.into()], "dmstr_id").try_as_basic_value().left().unwrap().into();
+
+                Value::new(Some(lit_val), ty::Primitive::String.into())
             },
             Literal::Null => {
                 Value::new(None, ty::Primitive::Null.into())
@@ -138,7 +144,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         }
 
         let val = self.load_local(local_id);
-        let temp_alloca = self.ctx.builder.build_alloca(self.ctx.rt.val_type, "temp");
+        let temp_alloca = self.ctx.builder.build_alloca(self.ctx.rt.ty.val_type, "temp");
         self.store_val(&val, &ty::Complex::Any, temp_alloca);
         temp_alloca
     }
@@ -172,11 +178,22 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     },
                     ty::Primitive::Float => {
                         let float_disc = self.ctx.llvm_ctx.i32_type().const_int(1, false);
-                        let val_as_int = self.ctx.builder.build_bitcast(val.val.unwrap(), self.ctx.llvm_ctx.i32_type(), "pack_val");
+                        // TODO fix this, this is mega bad, won't work on big endian systems
+                        let val_as_i32 = self.ctx.builder.build_bitcast(val.val.unwrap(), self.ctx.llvm_ctx.i32_type(), "pack_val");
+                        let val_as_i64: inkwell::values::IntValue = self.ctx.builder.build_int_z_extend(val_as_i32.into_int_value(), self.ctx.llvm_ctx.i64_type(), "pack_val");
                         let upd = self.ctx.builder.build_insert_value(local_struct, float_disc, 0, "upd_disc").unwrap();
                         // TODO: revisit this 2. it's here because of padding in the val struct -
                         // use offset_of?
+                        let upd = self.ctx.builder.build_insert_value(upd, val_as_i64, 2, "upd_val").unwrap();
+                        upd
+                    },
+                    ty::Primitive::String => {
+                        let string_disc = self.ctx.llvm_ctx.i32_type().const_int(2, false);
+                        let val_as_int = self.ctx.builder.build_bitcast(val.val.unwrap(), self.ctx.llvm_ctx.i64_type(), "pack_val");
+
+                        let upd = self.ctx.builder.build_insert_value(local_struct, string_disc, 0, "upd_disc").unwrap();
                         let upd = self.ctx.builder.build_insert_value(upd, val_as_int, 2, "upd_val").unwrap();
+
                         upd
                     },
                     _ => unimplemented!(),
@@ -224,7 +241,8 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 Op::Put(id) => {
                     let norm = self.convert_to_any(*id);
 
-                    self.ctx.builder.build_call(self.ctx.rt.rt_val_print, &[norm.into()], "put");
+                    let rt_local = self.ctx.builder.build_load(self.emit.rt_global, "local_runtime");
+                    self.ctx.builder.build_call(self.ctx.rt.rt_val_print, &[norm.into(), rt_local], "put");
                 },
 
                 Op::Binary(id, op, lhs, rhs) => {
@@ -232,7 +250,8 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     let rhs_ref = self.convert_to_any(*rhs).into();
                     let op_var = self.ctx.llvm_ctx.i32_type().const_int(*op as u64, false).into();
 
-                    self.ctx.builder.build_call(self.ctx.rt.rt_val_binary_op, &[self.local_allocs[*id].into(), op_var, lhs_ref, rhs_ref], "");
+                    let rt_local = self.ctx.builder.build_load(self.emit.rt_global, "local_runtime");
+                    self.ctx.builder.build_call(self.ctx.rt.rt_val_binary_op, &[self.local_allocs[*id].into(), rt_local, op_var, lhs_ref, rhs_ref], "");
                 },
 
                 Op::Call(id, name, args) => {
@@ -306,42 +325,61 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 #[derive(Debug)]
 pub struct Emit<'a, 'ctx> {
     ctx: &'a Context<'a, 'ctx>,
-    procs: Vec<ProcEmit<'a, 'ctx>>,
-    sym: HashMap<String, inkwell::values::FunctionValue<'ctx>>
+    procs: Vec<(&'a Proc, &'a str, inkwell::values::FunctionValue<'ctx>)>,
+    rt_global: inkwell::values::PointerValue<'ctx>,
+    sym: HashMap<String, inkwell::values::FunctionValue<'ctx>>,
 }
 
 impl<'a, 'ctx> Emit<'a, 'ctx> {
     pub fn new(ctx: &'a Context<'a, 'ctx>) -> Self {
+        let oppty = ctx.rt.ty.opaque_type.ptr_type(inkwell::AddressSpace::Generic);
+        let rt_global = ctx.module.add_global(oppty, Some(inkwell::AddressSpace::Generic), "runtime");
+        rt_global.set_initializer(&oppty.const_null());
         Self {
             ctx: ctx,
+            rt_global: rt_global.as_pointer_value(),
             procs: Vec::new(),
             sym: HashMap::new(),
         }
     }
 
-    pub fn add_proc(&mut self, name: &str, proc: &'a Proc) {
-        let mut proc_emit = ProcEmit::new(self.ctx, proc, name);
-        self.sym.insert(name.to_string(), proc_emit.func.clone());
-        self.procs.push(proc_emit);
+    pub fn add_proc(&mut self, name: &'a str, proc: &'a Proc) {
+        //let mut proc_emit = ProcEmit::new(self.ctx, proc, name);
+        let func_type = self.ctx.rt.ty.val_type.fn_type(&[], false);
+        let func = self.ctx.module.add_function(name, func_type, None);
+
+        self.sym.insert(name.to_string(), func);
+        self.procs.push((proc, name, func));
     }
 
     pub fn emit(&mut self) {
+        let main_block = self.emit_main();
+
         let mut main_proc = None;
-        for mut proc_emit in self.procs.drain(..).collect::<Vec<_>>() { // TODO no
+        for (proc, name, func) in self.procs.drain(..).collect::<Vec<_>>() { // TODO no
+            let mut proc_emit = ProcEmit::new(self.ctx, self, proc, func, name);
             proc_emit.emit_proc(self);
             if proc_emit.name == "entry" {
                 main_proc = Some(proc_emit.func.clone());
             }
         }
 
-        self.emit_main(main_proc.unwrap());
+        self.finalize_main(main_block, main_proc.unwrap());
     }
 
-    fn emit_main(&mut self, entry_func: inkwell::values::FunctionValue) {
+    fn emit_main(&mut self) -> inkwell::basic_block::BasicBlock<'ctx> {
         let func_type = self.ctx.llvm_ctx.void_type().fn_type(&[], false);
         let func = self.ctx.module.add_function("main", func_type, None);
 
         let block = self.ctx.llvm_ctx.append_basic_block(func, "entry");
+        self.ctx.builder.position_at_end(block);
+        let rt_ptr = self.ctx.builder.build_call(self.ctx.rt.rt_runtime_new, &[], "runtime").try_as_basic_value().left().unwrap().into_pointer_value();
+        self.ctx.builder.build_store(self.rt_global, rt_ptr);
+
+        block
+    }
+
+    fn finalize_main(&self, block: inkwell::basic_block::BasicBlock, entry_func: inkwell::values::FunctionValue) {
         self.ctx.builder.position_at_end(block);
         self.ctx.builder.build_call(entry_func, &[], "");
         self.ctx.builder.build_return(None);
@@ -399,62 +437,77 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
     }
 }
 
+#[derive(Debug)]
+struct RtFuncTyBundle<'ctx> {
+    // TODO: undo this, it's a hack to clean up optimized output
+    val_type: inkwell::types::StructType<'ctx>,
+    //val_type: inkwell::types::IntType<'ctx>,
+    opaque_type: inkwell::types::StructType<'ctx>,
+}
+
 macro_rules! rt_funcs {
     ( $name:ident, [ $( ( $func:ident, $ret:ident ~ $retspec:ident, [ $( $arg:ident ~ $argspec:ident ),* $(,)* ] ) ),* $(,)* ] ) => {
         #[derive(Debug)]
-        struct $name <'a> {
-            // TODO: undo this, it's a hack to clean up optimized output
-            val_type: inkwell::types::StructType<'a>,
-            //val_type: inkwell::types::IntType,
-            val_ptr_type: inkwell::types::PointerType<'a>,
+        struct $name <'ctx> {
+            ty: RtFuncTyBundle<'ctx>,
             $(
-                $func: inkwell::values::FunctionValue<'a>,
+                $func: inkwell::values::FunctionValue<'ctx>,
             )*
         }
 
-        impl<'a> $name <'a> {
-            fn new(ctx: &'a inkwell::context::Context, module: &inkwell::module::Module<'a>) -> $name<'a> {
+        impl<'ctx> $name <'ctx> {
+            fn new(ctx: &'ctx inkwell::context::Context, module: &inkwell::module::Module<'ctx>) -> $name<'ctx> {
                 let padding_size = size_of::<ludo::val::Val>() - 4; // u32 discrim
                 // TODO: undo this, it's a hack to clean up optimized output
                 let val_padding_type = ctx.i32_type();
-                let val_type = ctx.struct_type(&[ctx.i32_type().into(), val_padding_type.into(), val_padding_type.into(), val_padding_type.into()], true);
+                let val_type = ctx.struct_type(&[ctx.i32_type().into(), val_padding_type.into(), ctx.i64_type().into()], true);
                 // safety net for me.
                 assert_eq!(padding_size, 12);
                 //let val_type = ctx.i64_type();
                 let val_ptr_type = val_type.ptr_type(inkwell::AddressSpace::Generic);
                 let val_type = val_type.into();
 
-                $name {
+                let opaque_type = ctx.opaque_struct_type("opaque");
+
+                let tyb = RtFuncTyBundle {
                     val_type: val_type,
-                    val_ptr_type: val_ptr_type,
+                    opaque_type: opaque_type,
+                };
+
+                $name {
                     $(
                         $func: module.add_function(stringify!($func),
-                            rt_funcs!(@genty ctx val_type val_ptr_type $retspec $ret).fn_type(&[
+                            rt_funcs!(@genty ctx $retspec tyb $ret $ret).fn_type(&[
                                 $(
-                                    rt_funcs!(@genty ctx val_type val_ptr_type $argspec $arg).into(),
+                                    rt_funcs!(@genty ctx $argspec tyb $arg $arg).into(),
                                 )*
                             ], false),
                         None),
                     )*
+                    ty: tyb,
                 }
             }
         }
     };
 
-    ( @genty $ctx:ident $vt:ident $vtp:ident val val_type) => (
-        $vt
+    ( @genty $ctx:ident $spec:ident $tyb:ident val_type $ty:ident) => (
+        rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
     );
 
-    ( @genty $ctx:ident $vt:ident $vtp:ident ptr val_type) => (
-        $vtp
+    ( @genty $ctx:ident $spec:ident $tyb:ident opaque_type $ty:ident) => (
+        rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
     );
 
-    ( @genty $ctx:ident $vt:ident $vtp:ident val $ret:ident) => (
-        $ctx.$ret()
+    ( @genty $ctx:ident $spec:ident $tyb:ident $tym:ident $ty:ident) => (
+        rt_funcs!(@genty @ptrify $spec , $ctx.$ty())
     );
 
-    ( @genty $ctx:ident $vt:ident $vtp:ident ptr $ret:ident) => (
-        $ctx.$ret().ptr_type(inkwell::AddressSpace::Generic)
+    ( @genty @ptrify val , $e:expr) => (
+        $e
+    );
+
+    ( @genty @ptrify ptr , $e:expr) => (
+        $e.ptr_type(inkwell::AddressSpace::Generic)
     );
 }
 
@@ -464,12 +517,14 @@ rt_funcs!{
         (rt_val_float, void_type~val, [val_type~ptr, f32_type~val]),
         (rt_val_string, void_type~val, [val_type~ptr, i64_type~val]),
         //(rt_val_int, void_type, [val_ptr_type, i32_type]),
-        (rt_val_binary_op, void_type~val, [val_type~ptr, i32_type~val, val_type~ptr, val_type~ptr]),
+        (rt_val_binary_op, void_type~val, [val_type~ptr, opaque_type~ptr, i32_type~val, val_type~ptr, val_type~ptr]),
         (rt_val_to_switch_disc, i32_type~val, [val_type~ptr]),
-        (rt_val_print, void_type~val, [val_type~ptr]),
+        (rt_val_print, void_type~val, [val_type~ptr, opaque_type~ptr]),
         (rt_val_cloned, void_type~val, [val_type~ptr]),
         (rt_val_drop, void_type~val, [val_type~ptr]),
 
-        (rt_string_from_utf8, void_type~val, [i64_type~ptr, i8_type~ptr, i32_type~val]),
+        (rt_string_from_utf8, i64_type~val, [opaque_type~ptr, i8_type~ptr, i32_type~val]),
+
+        (rt_runtime_new, opaque_type~ptr, []),
     ]
 }
