@@ -60,12 +60,20 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 None => "",
             };
 
-            let alloc = if local.ty.is_primitive(ty::Primitive::Float) {
-                self.ctx.builder.build_alloca(self.ctx.llvm_ctx.f32_type(), name)
-            } else {
-                let alloc = self.ctx.builder.build_alloca(self.ctx.rt.ty.val_type, name);
-                self.ctx.builder.build_store(alloc, null_val);
-                alloc
+            let alloc = match local.ty {
+                ty::Complex::Primitive(prim) => {
+                    match prim {
+                        ty::Primitive::Float => self.ctx.builder.build_alloca(self.ctx.llvm_ctx.f32_type(), name),
+                        ty::Primitive::String => self.ctx.builder.build_alloca(self.ctx.llvm_ctx.i64_type(), name),
+                        _ => unimplemented!("unhandled prim: {:?}", prim),
+                    }
+                },
+                ty::Complex::Any => {
+                    let alloc = self.ctx.builder.build_alloca(self.ctx.rt.ty.val_type, name);
+                    self.ctx.builder.build_store(alloc, null_val);
+                    alloc
+                },
+                _ => unimplemented!("unhandled ty: {:?}", local.ty),
             };
 
             self.local_allocs.push(alloc);
@@ -103,13 +111,18 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 Value::new(Some(lit_val), ty::Primitive::Float.into())
             },
             Literal::String(s) => {
+                // TODO make this all better, when inkwell supports GEP directly on const_string
+                // this GEPpery is bad.
                 let const_str = self.ctx.llvm_ctx.const_string(s.as_bytes(), false);
-                let tmp_local = self.ctx.builder.build_alloca(const_str.get_type(), "tmp_str");
+                let tmp_local = self.ctx.builder.build_alloca(const_str.get_type(), "tmp_str");//.const_cast(self.ctx.llvm_ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic));
                 self.ctx.builder.build_store(tmp_local, const_str);
+
+                let cz = self.ctx.llvm_ctx.i32_type().const_int(0, false);
+                let tmp_local_ptr = unsafe { self.ctx.builder.build_gep(tmp_local, &[cz, cz], "") };
                 let len_val = self.ctx.llvm_ctx.i32_type().const_int(s.len().try_into().unwrap(), false);
 
                 let rt_local = self.ctx.builder.build_load(self.emit.rt_global, "local_runtime");
-                let lit_val = self.ctx.builder.build_call(self.ctx.rt.rt_string_from_utf8, &[rt_local, tmp_local.into(), len_val.into()], "dmstr_id").try_as_basic_value().left().unwrap().into();
+                let lit_val = self.ctx.builder.build_call(self.ctx.rt.rt_string_from_utf8, &[rt_local, tmp_local_ptr.into(), len_val.into()], "dmstr_id").try_as_basic_value().left().unwrap().into();
 
                 Value::new(Some(lit_val), ty::Primitive::String.into())
             },
@@ -261,6 +274,16 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     let val = Value::new(Some(res_val), ty::Complex::Any);
                     self.store_local(id, &val);
                 },
+
+                Op::Cast(dst, src, ty) => {
+                    if *ty != ty::Primitive::String {
+                        unimplemented!("can only cast to string, not {:?}", ty);
+                    }
+
+                    let src_ref = self.convert_to_any(*src).into();
+                    let rt_local = self.ctx.builder.build_load(self.emit.rt_global, "local_runtime");
+                    self.ctx.builder.build_call(self.ctx.rt.rt_val_cast_string_val, &[self.local_allocs[*dst].into(), src_ref, rt_local], "");
+                }
 
                 //_ => unimplemented!("{:?}", op),
             }
@@ -522,6 +545,7 @@ rt_funcs!{
         (rt_val_print, void_type~val, [val_type~ptr, opaque_type~ptr]),
         (rt_val_cloned, void_type~val, [val_type~ptr]),
         (rt_val_drop, void_type~val, [val_type~ptr]),
+        (rt_val_cast_string_val, void_type~val, [val_type~ptr, val_type~ptr, opaque_type~ptr]),
 
         (rt_string_from_utf8, i64_type~val, [opaque_type~ptr, i8_type~ptr, i32_type~val]),
 

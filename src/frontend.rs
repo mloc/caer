@@ -373,6 +373,34 @@ impl<'a, 'p> BlockBuilder<'a, 'p> {
 
                 res
             },
+            ast::Term::InterpString(ls, es_pairs) => {
+                // TODO fix postfix formatting: text("hello []", 2) => "hello 2"
+                // TODO more efficient buliding, repeated concat bad
+                let mut built = self.build_literal(cfg::Literal::String(ls.clone()));
+
+                for (o_expr, sep) in es_pairs.iter() {
+                    let expr = o_expr.as_ref().expect("postfix formatting not supported currently");
+                    let expr_l = self.build_expr(expr);
+                    // TODO this is a string, but we treat it as an Any for now
+                    let expr_cast_l = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
+                    self.block.ops.push(cfg::Op::Cast(expr_cast_l, expr_l, ty::Primitive::String));
+
+                    // TODO this is a string, but we treat it as an Any for now
+                    let new_built = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
+                    self.block.ops.push(cfg::Op::Binary(new_built, BinaryOp::Add, built, expr_cast_l));
+                    built = new_built;
+
+                    if sep.len() > 0 {
+                        // TODO this is a string, but we treat it as an Any for now
+                        let new_built = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
+                        let lit_l = self.build_literal(cfg::Literal::String(sep.clone()));
+                        self.block.ops.push(cfg::Op::Binary(new_built, BinaryOp::Add, built, lit_l));
+                        built = new_built
+                    }
+                }
+
+                built
+            },
             _ => unimplemented!("{:?}", term),
         }
     }

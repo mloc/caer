@@ -1,6 +1,6 @@
 /proc/entry()
     var/s = "hey"
-    world << s + " there"
+    world << "[s] there[1/90]"
     //world << 1 + 1
 	/*world << simple()
 	var/xx = abc() + 8 + abc()

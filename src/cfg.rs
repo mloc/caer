@@ -177,12 +177,16 @@ impl<'a> Proc {
                     Op::Binary(_, _, lhs, rhs) => {
                         flow[*lhs].reads += 1;
                         flow[*rhs].reads += 1;
-                    }
+                    },
 
                     Op::Call(_, _, args) => {
                         for arg in args.iter() {
                             flow[*arg].reads += 1;
                         }
+                    },
+
+                    Op::Cast(_, src, _) => {
+                        flow[*src].reads += 1;
                     }
                 }
             }
@@ -370,6 +374,8 @@ pub enum Op {
     Put(LocalId),
     Binary(LocalId, ludo::op::BinaryOp, LocalId, LocalId),
     Call(LocalId, String, Vec<LocalId>),
+
+    Cast(LocalId, LocalId, ty::Primitive),
 }
 
 #[derive(Debug)]
