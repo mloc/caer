@@ -402,7 +402,8 @@ pub enum Op {
 pub enum Literal {
     Null,
     Num(f32),
-    String(String),
+    // TODO proper type for indexed strings
+    String(u64),
     List,
 }
 

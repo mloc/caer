@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::borrow::Cow;
 use crate::cfg;
 use dreammaker::{ast, objtree};
 use indexed_vec::Idx;
@@ -7,26 +8,30 @@ use crate::ty;
 
 pub struct Builder<'a> {
     tree: &'a objtree::ObjectTree,
-    environment: cfg::Environment,
+    env: cfg::Environment,
 }
 impl<'a> Builder<'a> {
     pub fn build(tree: &'a objtree::ObjectTree) -> cfg::Environment {
         let mut builder = Self {
             tree: tree,
-            environment: cfg::Environment::new(),
+            env: cfg::Environment::new(),
         };
 
         builder.build_procs();
 
-        builder.environment
+        builder.env
     }
 
     fn build_procs(&mut self) {
-        self.environment.procs = self.tree.root().get().procs.iter().filter(|(name, procs)| {
+        self.env.procs = self.tree.root().get().procs.iter().filter(|(name, procs)| {
             procs.value[0].body.len() != 0 // TODO REMOVE THIS
         }).map(|(name, procs)| {
             (name.clone(), ProcBuilder::build(self, &name, &procs.value[0]))
         }).collect();
+    }
+
+    fn add_string(&mut self, s: impl Into<Cow<'a, str>>) -> u64 {
+        self.env.string_table.put(s)
     }
 }
 
@@ -363,7 +368,11 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
         match term {
             ast::Term::Int(x) => self.build_literal(cfg::Literal::Num(*x as f32)),
             ast::Term::Float(x) => self.build_literal(cfg::Literal::Num(*x)),
-            ast::Term::String(s) => self.build_literal(cfg::Literal::String(s.clone())),
+            ast::Term::String(s) => {
+                // TODO this cloning is bad, too lazy to fix lifetimes
+                let str_id = self.pb.builder.add_string(s.clone());
+                self.build_literal(cfg::Literal::String(str_id))
+            },
             ast::Term::Ident(var_name) => {
                 let var_id = self.pb.proc.lookup_var(self.block.scope, var_name).unwrap();
                 // TODO var ty fix
@@ -382,8 +391,10 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
             },
             ast::Term::InterpString(ls, es_pairs) => {
                 // TODO fix postfix formatting: text("hello []", 2) => "hello 2"
-                // TODO more efficient buliding, repeated concat bad
-                let mut built = self.build_literal(cfg::Literal::String(ls.clone()));
+                // TODO more efficient building, repeated concat bad
+                // TODO this cloning is bad, too lazy to fix lifetimes
+                let lit = cfg::Literal::String(self.pb.builder.add_string(ls.clone()));
+                let mut built = self.build_literal(lit);
 
                 for (o_expr, sep) in es_pairs.iter() {
                     let expr = o_expr.as_ref().expect("postfix formatting not supported currently");
@@ -400,7 +411,9 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                     if sep.len() > 0 {
                         // TODO this is a string, but we treat it as an Any for now
                         let new_built = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
-                        let lit_l = self.build_literal(cfg::Literal::String(sep.clone()));
+                        // TODO this cloning is bad, too lazy to fix lifetimes
+                        let lit = cfg::Literal::String(self.pb.builder.add_string(sep.clone()));
+                        let lit_l = self.build_literal(lit);
                         self.block.ops.push(cfg::Op::Binary(new_built, BinaryOp::Add, built, lit_l));
                         built = new_built
                     }

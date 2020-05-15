@@ -110,7 +110,8 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 let lit_val = self.ctx.llvm_ctx.f32_type().const_float(*x as f64).into();
                 Value::new(Some(lit_val), ty::Primitive::Float.into())
             },
-            Literal::String(s) => {
+            Literal::String(id) => {
+                /*
                 // TODO make this all better, when inkwell supports GEP directly on const_string
                 // this GEPpery is bad.
                 let const_str = self.ctx.llvm_ctx.const_string(s.as_bytes(), false);
@@ -123,6 +124,9 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 
                 let rt_local = self.ctx.builder.build_load(self.emit.rt_global, "local_runtime");
                 let lit_val = self.ctx.builder.build_call(self.ctx.rt.rt_string_from_utf8, &[rt_local, tmp_local_ptr.into(), len_val.into()], "dmstr_id").try_as_basic_value().left().unwrap().into();
+                */
+
+                let lit_val = self.ctx.llvm_ctx.i64_type().const_int(*id, false).into();
 
                 Value::new(Some(lit_val), ty::Primitive::String.into())
             },
@@ -404,7 +408,20 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
 
         let block = self.ctx.llvm_ctx.append_basic_block(func, "entry");
         self.ctx.builder.position_at_end(block);
-        let rt_ptr = self.ctx.builder.build_call(self.ctx.rt.rt_runtime_new, &[], "runtime").try_as_basic_value().left().unwrap().into_pointer_value();
+
+
+        // TODO make this all better, when inkwell supports GEP directly on const_string
+        // this GEPpery is bad.
+        let st_init_ser = self.env.string_table.serialize();
+        let st_init_const = self.ctx.llvm_ctx.const_string(&st_init_ser, false);
+        let tmp_local = self.ctx.builder.build_alloca(st_init_const.get_type(), "tmp_st_init");
+        self.ctx.builder.build_store(tmp_local, st_init_const);
+
+        let cz = self.ctx.llvm_ctx.i32_type().const_int(0, false);
+        let tmp_local_ptr = unsafe { self.ctx.builder.build_gep(tmp_local, &[cz, cz], "") };
+        let len_val = self.ctx.llvm_ctx.i64_type().const_int(st_init_ser.len().try_into().unwrap(), false);
+
+        let rt_ptr = self.ctx.builder.build_call(self.ctx.rt.rt_runtime_init, &[tmp_local_ptr.into(), len_val.into()], "runtime").try_as_basic_value().left().unwrap().into_pointer_value();
         self.ctx.builder.build_store(self.rt_global, rt_ptr);
 
         block
@@ -557,6 +574,6 @@ rt_funcs!{
 
         (rt_string_from_utf8, i64_type~val, [opaque_type~ptr, i8_type~ptr, i32_type~val]),
 
-        (rt_runtime_new, opaque_type~ptr, []),
+        (rt_runtime_init, opaque_type~ptr, [i8_type~ptr, i64_type~val]),
     ]
 }
