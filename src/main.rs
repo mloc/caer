@@ -14,18 +14,15 @@ fn main() {
 
     let tree = parser.parse_object_tree();
 
-    let frontend = frontend::Builder::new(&tree);
-    let procs = frontend.build_procs();
+    let env = frontend::Builder::build(&tree);
 
     let llctx = inkwell::context::Context::create();
     let llmod = llctx.create_module("main");
     let llbuild = llctx.create_builder();
 
     let emit_ctx = emit::Context::new(&llctx, &llmod, &llbuild);
-    let mut builder = emit::Emit::new(&emit_ctx);
-    for (name, proc) in procs.iter() {
-        builder.add_proc(&name, &proc);
-    }
+    let mut builder = emit::Emit::new(&emit_ctx, &env);
+    builder.build_procs();
 
     builder.emit();
     builder.run(true);

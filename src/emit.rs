@@ -348,25 +348,33 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 #[derive(Debug)]
 pub struct Emit<'a, 'ctx> {
     ctx: &'a Context<'a, 'ctx>,
+    env: &'a Environment,
     procs: Vec<(&'a Proc, &'a str, inkwell::values::FunctionValue<'ctx>)>,
     rt_global: inkwell::values::PointerValue<'ctx>,
     sym: HashMap<String, inkwell::values::FunctionValue<'ctx>>,
 }
 
 impl<'a, 'ctx> Emit<'a, 'ctx> {
-    pub fn new(ctx: &'a Context<'a, 'ctx>) -> Self {
+    pub fn new(ctx: &'a Context<'a, 'ctx>, env: &'a Environment) -> Self {
         let oppty = ctx.rt.ty.opaque_type.ptr_type(inkwell::AddressSpace::Generic);
         let rt_global = ctx.module.add_global(oppty, Some(inkwell::AddressSpace::Generic), "runtime");
         rt_global.set_initializer(&oppty.const_null());
         Self {
             ctx: ctx,
+            env: env,
             rt_global: rt_global.as_pointer_value(),
             procs: Vec::new(),
             sym: HashMap::new(),
         }
     }
 
-    pub fn add_proc(&mut self, name: &'a str, proc: &'a Proc) {
+    pub fn build_procs(&mut self) {
+        for (name, proc) in self.env.procs.iter() {
+            self.add_proc(&name, &proc);
+        }
+    }
+
+    fn add_proc(&mut self, name: &'a str, proc: &'a Proc) {
         //let mut proc_emit = ProcEmit::new(self.ctx, proc, name);
         let func_type = self.ctx.rt.ty.val_type.fn_type(&[], false);
         let func = self.ctx.module.add_function(name, func_type, None);

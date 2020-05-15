@@ -7,25 +7,31 @@ use crate::ty;
 
 pub struct Builder<'a> {
     tree: &'a objtree::ObjectTree,
+    environment: cfg::Environment,
 }
-
 impl<'a> Builder<'a> {
-    pub fn new(tree: &'a objtree::ObjectTree) -> Self {
-        Self {
+    pub fn build(tree: &'a objtree::ObjectTree) -> cfg::Environment {
+        let mut builder = Self {
             tree: tree,
-        }
+            environment: cfg::Environment::new(),
+        };
+
+        builder.build_procs();
+
+        builder.environment
     }
 
-    pub fn build_procs(&self) -> HashMap<String, cfg::Proc> {
-        self.tree.root().get().procs.iter().filter(|(name, procs)| {
+    fn build_procs(&mut self) {
+        self.environment.procs = self.tree.root().get().procs.iter().filter(|(name, procs)| {
             procs.value[0].body.len() != 0 // TODO REMOVE THIS
         }).map(|(name, procs)| {
-            (name.clone(), ProcBuilder::build(&name, &procs.value[0]))
-        }).collect()
+            (name.clone(), ProcBuilder::build(self, &name, &procs.value[0]))
+        }).collect();
     }
 }
 
-struct ProcBuilder<'a> {
+struct ProcBuilder<'a, 'b> {
+    builder: &'a mut Builder<'b>,
     ast_proc: &'a objtree::ProcValue,
     vars: HashMap<String, cfg::LocalId>,
     proc: cfg::Proc,
@@ -33,12 +39,13 @@ struct ProcBuilder<'a> {
     finished_blocks: Vec<cfg::Block>,
 }
 
-impl<'a> ProcBuilder<'a> {
-    fn build(name: &str, ast_proc: &'a objtree::ProcValue) -> cfg::Proc {
+impl<'a, 'b> ProcBuilder<'a, 'b> {
+    fn build(builder: &'a mut Builder<'b>, name: &str, ast_proc: &'a objtree::ProcValue) -> cfg::Proc {
         let mut proc = cfg::Proc::new(name.to_string());
         let scope = proc.new_scope(proc.global_scope);
 
-        let mut builder = Self {
+        let mut pb = Self {
+            builder: builder,
             ast_proc: ast_proc,
             vars: HashMap::new(),
             proc: proc,
@@ -46,7 +53,7 @@ impl<'a> ProcBuilder<'a> {
             finished_blocks: Vec::new(),
         };
 
-        builder.build_proc()
+        pb.build_proc()
     }
 
     fn finalize_block(&mut self, block: cfg::Block) {
@@ -92,14 +99,14 @@ impl<'a> ProcBuilder<'a> {
     }
 }
 
-struct BlockBuilder<'a, 'p> {
-    pb: &'a mut ProcBuilder<'p>,
+struct BlockBuilder<'a, 'p, 'b> {
+    pb: &'a mut ProcBuilder<'p, 'b>,
     block: cfg::Block,
     root_block_id: cfg::BlockId,
 }
 
-impl<'a, 'p> BlockBuilder<'a, 'p> {
-    fn new(pb: &'a mut ProcBuilder<'p>, scope: cfg::ScopeId) -> Self {
+impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
+    fn new(pb: &'a mut ProcBuilder<'p, 'b>, scope: cfg::ScopeId) -> Self {
         let mut block = pb.proc.new_block(scope);
 
         Self {
