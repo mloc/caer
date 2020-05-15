@@ -1,5 +1,5 @@
 // don't rearrange either
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 #[repr(u32)]
 pub enum BinaryOp {
     Add,
