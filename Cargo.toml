@@ -9,6 +9,7 @@ name = "ludo"
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
+bincode = "1.2.1"
 
 [dependencies.cstub_bindgen_macro]
 path = "../cstub_bindgen_macro"
