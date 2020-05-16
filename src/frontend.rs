@@ -24,7 +24,13 @@ impl<'a> Builder<'a> {
 
     fn build_procs(&mut self) {
         self.env.procs = self.tree.root().get().procs.iter().filter(|(name, procs)| {
-            procs.value[0].body.len() != 0 // TODO REMOVE THIS
+            match &procs.main_value().code {
+                objtree::Code::Present(_) => true,
+                objtree::Code::Invalid(err) => panic!("oh no dm error {:?}", err),
+                objtree::Code::Builtin => false,
+                objtree::Code::Disabled => panic!("woop woop procs disabled"),
+            }
+            //procs.value[0].body.len() != 0 // TODO REMOVE THIS
         }).map(|(name, procs)| {
             (name.clone(), ProcBuilder::build(self, &name, &procs.value[0]))
         }).collect();
@@ -66,7 +72,12 @@ impl<'a, 'b> ProcBuilder<'a, 'b> {
     }
 
     fn build_proc(mut self) -> cfg::Proc {
-        self.build_block(&self.ast_proc.body, self.proc.global_scope, None);
+        let body = if let objtree::Code::Present(ref b) = self.ast_proc.code {
+            b
+        } else {
+            panic!("not present")
+        };
+        self.build_block(body.as_slice(), self.proc.global_scope, None);
 
         self.finished_blocks.sort_by_key(|b| b.id);
         for block in self.finished_blocks.drain(..) {
@@ -79,14 +90,14 @@ impl<'a, 'b> ProcBuilder<'a, 'b> {
         self.proc
     }
 
-    fn build_block(&mut self, stmts: &[ast::Statement], parent_scope: cfg::ScopeId, next_block: Option<cfg::BlockId>) -> cfg::BlockId {
+    fn build_block(&mut self, stmts: &[ast::Spanned<ast::Statement>], parent_scope: cfg::ScopeId, next_block: Option<cfg::BlockId>) -> cfg::BlockId {
         let scope = self.proc.new_scope(parent_scope);
 
         let mut builder = BlockBuilder::new(self, scope);
 
         for stmt in stmts.iter() {
             println!("{:?}", stmt);
-            builder.build_stmt(stmt);
+            builder.build_stmt(&stmt.elem);
         }
 
         let block_id = builder.root_block_id;
@@ -165,7 +176,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                             ast::Expression::Base { unary, term, follow } => {
                                 assert!(unary.len() == 0);
                                 assert!(follow.len() == 0);
-                                match term {
+                                match term.elem {
                                     ast::Term::Ident(ref s) => s,
                                     _ => unimplemented!(),
                                 }
@@ -203,17 +214,17 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                 }
             },
 
-            ast::Statement::If(branches, else_branch) => {
+            ast::Statement::If { arms, else_arm } => {
                 let if_end = self.pb.proc.new_block(self.block.scope);
 
                 // TODO clean up this scope creation with better builder
-                for (condition, body) in branches.iter() {
+                for (condition, body) in arms.iter() {
                     let cond_scope = self.pb.proc.new_scope(self.block.scope);
                     let mut cond_block = self.pb.proc.new_block(cond_scope);
                     cond_block.scope_end = true;
 
                     let cond_expr = self.on_block(&mut cond_block, |bb| {
-                        bb.build_expr(condition)
+                        bb.build_expr(&condition.elem)
                     });
 
                     let body_block_id = self.pb.build_block(&body[..], self.block.scope, Some(if_end.id));
@@ -232,7 +243,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                 }
 
                 let mut next = if_end.id;
-                if let Some(body) = else_branch {
+                if let Some(body) = else_arm {
                     next = self.pb.build_block(&body[..], self.block.scope, Some(if_end.id));
                 }
 
@@ -243,16 +254,16 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                 self.cur_block_done(if_end);
             },
 
-            ast::Statement::While(cond, body) => {
+            ast::Statement::While { condition, block } => {
                 let cond_scope = self.pb.proc.new_scope(self.block.scope);
                 let mut cond_block = self.pb.proc.new_block(cond_scope);
                 cond_block.scope_end = true;
                 let while_end = self.pb.proc.new_block(self.block.scope);
 
-                let body_block_id = self.pb.build_block(&body[..], self.block.scope, Some(cond_block.id));
+                let body_block_id = self.pb.build_block(&block[..], self.block.scope, Some(cond_block.id));
 
                 let cond_expr = self.on_block(&mut cond_block, |bb| {
-                    bb.build_expr(cond)
+                    bb.build_expr(condition)
                 });
 
                 cond_block.terminator = cfg::Terminator::Switch {
@@ -329,7 +340,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
     fn build_expr(&mut self, expr: &ast::Expression) -> cfg::LocalId {
         match expr {
             ast::Expression::Base { unary, term, follow } => {
-                let expr = self.build_term(term);
+                let expr = self.build_term(&term.elem);
                 assert!(unary.len() == 0);
                 assert!(follow.len() == 0);
 

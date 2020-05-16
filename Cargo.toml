@@ -8,7 +8,8 @@ version = "0.1.0"
 dot = "0.1.4"
 
 [dependencies.dreammaker]
-path = "../SpacemanDMM/src/dreammaker"
+#path = "../SpacemanDMM/src/dreammaker"
+git = "https://github.com/SpaceManiac/SpacemanDMM"
 
 [dependencies.ludo]
 path = "../ludo"
