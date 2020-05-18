@@ -1,4 +1,6 @@
 use cstub_bindgen_macro::expose_c_stubs;
+use serde::{Serialize, Deserialize};
+
 use crate::string_table;
 use crate::runtime::Runtime;
 
@@ -11,10 +13,8 @@ use std::mem;
 // TODO: replace
 
 #[repr(C)]
-#[derive(Debug, PartialEq, PartialOrd, Copy, Clone)]
-pub struct DmString {
-    id: u64
-}
+#[derive(Debug, PartialEq, PartialOrd, Copy, Clone, Serialize, Deserialize)]
+pub struct DmString(u64);
 
 #[expose_c_stubs(rt_string)]
 impl DmString {
@@ -24,7 +24,7 @@ impl DmString {
         let sl = unsafe { std::slice::from_raw_parts(bytes, n as usize) };
         let s = std::str::from_utf8(sl).unwrap().into();
 
-        unsafe { mem::transmute(DmString::new(rt, s)) }
+        DmString::new(rt, s).id()
     }
 
     pub fn concat_into(rt: &mut Runtime, o: &mut DmString, l: &DmString, r: &DmString) {
@@ -36,13 +36,16 @@ impl DmString {
     pub fn new(rt: &mut Runtime, s: String) -> Self {
         let id = rt.string_table.put(s);
 
-        Self {
-            id: id,
-        }
+        Self(id)
+    }
+
+    #[inline(always)]
+    pub fn id(&self) -> u64 {
+        self.0
     }
 
     pub fn get_str<'a>(&self, rt: &'a Runtime) -> &'a str {
-        rt.string_table.get(self.id)
+        rt.string_table.get(self.id())
     }
 
     pub fn concat(rt: &mut Runtime, l: &DmString, r: &DmString) -> DmString {
@@ -50,6 +53,6 @@ impl DmString {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.id == 0
+        self.id() == 0
     }
 }

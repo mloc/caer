@@ -87,6 +87,7 @@ impl Val {
         }
     }
 
+    // this is not Drop and shouldn't be treated as such.
     fn drop(&mut self) {
         if let Val::Ref(_) = self {
             unimplemented!("update refcounts")

@@ -7,7 +7,10 @@ use bincode;
 // 64 bits is maybe too big. for the sake of not overthinking stuff, I've left it as is, but it
 //    bloats *all* values. using 32 bits might require some kind of reallocation.
 // TODO: no GC currently, leaks memory like mad
+// TODO: when we GC, don't GC 'static' compiler-created strings
 // TODO: don't hold backrefs for large strings
+// TODO: optimization for small strings, <=7 bytes can be stuffed in the val, like servo?
+
 //static UPPER_REGION: u64 = 1 << 31;
 //static CUTOFF: usize = 64;
 
