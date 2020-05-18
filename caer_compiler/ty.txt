@@ -1,0 +1,36 @@
+typing!
+
+discussion section
+
+this is hard, I think.
+
+in an ideal world, we could use straight HM, be happy, go home. the presence of hard/soft vals
+ really fucks us up. oh well.
+    also, heterogeneous lists - but I guess that can be represented as a list of softvals
+
+we'll do monomorphization.
+
+other Qs to get out of the way:
+    do we want datums to be one homogeneous type or unique, with all the mess that entails?
+        unique. homogeneous type might be useful as a stepping stone, but it's against the point of
+         having a nice type system and static dispatch
+
+    how far should monomorphization go? if a proc can take a mix of hard and soft values, should we
+     force all to be soft?
+        it'd be nice to monomorph for every possible permutation of params, but that *could* get
+         messy? I'm not sure if this is a pathological case or not. maybe limit this to functions
+         with <N params?
+
+flow typing!
+    very stretch goal, but if done right could unlock a bunch of implicit optimizations and improve
+     dev exp.
+    look at how crystal does this and how it works out for them - in general, there could be a lot
+     to learn from how crystal does typing
+
+---
+
+NOTES AT A LATER DATE
+
+let's not worry about types for now.
+had an idea though; two-pass type inference. pass one will determine which vals need to be soft,
+ through some kind of control flow analysis. pass two is traditional HM, building on that info.

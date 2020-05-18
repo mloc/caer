@@ -1,0 +1,22 @@
+[package]
+authors = ["Richard Diamond <wichard@vitalitystudios.com>"]
+name = "indexed_vec"
+version = "1.0.2"
+license = "MPL-2.0"
+repository = "https://github.com/DiamondLovesYou/indexed_vec"
+description = "`IndexVec` from `librustc_data_structures`"
+
+[dependencies.serde]
+optional = true
+version = "1.0"
+
+[dependencies.serde_derive]
+optional = true
+version = "1.0"
+
+[features]
+default = ["serial"]
+serial = [
+    "serde_derive",
+    "serde",
+]

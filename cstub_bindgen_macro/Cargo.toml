@@ -1,0 +1,18 @@
+[package]
+authors = ["Colm Ó hIcí <colmohici@gmail.com>"]
+name = "cstub_bindgen_macro"
+version = "0.1.0"
+
+[dependencies]
+proc-macro2 = "0.4.24"
+quote = "0.6.10"
+
+[dependencies.syn]
+features = [
+    "full",
+    "extra-traits",
+]
+version = "0.15.21"
+
+[lib]
+proc-macro = true
