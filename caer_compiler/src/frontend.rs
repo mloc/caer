@@ -4,6 +4,7 @@ use crate::cfg;
 use dreammaker::{ast, objtree};
 use indexed_vec::Idx;
 use caer_runtime::op::BinaryOp;
+use caer_runtime::string_table::StringId;
 use crate::ty;
 
 pub struct Builder<'a> {
@@ -36,7 +37,7 @@ impl<'a> Builder<'a> {
         }).collect();
     }
 
-    fn add_string(&mut self, s: impl Into<Cow<'a, str>>) -> u64 {
+    fn add_string(&mut self, s: impl Into<Cow<'a, str>>) -> StringId {
         self.env.string_table.put(s)
     }
 }

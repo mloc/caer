@@ -2,7 +2,7 @@ use cstub_bindgen_macro::expose_c_stubs;
 use std::mem;
 use indexed_vec::Idx;
 
-use crate::string::DmString;
+use crate::string_table::StringId;
 use crate::runtime::Runtime;
 use crate::val::Val;
 use crate::environment::ProcId;
@@ -23,7 +23,7 @@ impl<T> FFIArray<T> {
 #[repr(C)]
 pub struct ArgPack {
     unnamed: FFIArray<Val>,
-    named: FFIArray<(DmString, Val)>,
+    named: FFIArray<(StringId, Val)>,
 }
 
 #[expose_c_stubs(rt_arg_pack)]

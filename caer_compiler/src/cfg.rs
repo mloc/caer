@@ -4,7 +4,7 @@ use indexed_vec::{IndexVec, newtype_index, Idx};
 use std::fs::{self, File};
 use std::io::{Seek, SeekFrom, Write};
 use std::cmp;
-use caer_runtime::string_table::StringTable;
+use caer_runtime::string_table::{StringTable, StringId};
 use caer_runtime;
 use crate::ty;
 use dot;
@@ -397,7 +397,7 @@ pub enum Op {
     Binary(LocalId, caer_runtime::op::BinaryOp, LocalId, LocalId),
     // TODO: STRINGID
     // TODO: use + ref a procid
-    //Call(LocalId, u64, Vec<LocalId>, Vec<(u64, LocalId)>),
+    //Call(LocalId, StringId, Vec<LocalId>, Vec<(StringId, LocalId)>),
     Call(LocalId, String, Vec<LocalId>),
 
     Cast(LocalId, LocalId, ty::Primitive),
@@ -407,8 +407,7 @@ pub enum Op {
 pub enum Literal {
     Null,
     Num(f32),
-    // TODO: STRINGID
-    String(u64),
+    String(StringId),
     List,
 }
 

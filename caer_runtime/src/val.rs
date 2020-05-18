@@ -1,7 +1,7 @@
 use cstub_bindgen_macro::expose_c_stubs;
 use std::mem;
 use crate::op;
-use crate::string::DmString;
+use crate::string_table::StringId;
 use crate::runtime::Runtime;
 use std::ops::*;
 
@@ -12,7 +12,7 @@ pub enum Val {
     Null,
     Float(f32),
     //Int(i32),
-    String(DmString),
+    String(StringId),
     Ref(i32),
 }
 
@@ -22,7 +22,7 @@ impl Val {
         mem::forget(mem::replace(self, Val::Float(val)));
     }
 
-    fn string(&mut self, string: DmString) {
+    fn string(&mut self, string: StringId) {
         mem::forget(mem::replace(self, Val::String(string)));
     }
 
@@ -47,7 +47,7 @@ impl Val {
                 // kinda bad, don't need to alloc a new dmstring if rhs is non-str
                 // TODO reconsider this, DM doesn't allow "e" + 2
                 let rval = rhs.cast_string(rt);
-                Val::String(DmString::concat(rt, &lval, &rval))
+                Val::String(rt.string_table.concat(lval, rval))
             },
             Val::Ref(_) => unimplemented!("overloads"),
         };
@@ -76,7 +76,7 @@ impl Val {
         match self {
             Val::Null => println!("null"),
             Val::Float(n) => println!("{}", n),
-            Val::String(s) => println!("{:?}", s.get_str(rt)),
+            Val::String(s) => println!("{:?}", rt.string_table.get(*s)),
             _ => unimplemented!(),
         }
     }
@@ -227,10 +227,10 @@ impl Val {
         }
     }
 
-    fn cast_string(&self, rt: &mut Runtime) -> DmString {
+    fn cast_string(&self, rt: &mut Runtime) -> StringId {
         match self {
-            Val::Null => DmString::new(rt, "null".to_string()),
-            Val::Float(n) => DmString::new(rt, n.to_string()),
+            Val::Null => rt.string_table.put("null"),
+            Val::Float(n) => rt.string_table.put(n.to_string()),
             //Val::Int(n) => n.to_string(),
             Val::String(s) => *s,
             Val::Ref(_) => unimplemented!("lookup id + get ty path"),

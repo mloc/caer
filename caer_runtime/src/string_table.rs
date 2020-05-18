@@ -2,6 +2,7 @@ use std::io::{Read, Write};
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use serde::{Serialize, Deserialize};
 use bincode;
 
 // THOUGHTS
@@ -15,11 +16,27 @@ use bincode;
 //static UPPER_REGION: u64 = 1 << 31;
 //static CUTOFF: usize = 64;
 
+// not using newtype_idx because we want 64 bits, and might do some other hacking later.
+#[repr(C)]
+#[derive(Debug, PartialEq, PartialOrd, Eq, Copy, Clone, Hash, Serialize, Deserialize)]
+pub struct StringId(u64);
+
+impl StringId {
+    #[inline(always)]
+    pub fn id(&self) -> u64 {
+        self.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.id() == 0
+    }
+}
+
 #[derive(Debug)]
 pub struct StringTable {
     // optimized btreemap might be faster here
-    strings: HashMap<u64, String>,
-    ids: HashMap<String, u64>,
+    strings: HashMap<StringId, String>,
+    ids: HashMap<String, StringId>,
 
     next_id: u64,
 }
@@ -33,17 +50,17 @@ impl StringTable {
         }
     }
 
-    pub fn get(&self, id: u64) -> &str {
-        if id == 0 {
+    pub fn get(&self, id: StringId) -> &str {
+        if id.id() == 0 {
             return ""
         }
         &self.strings[&id]
     }
 
-    pub fn put<'a, S: Into<Cow<'a, str>>>(&mut self, s: S) -> u64 {
+    pub fn put<'a, S: Into<Cow<'a, str>>>(&mut self, s: S) -> StringId {
         let s = s.into();
         if s.is_empty() {
-            return 0
+            return StringId(0)
         }
 
         if let Some(id) = self.ids.get(s.as_ref()) {
@@ -52,7 +69,7 @@ impl StringTable {
 
         let s_owned = s.into_owned();
 
-        let id = self.next_id;
+        let id = StringId(self.next_id);
         self.next_id += 1;
 
         self.strings.insert(id, s_owned.clone());
@@ -61,15 +78,20 @@ impl StringTable {
         id
     }
 
+    // mightn't belong on stringtable
+    pub fn concat(&mut self, l: StringId, r: StringId) -> StringId {
+        self.put(format!("{}{}", self.get(l), self.get(r)))
+    }
+
     // TODO: ERRH
     pub fn serialize(&self, writer: impl Write) {
-        let flat: Vec<(&u64, &String)> = self.strings.iter().collect();
+        let flat: Vec<(&StringId, &String)> = self.strings.iter().collect();
         bincode::serialize_into(writer, &flat).unwrap();
     }
 
     // TODO: ERRH
     pub fn deserialize(reader: impl Read) -> StringTable {
-        let flat: Vec<(u64, String)> = bincode::deserialize_from(reader).unwrap();
+        let flat: Vec<(StringId, String)> = bincode::deserialize_from(reader).unwrap();
 
         let mut strings = HashMap::new();
         let mut ids = HashMap::new();
@@ -78,8 +100,8 @@ impl StringTable {
         for (id, s) in flat {
             strings.insert(id, s.clone());
             ids.insert(s, id);
-            if id + 1 > next_id {
-                next_id = id + 1;
+            if id.id() + 1 > next_id {
+                next_id = id.id() + 1;
             }
         }
 

@@ -15,7 +15,7 @@ pub struct Runtime {
 #[expose_c_stubs(rt_runtime)]
 impl Runtime {
     // TODO: ERRH
-    pub fn init(init_st_bytes: *const u8, init_st_n: i64, init_env_bytes: *const u8, init_env_n: i64) -> Self {
+    pub fn init() -> Self {
         let init_st = StringTable::deserialize(File::open("stringtable.bincode").unwrap());
         let init_env = bincode::deserialize_from(File::open("environment.bincode").unwrap()).unwrap();
 

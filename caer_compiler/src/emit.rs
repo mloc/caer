@@ -126,7 +126,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 let lit_val = self.ctx.builder.build_call(self.ctx.rt.rt_string_from_utf8, &[rt_local, tmp_local_ptr.into(), len_val.into()], "dmstr_id").try_as_basic_value().left().unwrap().into();
                 */
 
-                let lit_val = self.ctx.llvm_ctx.i64_type().const_int(*id, false).into();
+                let lit_val = self.ctx.llvm_ctx.i64_type().const_int(id.id(), false).into();
 
                 Value::new(Some(lit_val), ty::Primitive::String.into())
             },
@@ -563,8 +563,6 @@ rt_funcs!{
         (rt_val_cloned, void_type~val, [val_type~ptr]),
         (rt_val_drop, void_type~val, [val_type~ptr]),
         (rt_val_cast_string_val, void_type~val, [val_type~ptr, val_type~ptr, opaque_type~ptr]),
-
-        (rt_string_from_utf8, i64_type~val, [opaque_type~ptr, i8_type~ptr, i32_type~val]),
 
         (rt_runtime_init, opaque_type~ptr, []),
 
