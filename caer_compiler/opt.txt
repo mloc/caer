@@ -1,0 +1,129 @@
+scratchpad
+
+scoping issues
+    stuff can be descoped before we use it in a terminator
+    fixed by cloning everywhere - we should have been doing this anyway
+    next up: figuring out where we can avoid clones
+        single-copy no-read cases, move and remove drop
+            basics done- need better scope analysis to find some cases
+
+current val struct repr leads to very messy optimized code- probably because of the padding i8s?
+    speed-wise it might be fine, but it's hard to debug "by eye". investigate disabling that opt
+        or hack it up and replace it with an i64 :D
+    is there a better way to represent the struct? some kind of min-size?
+
+    since then, the val struct has grown (oh no), it's 128b now. ech.
+        things are messier, but we're on a [i32,i32,i32,i32] struct which seems to work ok. revisit
+
+the joy of refactoring (ft. the frontend)
+    currently, statements are entirely built in build_block, in a big loop
+    this makes some assumptions; that the new block will be a child scope of given scope is the
+     most awkward
+    this makes for loops awkward; we want to build statements from another source, in a scope
+    so- refactor statement building out from block building? sure
+
+    at the same time; work on "block builder"?
+
+    kinda done- not ideal, but a lot better. scope creation is still a bit meh but we have better
+     viz now
+
+typing
+    ho boy
+    see below, see ty.txt
+
+----
+
+entry point is currently /proc/entry(), main is a generated entry point that calls entry()
+    helps debugging
+
+values
+    soft and hard values
+        hard values have complete type info at compile time, some way or another
+            can be more directly operated on
+        soft are wrapped with type info, dynamic
+            need to be operated on using runtime helpers
+
+    softval structure
+        opaque enum? - for now, sure.
+            in future it'd be nicer to have something we can downcast hard->soft without runtime
+
+        problems abound
+            with current stub system, is heap allocated :(
+            future work for less opaque enum would help this; for now, need to remember to drop
+
+        this is good now! still need to drop but we have the infra for that
+            half-opaque struct, only tag is exposed
+            we do some hopefully stable rust stuff to get the size
+
+scopes
+    sketchbook musings:
+        scopes are more granular than blocks? but can span blocks
+        maybe not- the only case I can think of where this matters is temporary literals in if conds
+        but we can assign them to the outer scope and clean up later, since they can't define vars
+        only cond-ish thing that makes vars is for(;;), but this will be a block anyway
+        so are scopes aligned with blocks? hopefully. if not, maybe we can split blocks up instead
+        this might also help unwind cleanup
+            oh yikes- how will that work? a cleanup block for every block?
+        can llvm help at all?
+
+calling (global) procs
+    deferred thinking about this until we have a better idea on errors
+    need to think about: args
+
+runtime errors
+    current plan: llvm exceptions
+    but- we'd like to be able to propagate errors from the runtime
+    could have some rtcall wrapper but that adds overhead to all rtcalls
+
+concurrency
+    llvm coroutines? haven't looked into this enough
+    no- libaco
+
+future optimizations:
+    hard values + stack soft values
+        hard values need type inference (in future: annotations)
+
+        stack values are more interesting
+            starting point might be informing about size of rt::Val
+            ideally we want Val to be less opaque so that we can do manipulations without hitting rt
+
+    faster DM calls
+        specialization!
+        create "type strict" versions of procs when we have full type info, call when possible
+            "hard" procs? procs that only take hard values
+        using standard cdecly functions + args
+        absence masking to handle default args without having to wrap
+            positional args might take some more hacking
+        won't work for any proc that uses args list
+            but maybe we can specialize List<Val> to List<Int> or so
+            qdel will suffer -> but maybe that can be an intrinsic? we could just improve del
+
+        separate from dynamic/static dispatch, only affects how args are passed
+
+        linting/annotations to ensure procs are used only strictly? "nosoft"
+            affects call()() usage - that'll probably always use soft unless we keep md around
+            maybe not useful, we probably still want to use hard procs from soft context
+            alternatively act as a check for all values being hard?
+
+typing & resolution
+    too big, new file, ty.txt
+
+----
+
+old things
+
+BIG TODO: switch is broken rn, always casts to bool before checking. basically acts as br
+    FIXED probably, by inverting meaning of switches
+    replaced rt_val_to_bool with rt_val_to_switch_disc, which casts to u32
+
+big bad idea
+    all locals are SSA
+    vars are "pointers" on SSA locals with special ops
+        do we lose too much simplicity?
+        is this too low level? too close to what LLVM does?
+        
+        maybe! but let's try it
+        it'll make some interactions less messy
+        
+        this kinda worked out- but ssa locals are still stack pointers
+        makes more sense I guess

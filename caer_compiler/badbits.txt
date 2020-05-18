@@ -1,0 +1,1 @@
+assumption on entries being contiguous block ids

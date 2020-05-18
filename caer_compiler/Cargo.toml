@@ -1,0 +1,23 @@
+[package]
+authors = ["Colm Ó hIcí <colmohici@gmail.com>"]
+edition = "2018"
+name = "ldc"
+version = "0.1.0"
+
+[dependencies]
+dot = "0.1.4"
+
+[dependencies.dreammaker]
+#path = "../SpacemanDMM/src/dreammaker"
+git = "https://github.com/SpaceManiac/SpacemanDMM"
+
+[dependencies.ludo]
+path = "../caer_runtime"
+
+[dependencies.indexed_vec]
+default-features = false
+path = "../indexed_vec"
+
+[dependencies.inkwell]
+branch = "llvm8-0"
+git = "https://github.com/TheDan64/inkwell"
