@@ -575,5 +575,7 @@ rt_funcs!{
         (rt_string_from_utf8, i64_type~val, [opaque_type~ptr, i8_type~ptr, i32_type~val]),
 
         (rt_runtime_init, opaque_type~ptr, [i8_type~ptr, i64_type~val]),
+
+        (rt_arg_pack_unpack_into, void_type~val, [opaque_type~ptr, val_type~ptr, i64_type~val, opaque_type~ptr]),
     ]
 }

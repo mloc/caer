@@ -12,7 +12,7 @@ dot = "0.1.4"
 git = "https://github.com/SpaceManiac/SpacemanDMM"
 
 [dependencies.ludo]
-path = "../ludo"
+path = "../caer_runtime"
 
 [dependencies.indexed_vec]
 default-features = false

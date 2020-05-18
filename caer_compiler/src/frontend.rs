@@ -141,7 +141,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
     }
 
     // TODO rename, bad bus name
-    // TODO redo, probably inefficient as heck
+    // TODO redo, probably inefficient as heck, just figure out the lifetimes dude
     fn on_block<R>(&mut self, block: &mut cfg::Block, action: impl FnOnce(&mut BlockBuilder) -> R) -> R {
         std::mem::swap(&mut self.block, block);
         let ret = action(self);

@@ -393,6 +393,9 @@ pub enum Op {
 
     Put(LocalId),
     Binary(LocalId, ludo::op::BinaryOp, LocalId, LocalId),
+    // TODO: STRINGID
+    // TODO: use + ref a procid
+    //Call(LocalId, u64, Vec<LocalId>, Vec<(u64, LocalId)>),
     Call(LocalId, String, Vec<LocalId>),
 
     Cast(LocalId, LocalId, ty::Primitive),
@@ -402,7 +405,7 @@ pub enum Op {
 pub enum Literal {
     Null,
     Num(f32),
-    // TODO proper type for indexed strings
+    // TODO: STRINGID
     String(u64),
     List,
 }
