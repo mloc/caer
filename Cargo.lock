@@ -38,6 +38,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08c48aae112d48ed9f069b33538ea9e3e90aa263cfa3d1c24309612b1f7472de"
 
 [[package]]
+name = "caer_compiler"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "caer_runtime",
+ "dot",
+ "dreammaker",
+ "indexed_vec",
+ "inkwell",
+]
+
+[[package]]
+name = "caer_runtime"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "cstub_bindgen_macro",
+ "indexed_vec",
+ "serde",
+]
+
+[[package]]
 name = "cc"
 version = "1.0.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -158,17 +180,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
-name = "ldc"
-version = "0.1.0"
-dependencies = [
- "dot",
- "dreammaker",
- "indexed_vec",
- "inkwell",
- "ludo",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.70"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -209,15 +220,6 @@ checksum = "9b1237d003f81f68a886aa31fd31fc932da1344b5e81337cbd88783e672e2ff5"
 dependencies = [
  "libc",
  "rgb",
-]
-
-[[package]]
-name = "ludo"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "cstub_bindgen_macro",
- "serde",
 ]
 
 [[package]]

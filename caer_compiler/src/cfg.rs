@@ -4,8 +4,8 @@ use indexed_vec::{IndexVec, newtype_index, Idx};
 use std::fs::{self, File};
 use std::io::{Seek, SeekFrom, Write};
 use std::cmp;
-use ludo::string_table::StringTable;
-use ludo;
+use caer_runtime::string_table::StringTable;
+use caer_runtime;
 use crate::ty;
 use dot;
 
@@ -13,13 +13,14 @@ newtype_index!(LocalId {pub idx});
 newtype_index!(BlockId {pub idx});
 newtype_index!(ScopeId {pub idx});
 
-// this could maybe be renamed, idk
+// this should be renamed and moved out of env.
 #[derive(Debug)]
 pub struct Environment {
     // is this bad? yes
     // but it's easy
-    // TODO do something less tightly coupled
+    // TODO: do something less tightly coupled
     pub string_table: StringTable,
+    pub rt_env: caer_runtime::environment::Environment,
     pub procs: HashMap<String, Proc>,
 }
 
@@ -27,6 +28,7 @@ impl Environment {
     pub fn new() -> Self {
         Self {
             string_table: StringTable::new(),
+            rt_env: caer_runtime::environment::Environment::new(),
             procs: HashMap::new(),
         }
     }
@@ -392,7 +394,7 @@ pub enum Op {
     Store(LocalId, LocalId),
 
     Put(LocalId),
-    Binary(LocalId, ludo::op::BinaryOp, LocalId, LocalId),
+    Binary(LocalId, caer_runtime::op::BinaryOp, LocalId, LocalId),
     // TODO: STRINGID
     // TODO: use + ref a procid
     //Call(LocalId, u64, Vec<LocalId>, Vec<(u64, LocalId)>),

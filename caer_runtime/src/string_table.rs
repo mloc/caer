@@ -1,6 +1,7 @@
-use std::cell::RefCell;
+use std::io::{Read, Write};
 use std::borrow::Cow;
 use std::collections::HashMap;
+
 use bincode;
 
 // THOUGHTS
@@ -60,13 +61,15 @@ impl StringTable {
         id
     }
 
-    pub fn serialize(&self) -> Vec<u8> {
+    // TODO: ERRH
+    pub fn serialize(&self, writer: impl Write) {
         let flat: Vec<(&u64, &String)> = self.strings.iter().collect();
-        bincode::serialize(&flat).unwrap()
+        bincode::serialize_into(writer, &flat).unwrap();
     }
 
-    pub fn deserialize(buf: &[u8]) -> StringTable {
-        let flat: Vec<(u64, String)> = bincode::deserialize(buf).unwrap();
+    // TODO: ERRH
+    pub fn deserialize(reader: impl Read) -> StringTable {
+        let flat: Vec<(u64, String)> = bincode::deserialize_from(reader).unwrap();
 
         let mut strings = HashMap::new();
         let mut ids = HashMap::new();
@@ -117,8 +120,9 @@ mod tests {
         src_table.put("hello");
         src_table.put("world");
 
-        let buf = src_table.serialize();
-        let dest_table = StringTable::deserialize(&buf);
+        let mut buf = vec![];
+        src_table.serialize(&mut buf);
+        let dest_table = StringTable::deserialize(buf.as_slice());
 
         println!("{:?}", dest_table);
 

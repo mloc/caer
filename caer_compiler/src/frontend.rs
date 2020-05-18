@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use crate::cfg;
 use dreammaker::{ast, objtree};
 use indexed_vec::Idx;
-use ludo::op::BinaryOp;
+use caer_runtime::op::BinaryOp;
 use crate::ty;
 
 pub struct Builder<'a> {

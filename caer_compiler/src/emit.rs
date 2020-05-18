@@ -1,7 +1,7 @@
 use indexed_vec::{IndexVec, Idx};
 use std::collections::HashMap;
 use crate::cfg::*;
-use std::fs;
+use std::fs::{self, File};
 use std::borrow::Borrow;
 use crate::ty::{self, Ty};
 use std::convert::TryInto;
@@ -409,19 +409,11 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
         let block = self.ctx.llvm_ctx.append_basic_block(func, "entry");
         self.ctx.builder.position_at_end(block);
 
+        // TODO: move file emit to a better place
+        self.env.string_table.serialize(File::create("stringtable.bincode").unwrap());
+        bincode::serialize_into(File::create("environment.bincode").unwrap(), &self.env.rt_env).unwrap();
 
-        // TODO make this all better, when inkwell supports GEP directly on const_string
-        // this GEPpery is bad.
-        let st_init_ser = self.env.string_table.serialize();
-        let st_init_const = self.ctx.llvm_ctx.const_string(&st_init_ser, false);
-        let tmp_local = self.ctx.builder.build_alloca(st_init_const.get_type(), "tmp_st_init");
-        self.ctx.builder.build_store(tmp_local, st_init_const);
-
-        let cz = self.ctx.llvm_ctx.i32_type().const_int(0, false);
-        let tmp_local_ptr = unsafe { self.ctx.builder.build_gep(tmp_local, &[cz, cz], "") };
-        let len_val = self.ctx.llvm_ctx.i64_type().const_int(st_init_ser.len().try_into().unwrap(), false);
-
-        let rt_ptr = self.ctx.builder.build_call(self.ctx.rt.rt_runtime_init, &[tmp_local_ptr.into(), len_val.into()], "runtime").try_as_basic_value().left().unwrap().into_pointer_value();
+        let rt_ptr = self.ctx.builder.build_call(self.ctx.rt.rt_runtime_init, &[], "runtime").try_as_basic_value().left().unwrap().into_pointer_value();
         self.ctx.builder.build_store(self.rt_global, rt_ptr);
 
         block
@@ -505,7 +497,7 @@ macro_rules! rt_funcs {
 
         impl<'ctx> $name <'ctx> {
             fn new(ctx: &'ctx inkwell::context::Context, module: &inkwell::module::Module<'ctx>) -> $name<'ctx> {
-                let padding_size = size_of::<ludo::val::Val>() - 4; // u32 discrim
+                let padding_size = size_of::<caer_runtime::val::Val>() - 4; // u32 discrim
                 // TODO: undo this, it's a hack to clean up optimized output
                 let val_padding_type = ctx.i32_type();
                 let val_type = ctx.struct_type(&[ctx.i32_type().into(), val_padding_type.into(), ctx.i64_type().into()], true);
@@ -574,7 +566,7 @@ rt_funcs!{
 
         (rt_string_from_utf8, i64_type~val, [opaque_type~ptr, i8_type~ptr, i32_type~val]),
 
-        (rt_runtime_init, opaque_type~ptr, [i8_type~ptr, i64_type~val]),
+        (rt_runtime_init, opaque_type~ptr, []),
 
         (rt_arg_pack_unpack_into, void_type~val, [opaque_type~ptr, val_type~ptr, i64_type~val, opaque_type~ptr]),
     ]

@@ -1,17 +1,18 @@
 [package]
 authors = ["Colm Ó hIcí <colmohici@gmail.com>"]
 edition = "2018"
-name = "ldc"
+name = "caer_compiler"
 version = "0.1.0"
 
 [dependencies]
 dot = "0.1.4"
+bincode = "1.2.1"
 
 [dependencies.dreammaker]
 #path = "../SpacemanDMM/src/dreammaker"
 git = "https://github.com/SpaceManiac/SpacemanDMM"
 
-[dependencies.ludo]
+[dependencies.caer_runtime]
 path = "../caer_runtime"
 
 [dependencies.indexed_vec]

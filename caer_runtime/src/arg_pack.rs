@@ -1,8 +1,11 @@
 use cstub_bindgen_macro::expose_c_stubs;
 use std::mem;
+use indexed_vec::Idx;
+
 use crate::string::DmString;
 use crate::runtime::Runtime;
 use crate::val::Val;
+use crate::environment::ProcId;
 
 // meh, saves some duplicated code below, probably should be factored out
 #[repr(C)]
@@ -28,8 +31,9 @@ impl ArgPack {
     // this is p. inefficient.
     // unpacking probably shouldn't be done in libcode, probably shouldn't be copying vals
     // TODO: rework unpacking
+    // TODO: support passing in proc_id as primitive idx
     fn unpack_into(&mut self, targets: *mut Val, proc_id: u64, rt: &mut Runtime) {
-        let spec = &rt.proc_specs[proc_id as usize];
+        let spec = &rt.env.proc_specs[ProcId::new(proc_id as usize)];
         // compiler should ensure that targets is an array with the same sizes as the spec
         let n = spec.params.len();
         let targets = unsafe { std::slice::from_raw_parts_mut(targets, n) };

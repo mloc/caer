@@ -1,11 +1,11 @@
 [package]
-name = "ludo"
+name = "caer_runtime"
 version = "0.1.0"
 authors = ["Colm Ó hIcí <colmohici@gmail.com>"]
 edition = "2018"
 
 [lib]
-name = "ludo"
+name = "caer_runtime"
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
@@ -14,3 +14,6 @@ serde = { version = "1.0", features = ["derive"] }
 
 [dependencies.cstub_bindgen_macro]
 path = "../cstub_bindgen_macro"
+
+[dependencies.indexed_vec]
+path = "../indexed_vec"

@@ -1,21 +1,27 @@
 use cstub_bindgen_macro::expose_c_stubs;
 
-use crate::string_table;
+use crate::string_table::StringTable;
 use crate::proc_spec::ProcSpec;
+use crate::environment::Environment;
+
+use std::fs::File;
 
 #[derive(Debug)]
 pub struct Runtime {
-    pub(crate) string_table: string_table::StringTable,
-    pub(crate) proc_specs: Vec<ProcSpec>,
+    pub(crate) string_table: StringTable,
+    pub(crate) env: Environment,
 }
 
 #[expose_c_stubs(rt_runtime)]
 impl Runtime {
-    pub fn init(init_st_bytes: *const u8, init_st_n: i64) -> Self {
-        let init_st = unsafe { std::slice::from_raw_parts(init_st_bytes, init_st_n as usize) };
+    // TODO: ERRH
+    pub fn init(init_st_bytes: *const u8, init_st_n: i64, init_env_bytes: *const u8, init_env_n: i64) -> Self {
+        let init_st = StringTable::deserialize(File::open("stringtable.bincode").unwrap());
+        let init_env = bincode::deserialize_from(File::open("environment.bincode").unwrap()).unwrap();
+
         Runtime {
-            string_table: string_table::StringTable::deserialize(init_st),
-            proc_specs: vec![],
+            string_table: init_st,
+            env: init_env,
         }
     }
 }
