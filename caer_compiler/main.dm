@@ -1,3 +1,5 @@
+/proc/argfoo(var/bar)
+
 /proc/entry()
     var/s = "hey"
     world << "[s] there[1/90]"

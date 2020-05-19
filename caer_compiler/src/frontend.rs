@@ -5,6 +5,7 @@ use dreammaker::{ast, objtree};
 use indexed_vec::Idx;
 use caer_runtime::op::BinaryOp;
 use caer_runtime::string_table::StringId;
+use caer_runtime::proc_spec::ProcSpec;
 use crate::ty;
 
 pub struct Builder<'a> {
@@ -37,7 +38,7 @@ impl<'a> Builder<'a> {
         }).collect();
     }
 
-    fn add_string(&mut self, s: impl Into<Cow<'a, str>>) -> StringId {
+    fn add_string<'s>(&mut self, s: impl Into<Cow<'s, str>>) -> StringId {
         self.env.string_table.put(s)
     }
 }
@@ -84,6 +85,21 @@ impl<'a, 'b> ProcBuilder<'a, 'b> {
         for block in self.finished_blocks.drain(..) {
             self.proc.add_block(block);
         }
+
+        let mut spec = ProcSpec {
+            name: self.builder.add_string(&self.proc.name),
+            params: vec![],
+            names: vec![],
+        };
+
+        for (i, param) in self.ast_proc.parameters.iter().enumerate() {
+            let name_id = self.builder.add_string(&param.name);
+            spec.params.push(name_id);
+            spec.names.push((name_id, i as u32));
+        }
+        spec.names.sort_unstable_by_key(|(ref s, _)| {*s});
+
+        self.builder.env.rt_env.add_proc(spec);
 
         self.proc.analyze();
         self.proc.dot();

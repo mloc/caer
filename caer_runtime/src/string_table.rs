@@ -18,7 +18,7 @@ use bincode;
 
 // not using newtype_idx because we want 64 bits, and might do some other hacking later.
 #[repr(C)]
-#[derive(Debug, PartialEq, PartialOrd, Eq, Copy, Clone, Hash, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Copy, Clone, Hash, Serialize, Deserialize)]
 pub struct StringId(u64);
 
 impl StringId {
