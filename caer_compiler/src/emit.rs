@@ -483,6 +483,31 @@ struct RtFuncTyBundle<'ctx> {
     val_type: inkwell::types::StructType<'ctx>,
     //val_type: inkwell::types::IntType<'ctx>,
     opaque_type: inkwell::types::StructType<'ctx>,
+
+    arg_pack_type: inkwell::types::StructType<'ctx>,
+    arg_pack_tuple_type: inkwell::types::StructType<'ctx>,
+}
+
+impl<'ctx> RtFuncTyBundle<'ctx> {
+    fn new(ctx: &'ctx inkwell::context::Context) -> Self {
+        let val_padding_type = ctx.i32_type();
+        let val_type = ctx.struct_type(&[ctx.i32_type().into(), val_padding_type.into(), ctx.i64_type().into()], true);
+        let val_type_ptr = val_type.ptr_type(inkwell::AddressSpace::Generic);
+
+        let opaque_type = ctx.opaque_struct_type("opaque");
+
+        let arg_pack_tuple_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.into()], false);
+        let arg_pack_tuple_type_ptr = arg_pack_tuple_type.ptr_type(inkwell::AddressSpace::Generic);
+
+        let arg_pack_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.into(), ctx.i64_type().into(), arg_pack_tuple_type_ptr.into()], false);
+
+        RtFuncTyBundle {
+            val_type: val_type,
+            opaque_type: opaque_type,
+            arg_pack_type: arg_pack_type,
+            arg_pack_tuple_type: arg_pack_tuple_type,
+        }
+    }
 }
 
 macro_rules! rt_funcs {
@@ -498,21 +523,8 @@ macro_rules! rt_funcs {
         impl<'ctx> $name <'ctx> {
             fn new(ctx: &'ctx inkwell::context::Context, module: &inkwell::module::Module<'ctx>) -> $name<'ctx> {
                 let padding_size = size_of::<caer_runtime::val::Val>() - 4; // u32 discrim
-                // TODO: undo this, it's a hack to clean up optimized output
-                let val_padding_type = ctx.i32_type();
-                let val_type = ctx.struct_type(&[ctx.i32_type().into(), val_padding_type.into(), ctx.i64_type().into()], true);
-                // safety net for me.
-                assert_eq!(padding_size, 12);
-                //let val_type = ctx.i64_type();
-                let val_ptr_type = val_type.ptr_type(inkwell::AddressSpace::Generic);
-                let val_type = val_type.into();
 
-                let opaque_type = ctx.opaque_struct_type("opaque");
-
-                let tyb = RtFuncTyBundle {
-                    val_type: val_type,
-                    opaque_type: opaque_type,
-                };
+                let tyb = RtFuncTyBundle::new(ctx);
 
                 $name {
                     $(
@@ -535,6 +547,10 @@ macro_rules! rt_funcs {
     );
 
     ( @genty $ctx:ident $spec:ident $tyb:ident opaque_type $ty:ident) => (
+        rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
+    );
+
+    ( @genty $ctx:ident $spec:ident $tyb:ident arg_pack_type $ty:ident) => (
         rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
     );
 
@@ -566,6 +582,6 @@ rt_funcs!{
 
         (rt_runtime_init, opaque_type~ptr, []),
 
-        (rt_arg_pack_unpack_into, void_type~val, [opaque_type~ptr, val_type~ptr, i64_type~val, opaque_type~ptr]),
+        (rt_arg_pack_unpack_into, void_type~val, [arg_pack_type~ptr, val_type~ptr, i64_type~val, opaque_type~ptr]),
     ]
 }
