@@ -54,6 +54,17 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 
         let null_val = self.ctx.rt.ty.val_type.const_zero();
 
+        let mut n_params = 0;
+        for local in self.proc.locals.iter() {
+            if local.param {
+                n_params += 1;
+            }
+        }
+
+        let param_locals_arr_ty = self.ctx.rt.ty.val_type.ptr_type(inkwell::AddressSpace::Generic).array_type(n_params);
+        let mut param_locals_arr = param_locals_arr_ty.const_zero();
+        let mut params_i = 0;
+
         for local in self.proc.locals.iter() {
             let name = match local.name {
                 Some(ref s) => s,
@@ -76,8 +87,22 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 _ => unimplemented!("unhandled ty: {:?}", local.ty),
             };
 
+            if local.param {
+                param_locals_arr = self.ctx.builder.build_insert_value(param_locals_arr, alloc, params_i, "param_locals_arr").unwrap().into_array_value();
+                params_i += 1;
+            }
+
             self.local_allocs.push(alloc);
         }
+
+        let param_locals_alloca = self.ctx.builder.build_alloca(param_locals_arr_ty, "param_locals_alloca");
+        self.ctx.builder.build_store(param_locals_alloca, param_locals_arr);
+
+        let cz = self.ctx.llvm_ctx.i32_type().const_zero();
+        let param_locals_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(param_locals_alloca, &[cz, cz], "param_locals_ptr") };
+        let argpack_local = self.func.get_params()[0];
+        let rt_local = self.ctx.builder.build_load(self.emit.rt_global, "local_runtime");
+        self.ctx.builder.build_call(self.ctx.rt.rt_arg_pack_unpack_into, &[argpack_local, param_locals_ptr.into(), self.ctx.llvm_ctx.i64_type().const_int(self.proc.env_id.index() as u64, false).into(), rt_local], "");
 
         block
     }
@@ -272,9 +297,29 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 },
 
                 Op::Call(id, name, args) => {
-                    assert!(args.len() == 0);
+                    // create argpack
+                    let n_val = self.ctx.llvm_ctx.i64_type().const_int(args.len() as u64, false);
+                    let array_type = self.ctx.rt.ty.val_type.ptr_type(inkwell::AddressSpace::Generic).array_type(args.len() as u32);
+                    let argpack_unnamed_alloca = self.ctx.builder.build_alloca(array_type, "argpack_unnamed_arr");
+                    let mut argpack_unnamed = array_type.const_zero();
+                    for (i, arg) in args.iter().enumerate() {
+                        argpack_unnamed = self.ctx.builder.build_insert_value(argpack_unnamed, self.convert_to_any(*arg), i as u32, "arg").unwrap().into_array_value();
+                    }
+                    self.ctx.builder.build_store(argpack_unnamed_alloca, argpack_unnamed);
+
+                    // this GEPpery is bad?
+                    let cz = self.ctx.llvm_ctx.i32_type().const_zero();
+                    let argpack_unnamed_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(argpack_unnamed_alloca, &[cz, cz], "argpack_unnamed_ptr") };
+
+                    let argpack_alloca = self.ctx.builder.build_alloca(self.ctx.rt.ty.arg_pack_type, "argpack_ptr");
+                    let argpack = self.ctx.rt.ty.arg_pack_type.const_zero();
+                    let argpack = self.ctx.builder.build_insert_value(argpack, n_val, 0, "argpack").unwrap();
+                    let argpack = self.ctx.builder.build_insert_value(argpack, argpack_unnamed_ptr, 1, "argpack").unwrap();
+
+                    self.ctx.builder.build_store(argpack_alloca, argpack);
+
                     let func = emit.sym[name];
-                    let res_val = self.ctx.builder.build_call(func, &[], name).try_as_basic_value().left().unwrap();
+                    let res_val = self.ctx.builder.build_call(func, &[argpack_alloca.into()], name).try_as_basic_value().left().unwrap();
                     let val = Value::new(Some(res_val), ty::Complex::Any);
                     self.store_local(id, &val);
                 },
@@ -380,7 +425,7 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
 
     fn add_proc(&mut self, name: &'a str, proc: &'a Proc) {
         //let mut proc_emit = ProcEmit::new(self.ctx, proc, name);
-        let func_type = self.ctx.rt.ty.val_type.fn_type(&[], false);
+        let func_type = self.ctx.rt.ty.val_type.fn_type(&[self.ctx.rt.ty.arg_pack_type.ptr_type(inkwell::AddressSpace::Generic).into()], false);
         let func = self.ctx.module.add_function(name, func_type, None);
 
         self.sym.insert(name.to_string(), func);
@@ -421,7 +466,10 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
 
     fn finalize_main(&self, block: inkwell::basic_block::BasicBlock, entry_func: inkwell::values::FunctionValue) {
         self.ctx.builder.position_at_end(block);
-        self.ctx.builder.build_call(entry_func, &[], "");
+        let argpack_alloca = self.ctx.builder.build_alloca(self.ctx.rt.ty.arg_pack_type, "argpack_ptr");
+        let argpack = self.ctx.rt.ty.arg_pack_type.const_zero();
+        self.ctx.builder.build_store(argpack_alloca, argpack);
+        self.ctx.builder.build_call(entry_func, &[argpack_alloca.into()], "");
         self.ctx.builder.build_return(None);
     }
 
@@ -477,10 +525,12 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
     }
 }
 
+// TODO: redo all of this to a friendlier system
 #[derive(Debug)]
 struct RtFuncTyBundle<'ctx> {
     // TODO: undo this, it's a hack to clean up optimized output
     val_type: inkwell::types::StructType<'ctx>,
+    val_type_ptr: inkwell::types::PointerType<'ctx>,
     //val_type: inkwell::types::IntType<'ctx>,
     opaque_type: inkwell::types::StructType<'ctx>,
 
@@ -496,13 +546,14 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
 
         let opaque_type = ctx.opaque_struct_type("opaque");
 
-        let arg_pack_tuple_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.into()], false);
+        let arg_pack_tuple_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.ptr_type(inkwell::AddressSpace::Generic).into()], false);
         let arg_pack_tuple_type_ptr = arg_pack_tuple_type.ptr_type(inkwell::AddressSpace::Generic);
 
-        let arg_pack_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.into(), ctx.i64_type().into(), arg_pack_tuple_type_ptr.into()], false);
+        let arg_pack_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.ptr_type(inkwell::AddressSpace::Generic).into(), ctx.i64_type().into(), arg_pack_tuple_type_ptr.into()], false);
 
         RtFuncTyBundle {
             val_type: val_type,
+            val_type_ptr: val_type_ptr,
             opaque_type: opaque_type,
             arg_pack_type: arg_pack_type,
             arg_pack_tuple_type: arg_pack_tuple_type,
@@ -546,6 +597,10 @@ macro_rules! rt_funcs {
         rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
     );
 
+    ( @genty $ctx:ident $spec:ident $tyb:ident val_type_ptr $ty:ident) => (
+        rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
+    );
+
     ( @genty $ctx:ident $spec:ident $tyb:ident opaque_type $ty:ident) => (
         rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
     );
@@ -582,6 +637,6 @@ rt_funcs!{
 
         (rt_runtime_init, opaque_type~ptr, []),
 
-        (rt_arg_pack_unpack_into, void_type~val, [arg_pack_type~ptr, val_type~ptr, i64_type~val, opaque_type~ptr]),
+        (rt_arg_pack_unpack_into, void_type~val, [arg_pack_type~ptr, val_type_ptr~ptr, i64_type~val, opaque_type~ptr]),
     ]
 }

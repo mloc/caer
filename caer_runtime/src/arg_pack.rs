@@ -22,8 +22,8 @@ impl<T> FFIArray<T> {
 
 #[repr(C)]
 pub struct ArgPack {
-    unnamed: FFIArray<Val>,
-    named: FFIArray<(StringId, Val)>,
+    unnamed: FFIArray<*mut Val>,
+    named: FFIArray<(StringId, *mut Val)>,
 }
 
 #[expose_c_stubs(rt_arg_pack)]
@@ -32,17 +32,17 @@ impl ArgPack {
     // unpacking probably shouldn't be done in libcode, probably shouldn't be copying vals
     // TODO: rework unpacking
     // TODO: support passing in proc_id as primitive idx
-    fn unpack_into(&mut self, targets: *mut Val, proc_id: u64, rt: &mut Runtime) {
+    fn unpack_into(&mut self, target_ptrs: *const *mut Val, proc_id: u64, rt: &mut Runtime) {
         let spec = &rt.env.proc_specs[ProcId::new(proc_id as usize)];
         // compiler should ensure that targets is an array with the same sizes as the spec
         let n = spec.params.len();
-        let targets = unsafe { std::slice::from_raw_parts_mut(targets, n) };
+        let target_ptrs = unsafe { std::slice::from_raw_parts(target_ptrs, n) };
 
         for (i, arg) in self.unnamed.as_slice().iter().enumerate() {
             if i >= n {
                 break // too many unnamed args
             }
-            targets[i] = *arg
+            unsafe { *target_ptrs[i] = **arg }
         }
 
         let named_args = self.named.as_slice();
@@ -50,13 +50,13 @@ impl ArgPack {
         let mut i_arg = 0;
         let mut i_param = 0;
 
-        while i_arg <= named_args.len() && i_param <= n {
+        while i_arg < named_args.len() && i_param < n {
             if named_args[i_arg].0 < spec.names[i_param].0 {
                 i_param += 1
             } else if named_args[i_arg].0 > spec.names[i_param].0 {
                 i_arg += 1
             } else {
-                targets[spec.names[i_param].1 as usize] = named_args[i_arg].1;
+                unsafe { *target_ptrs[spec.names[i_param].1 as usize] = *named_args[i_arg].1 };
                 i_param += 1;
                 i_arg += 1;
             }

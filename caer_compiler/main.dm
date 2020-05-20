@@ -1,8 +1,10 @@
 /proc/argfoo(var/bar)
+    world << bar
 
 /proc/entry()
     var/s = "hey"
     world << "[s] there[1/90]"
+    argfoo(s)
     //world << 1 + 1
 	/*world << simple()
 	var/xx = abc() + 8 + abc()
