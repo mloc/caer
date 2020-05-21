@@ -5,6 +5,7 @@ use std::fs::{self, File};
 use std::io::{Seek, SeekFrom, Write};
 use std::cmp;
 use caer_runtime::string_table::{StringTable, StringId};
+use caer_runtime::environment::ProcId;
 use caer_runtime;
 use crate::ty;
 use dot;
@@ -40,7 +41,6 @@ pub struct Local {
     pub ty: ty::Complex,
     pub movable: bool,
     pub var:  bool,
-    pub param: bool,
     pub name: Option<String>,
     pub construct_scope: ScopeId,
     // if a value is moved, it won't be destructed with this local
@@ -69,10 +69,11 @@ impl LocalFlow {
 #[derive(Debug)]
 pub struct Proc {
     pub name: String,
-    pub env_id: caer_runtime::environment::ProcId,
+    pub env_id: ProcId,
 
     pub locals: IndexVec<LocalId, Local>,
     pub vars: HashMap<String, LocalId>,
+    pub params: Vec<LocalId>,
     pub blocks: IndexVec<BlockId, Block>,
     pub scopes: IndexVec<ScopeId, Scope>,
 
@@ -82,7 +83,7 @@ pub struct Proc {
 }
 
 impl<'a> Proc {
-    pub fn new(name: String) -> Self {
+    pub fn new(name: String, env_id: ProcId) -> Self {
         // ids map to indices in the scopes list; we can assume this scope will have id 0
         // TODO sounder way to handle this + locals?
         let global_scope = Scope::new(ScopeId::new(0), None);
@@ -91,11 +92,11 @@ impl<'a> Proc {
 
         let mut new = Self {
             name: name,
-            // TODO: change this, very bad
-            env_id: caer_runtime::environment::ProcId::new(0),
+            env_id: env_id,
 
             locals: IndexVec::new(),
             vars: HashMap::new(),
+            params: Vec::new(),
             blocks: IndexVec::new(),
             scopes: scopes,
 
@@ -104,11 +105,11 @@ impl<'a> Proc {
             next_block_id: 0,
         };
 
-        new.add_local(new.global_scope, ty::Complex::Any, None, true, false); // return
+        new.add_local(new.global_scope, ty::Complex::Any, None, true); // return val
         new
     }
 
-    pub fn add_local(&mut self, scope: ScopeId, ty: ty::Complex, name: Option<&str>, var: bool, param: bool) -> LocalId {
+    pub fn add_local(&mut self, scope: ScopeId, ty: ty::Complex, name: Option<&str>, var: bool) -> LocalId {
         let id = LocalId::new(self.locals.len());
 
         let local = Local {
@@ -116,7 +117,6 @@ impl<'a> Proc {
             ty: ty,
             movable: false,
             var: var,
-            param: param,
             name: Some(name.map_or_else(|| {format!("local_{}", id.index())}, |s| {format!("var_{}", s.to_string())})),
             construct_scope: scope,
             destruct_scope: Some(scope),

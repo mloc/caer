@@ -21,9 +21,24 @@ impl Environment {
         }
     }
 
-    pub fn add_proc(&mut self, spec: ProcSpec) -> ProcId {
+    pub fn add_proc(&mut self, name: StringId) -> ProcId {
+        let spec = ProcSpec {
+            name: name,
+            params: vec![],
+            names: vec![],
+        };
         let id = ProcId::new(self.proc_specs.len());
         self.proc_specs.push(spec);
         id
+    }
+
+    // TODO: ERRH
+    pub fn get_proc(&self, id: ProcId) -> &ProcSpec {
+        self.proc_specs.get(id).unwrap()
+    }
+
+    // TODO: ERRH
+    pub fn get_proc_mut(&mut self, id: ProcId) -> &mut ProcSpec {
+        self.proc_specs.get_mut(id).unwrap()
     }
 }

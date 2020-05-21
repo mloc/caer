@@ -54,17 +54,6 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 
         let null_val = self.ctx.rt.ty.val_type.const_zero();
 
-        let mut n_params = 0;
-        for local in self.proc.locals.iter() {
-            if local.param {
-                n_params += 1;
-            }
-        }
-
-        let param_locals_arr_ty = self.ctx.rt.ty.val_type.ptr_type(inkwell::AddressSpace::Generic).array_type(n_params);
-        let mut param_locals_arr = param_locals_arr_ty.const_zero();
-        let mut params_i = 0;
-
         for local in self.proc.locals.iter() {
             let name = match local.name {
                 Some(ref s) => s,
@@ -87,13 +76,18 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 _ => unimplemented!("unhandled ty: {:?}", local.ty),
             };
 
-            if local.param {
-                param_locals_arr = self.ctx.builder.build_insert_value(param_locals_arr, alloc, params_i, "param_locals_arr").unwrap().into_array_value();
-                params_i += 1;
-            }
-
             self.local_allocs.push(alloc);
         }
+
+        let param_locals_arr_ty = self.ctx.rt.ty.val_type.ptr_type(inkwell::AddressSpace::Generic).array_type(self.proc.params.len() as u32);
+        let mut param_locals_arr = param_locals_arr_ty.const_zero();
+
+        for (i, local_id) in self.proc.params.iter().enumerate() {
+            let alloc = self.local_allocs[*local_id];
+            // TODO: handle keyword args
+            param_locals_arr = self.ctx.builder.build_insert_value(param_locals_arr, alloc, i as u32, "param_locals_arr").unwrap().into_array_value();
+        }
+
 
         let param_locals_alloca = self.ctx.builder.build_alloca(param_locals_arr_ty, "param_locals_alloca");
         self.ctx.builder.build_store(param_locals_alloca, param_locals_arr);
@@ -101,6 +95,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         let cz = self.ctx.llvm_ctx.i32_type().const_zero();
         let param_locals_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(param_locals_alloca, &[cz, cz], "param_locals_ptr") };
         let argpack_local = self.func.get_params()[0];
+
         let rt_local = self.ctx.builder.build_load(self.emit.rt_global, "local_runtime");
         self.ctx.builder.build_call(self.ctx.rt.rt_arg_pack_unpack_into, &[argpack_local, param_locals_ptr.into(), self.ctx.llvm_ctx.i64_type().const_int(self.proc.env_id.index() as u64, false).into(), rt_local], "");
 
