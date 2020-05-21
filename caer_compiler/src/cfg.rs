@@ -22,7 +22,7 @@ pub struct Environment {
     // TODO: do something less tightly coupled
     pub string_table: StringTable,
     pub rt_env: caer_runtime::environment::Environment,
-    pub procs: HashMap<String, Proc>,
+    pub procs: HashMap<StringId, Proc>,
 }
 
 impl Environment {
@@ -41,7 +41,7 @@ pub struct Local {
     pub ty: ty::Complex,
     pub movable: bool,
     pub var:  bool,
-    pub name: Option<String>,
+    pub name: Option<StringId>,
     pub construct_scope: ScopeId,
     // if a value is moved, it won't be destructed with this local
     pub destruct_scope: Option<ScopeId>,
@@ -68,11 +68,11 @@ impl LocalFlow {
 
 #[derive(Debug)]
 pub struct Proc {
-    pub name: String,
+    pub name: StringId,
     pub env_id: ProcId,
 
     pub locals: IndexVec<LocalId, Local>,
-    pub vars: HashMap<String, LocalId>,
+    pub vars: HashMap<StringId, LocalId>,
     pub params: Vec<LocalId>,
     pub blocks: IndexVec<BlockId, Block>,
     pub scopes: IndexVec<ScopeId, Scope>,
@@ -83,7 +83,7 @@ pub struct Proc {
 }
 
 impl<'a> Proc {
-    pub fn new(name: String, env_id: ProcId) -> Self {
+    pub fn new(name: StringId, env_id: ProcId) -> Self {
         // ids map to indices in the scopes list; we can assume this scope will have id 0
         // TODO sounder way to handle this + locals?
         let global_scope = Scope::new(ScopeId::new(0), None);
@@ -109,7 +109,7 @@ impl<'a> Proc {
         new
     }
 
-    pub fn add_local(&mut self, scope: ScopeId, ty: ty::Complex, name: Option<&str>, var: bool) -> LocalId {
+    pub fn add_local(&mut self, scope: ScopeId, ty: ty::Complex, name: Option<StringId>, var: bool) -> LocalId {
         let id = LocalId::new(self.locals.len());
 
         let local = Local {
@@ -117,7 +117,8 @@ impl<'a> Proc {
             ty: ty,
             movable: false,
             var: var,
-            name: Some(name.map_or_else(|| {format!("local_{}", id.index())}, |s| {format!("var_{}", s.to_string())})),
+            //name: Some(name.map_or_else(|| {format!("local_{}", id.index())}, |s| {format!("var_{}", s.to_string())})),
+            name: name,
             construct_scope: scope,
             destruct_scope: Some(scope),
         };
@@ -149,8 +150,7 @@ impl<'a> Proc {
     }
 
     // scope tree search to find matching var
-    pub fn lookup_var(&self, root_scope: ScopeId, var: &str) -> Option<LocalId> {
-        let var = var.to_string();
+    pub fn lookup_var(&self, root_scope: ScopeId, var: StringId) -> Option<LocalId> {
         let mut cur_scope = root_scope;
         loop {
             let scope = &self.scopes[cur_scope];
@@ -241,10 +241,11 @@ impl<'a> Proc {
         }
     }
 
-    pub fn dot(&self) {
+    pub fn dot(&self, name: &str) {
         // TODO bad, for now we assume procs have unique names
         fs::create_dir_all("dbgout/dot/tino_cfg/").unwrap();
-        let mut f = File::create(format!("dbgout/dot/tino_cfg/cfg_{}.dot", self.name)).unwrap();
+        // TODO: replace proc-name here with some better repr
+        let mut f = File::create(format!("dbgout/dot/tino_cfg/cfg_{}.dot", name)).unwrap();
         dot::render(self, &mut f).unwrap();
 
         f.seek(SeekFrom::End(-2)).unwrap();
@@ -306,7 +307,8 @@ impl<'a> dot::Labeller<'a, BlockId, (BlockId, BlockId, String)> for Proc {
     }
 
     fn graph_id(&'a self) -> dot::Id<'a> {
-        dot::Id::new(&self.name).unwrap()
+        // TODO: extract actual name
+        dot::Id::new(format!("block_{}", self.name.id().to_string())).unwrap()
     }
 }
 
@@ -371,7 +373,7 @@ pub struct Scope {
     pub depth: i32,
     pub locals: Vec<LocalId>,
     pub destruct_locals: HashSet<LocalId>,
-    pub vars: HashMap<String, LocalId>,
+    pub vars: HashMap<StringId, LocalId>,
     pub blocks: Vec<BlockId>,
 }
 
@@ -403,7 +405,7 @@ pub enum Op {
     // TODO: STRINGID
     // TODO: use + ref a procid
     //Call(LocalId, StringId, Vec<LocalId>, Vec<(StringId, LocalId)>),
-    Call(LocalId, String, Vec<LocalId>),
+    Call(LocalId, StringId, Vec<LocalId>),
 
     Cast(LocalId, LocalId, ty::Primitive),
 }

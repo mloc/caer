@@ -4,6 +4,7 @@ use crate::cfg::*;
 use std::fs::{self, File};
 use std::borrow::Borrow;
 use crate::ty::{self, Ty};
+use caer_runtime::string_table::StringId;
 use std::convert::TryInto;
 use std::mem::size_of;
 
@@ -32,11 +33,11 @@ struct ProcEmit<'a, 'ctx> {
     blocks: IndexVec<BlockId, inkwell::basic_block::BasicBlock<'ctx>>,
     func: inkwell::values::FunctionValue<'ctx>,
     proc: &'a Proc,
-    name: String,
+    name: StringId,
 }
 
 impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
-    fn new(ctx: &'a Context<'a, 'ctx>, emit: &'a Emit<'a, 'ctx>, proc: &'a Proc, func: inkwell::values::FunctionValue<'ctx>, name: &str) -> Self {
+    fn new(ctx: &'a Context<'a, 'ctx>, emit: &'a Emit<'a, 'ctx>, proc: &'a Proc, func: inkwell::values::FunctionValue<'ctx>, name: StringId) -> Self {
         Self {
             ctx: ctx,
             emit: emit,
@@ -44,7 +45,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
             blocks: IndexVec::new(),
             func: func,
             proc: proc,
-            name: name.to_string(),
+            name: name,
         }
     }
 
@@ -56,7 +57,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 
         for local in self.proc.locals.iter() {
             let name = match local.name {
-                Some(ref s) => s,
+                Some(id) => self.emit.env.string_table.get(id),
                 None => "",
             };
 
@@ -87,7 +88,6 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
             // TODO: handle keyword args
             param_locals_arr = self.ctx.builder.build_insert_value(param_locals_arr, alloc, i as u32, "param_locals_arr").unwrap().into_array_value();
         }
-
 
         let param_locals_alloca = self.ctx.builder.build_alloca(param_locals_arr_ty, "param_locals_alloca");
         self.ctx.builder.build_store(param_locals_alloca, param_locals_arr);
@@ -313,8 +313,9 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 
                     self.ctx.builder.build_store(argpack_alloca, argpack);
 
+                    // TODO: don't lookup procs by symbol table like this
                     let func = emit.sym[name];
-                    let res_val = self.ctx.builder.build_call(func, &[argpack_alloca.into()], name).try_as_basic_value().left().unwrap();
+                    let res_val = self.ctx.builder.build_call(func, &[argpack_alloca.into()], "res").try_as_basic_value().left().unwrap();
                     let val = Value::new(Some(res_val), ty::Complex::Any);
                     self.store_local(id, &val);
                 },
@@ -393,9 +394,9 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 pub struct Emit<'a, 'ctx> {
     ctx: &'a Context<'a, 'ctx>,
     env: &'a Environment,
-    procs: Vec<(&'a Proc, &'a str, inkwell::values::FunctionValue<'ctx>)>,
+    procs: Vec<(&'a Proc, StringId, inkwell::values::FunctionValue<'ctx>)>,
     rt_global: inkwell::values::PointerValue<'ctx>,
-    sym: HashMap<String, inkwell::values::FunctionValue<'ctx>>,
+    sym: HashMap<StringId, inkwell::values::FunctionValue<'ctx>>,
 }
 
 impl<'a, 'ctx> Emit<'a, 'ctx> {
@@ -414,16 +415,16 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
 
     pub fn build_procs(&mut self) {
         for (name, proc) in self.env.procs.iter() {
-            self.add_proc(&name, &proc);
+            self.add_proc(*name, &proc);
         }
     }
 
-    fn add_proc(&mut self, name: &'a str, proc: &'a Proc) {
+    fn add_proc(&mut self, name: StringId, proc: &'a Proc) {
         //let mut proc_emit = ProcEmit::new(self.ctx, proc, name);
         let func_type = self.ctx.rt.ty.val_type.fn_type(&[self.ctx.rt.ty.arg_pack_type.ptr_type(inkwell::AddressSpace::Generic).into()], false);
-        let func = self.ctx.module.add_function(name, func_type, None);
+        let func = self.ctx.module.add_function(self.env.string_table.get(name), func_type, None);
 
-        self.sym.insert(name.to_string(), func);
+        self.sym.insert(name, func);
         self.procs.push((proc, name, func));
     }
 
@@ -434,7 +435,7 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
         for (proc, name, func) in self.procs.drain(..).collect::<Vec<_>>() { // TODO no
             let mut proc_emit = ProcEmit::new(self.ctx, self, proc, func, name);
             proc_emit.emit_proc(self);
-            if proc_emit.name == "entry" {
+            if self.env.string_table.get(name) == "entry" {
                 main_proc = Some(proc_emit.func.clone());
             }
         }

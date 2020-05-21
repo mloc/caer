@@ -22,6 +22,10 @@ use bincode;
 pub struct StringId(u64);
 
 impl StringId {
+    pub fn new(id: u64) -> Self {
+        Self(id)
+    }
+
     #[inline(always)]
     pub fn id(&self) -> u64 {
         self.0

@@ -34,7 +34,7 @@ impl<'a> Builder<'a> {
             }
             //procs.value[0].body.len() != 0 // TODO REMOVE THIS
         }).map(|(name, procs)| {
-            (name.clone(), ProcBuilder::build(self, &name, &procs.value[0]))
+            (self.add_string(name), ProcBuilder::build(self, &name, &procs.value[0]))
         }).collect();
     }
 
@@ -57,7 +57,7 @@ impl<'a, 'b> ProcBuilder<'a, 'b> {
         let name_id = builder.add_string(name);
         let env_id = builder.env.rt_env.add_proc(name_id);
 
-        let mut proc = cfg::Proc::new(name.to_string(), env_id);
+        let mut proc = cfg::Proc::new(name_id, env_id);
         let scope = proc.new_scope(proc.global_scope);
 
         let mut pb = Self {
@@ -79,9 +79,9 @@ impl<'a, 'b> ProcBuilder<'a, 'b> {
     fn build_proc(mut self) -> cfg::Proc {
         for (i, param) in self.ast_proc.parameters.iter().enumerate() {
             // TODO: need to record name separately for keyword args?
-            let local_id = self.proc.add_local(self.proc.global_scope, ty::Complex::Any, Some(&param.name), true);
-            self.proc.params.push(local_id);
             let name_id = self.builder.add_string(&param.name);
+            let local_id = self.proc.add_local(self.proc.global_scope, ty::Complex::Any, Some(name_id), true);
+            self.proc.params.push(local_id);
 
             let spec = self.builder.env.rt_env.get_proc_mut(self.proc.env_id);
             spec.params.push(name_id);
@@ -103,7 +103,7 @@ impl<'a, 'b> ProcBuilder<'a, 'b> {
         }
 
         self.proc.analyze();
-        self.proc.dot();
+        self.proc.dot(self.builder.env.string_table.get(self.proc.name));
 
         self.proc
     }
@@ -179,11 +179,12 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
     fn build_stmt(&mut self, stmt: &ast::Statement) {
         match stmt {
             ast::Statement::Var(v) => {
-                let local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, Some(&v.name), true);
+                let name_id = self.pb.builder.add_string(&v.name);
+                let local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, Some(name_id), true);
                 self.push_op(cfg::Op::MkVar(local));
 
                 if let Some(expr) = &v.value {
-                    self.build_assign(&v.name, expr);
+                    self.build_assign(name_id, expr);
                 }
             },
 
@@ -195,7 +196,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                                 assert!(unary.len() == 0);
                                 assert!(follow.len() == 0);
                                 match term.elem {
-                                    ast::Term::Ident(ref s) => s,
+                                    ast::Term::Ident(ref s) => self.pb.builder.add_string(s),
                                     _ => unimplemented!(),
                                 }
                             },
@@ -349,7 +350,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
         }
     }
 
-    fn build_assign(&mut self, var: &str, expr: &ast::Expression) {
+    fn build_assign(&mut self, var: StringId, expr: &ast::Expression) {
         let var_id = self.pb.proc.lookup_var(self.block.scope, var).unwrap();
         let asg_expr = self.build_expr(expr);
         self.push_op(cfg::Op::Store(var_id, asg_expr));
@@ -403,7 +404,8 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                 self.build_literal(cfg::Literal::String(str_id))
             },
             ast::Term::Ident(var_name) => {
-                let var_id = self.pb.proc.lookup_var(self.block.scope, var_name).unwrap();
+                let name_id = self.pb.builder.add_string(var_name);
+                let var_id = self.pb.proc.lookup_var(self.block.scope, name_id).unwrap();
                 // TODO var ty fix
                 let loaded = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
                 self.block.ops.push(cfg::Op::Load(loaded, var_id));
@@ -414,7 +416,8 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
 
                 let arg_exprs: Vec<_> = args.iter().map(|expr| self.build_expr(expr)).collect();
 
-                self.block.ops.push(cfg::Op::Call(res, name.clone(), arg_exprs));
+                let name_id = self.pb.builder.add_string(name);
+                self.block.ops.push(cfg::Op::Call(res, name_id, arg_exprs));
 
                 res
             },
