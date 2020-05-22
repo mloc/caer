@@ -8,9 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[cfg(feature = "serial")]
 #[macro_use] extern crate serde_derive;
-#[cfg(feature = "serial")]
 extern crate serde;
 
 use std::marker::PhantomData;
@@ -52,7 +50,7 @@ macro_rules! newtype_index {
      @type         [$type:ident]
      @max          [$max:expr]
      @debug_format [$debug_format:tt]) => (
-        #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, $($derives),*)]
+        #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize, Serialize, $($derives),*)]
         pub struct $type($($pub)* u32);
 
         impl Idx for $type {
@@ -316,13 +314,12 @@ pub trait Idx: Copy + Eq + Debug + 'static {
 
 pub type Enumerated<I, IT> = Map<Enumerate<IT>, IntoIdx<I>>;
 
-#[cfg_attr(feature = "serial", derive(Deserialize, Serialize))]
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Deserialize, Serialize)]
 pub struct IndexVec<I, T>
   where I: Idx,
 {
   vec: Vec<T>,
-  #[cfg_attr(feature = "serial", serde(skip))]
+  #[serde(skip)]
   _marker: PhantomData<Fn(&I)>,
 }
 
