@@ -444,7 +444,15 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
         self.env.string_table.serialize(File::create("stringtable.bincode").unwrap());
         bincode::serialize_into(File::create("environment.bincode").unwrap(), &self.env.rt_env).unwrap();
 
-        self.ctx.builder.build_call(self.ctx.rt.rt_runtime_init, &[self.rt_global.as_pointer_value().into()], "");
+        let vt_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(self.vt_global.as_pointer_value(), &[
+            self.ctx.llvm_ctx.i32_type().const_zero(),
+            self.ctx.llvm_ctx.i32_type().const_zero(),
+        ], "vt_ptr") };
+
+        self.ctx.builder.build_call(self.ctx.rt.rt_runtime_init, &[
+            self.rt_global.as_pointer_value().into(),
+            vt_ptr.into(),
+        ], "");
 
         block
     }
@@ -462,8 +470,7 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
         for ty in self.env.rt_env.type_tree.types.iter() {
             let vars_field_ty = self.ctx.rt.ty.val_type.array_type(ty.vars.len() as u32);
             let datum_ty = self.ctx.llvm_ctx.struct_type(&[
-                vars_field_ty.into()
-            ], false);
+                vars_field_ty.into()], false);
             assert_eq!(ty.id.index(), self.datum_types.len());
             self.datum_types.push(datum_ty);
         }
@@ -473,6 +480,8 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
         let mut vt_entries = Vec::new();
         // yuck, TODO: encapsulate typetree
         for ty in self.env.rt_env.type_tree.types.iter() {
+            let size_val = self.datum_types[ty.id].size_of().unwrap().const_cast(self.ctx.llvm_ctx.i64_type(), false).into();
+
             let var_index_fn = self.make_var_index_func(ty);
             let var_get_fn = self.make_get_var_func(ty, var_index_fn);
             let var_set_fn = self.make_set_var_func(ty, var_index_fn);
@@ -481,7 +490,12 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
             let var_get_fn_ptr = self.ctx.builder.build_bitcast(var_get_fn.as_global_value().as_pointer_value(), self.ctx.llvm_ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic), "");
             let var_set_fn_ptr = self.ctx.builder.build_bitcast(var_set_fn.as_global_value().as_pointer_value(), self.ctx.llvm_ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic), "");
             //let var_get_fn_ptr = self.ctx.llvm_ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic).const_zero().into();
-            let vt_entry = self.ctx.rt.ty.vt_entry_type.const_named_struct(&[var_index_fn_ptr, var_get_fn_ptr, var_set_fn_ptr]);
+            let vt_entry = self.ctx.rt.ty.vt_entry_type.const_named_struct(&[
+                size_val,
+                var_index_fn_ptr,
+                var_get_fn_ptr,
+                var_set_fn_ptr
+            ]);
             vt_entries.push(vt_entry);
         }
         self.vt_global.set_initializer(&self.ctx.rt.ty.vt_entry_type.const_array(&vt_entries));
@@ -671,6 +685,8 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
         let rt_type = ctx.i8_type().array_type(size_of::<caer_runtime::runtime::Runtime>() as u32);
 
         let vt_entry_type = ctx.struct_type(&[
+            // size
+            ctx.i64_type().into(),
             // var_index fn ptr
             ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic).into(),
             // var_get fn ptr
@@ -743,6 +759,10 @@ macro_rules! rt_funcs {
         rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
     );
 
+    ( @genty $ctx:ident $spec:ident $tyb:ident vt_entry_type $ty:ident) => (
+        rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
+    );
+
     ( @genty $ctx:ident $spec:ident $tyb:ident $tym:ident $ty:ident) => (
         rt_funcs!(@genty @ptrify $spec , $ctx.$ty())
     );
@@ -769,7 +789,7 @@ rt_funcs!{
         (rt_val_drop, void_type~val, [val_type~ptr]),
         (rt_val_cast_string_val, void_type~val, [val_type~ptr, val_type~ptr, rt_type~ptr]),
 
-        (rt_runtime_init, void_type~val, [rt_type~ptr]),
+        (rt_runtime_init, void_type~val, [rt_type~ptr, vt_entry_type~ptr]),
 
         (rt_arg_pack_unpack_into, void_type~val, [arg_pack_type~ptr, val_type_ptr~ptr, i64_type~val, rt_type~ptr]),
     ]
