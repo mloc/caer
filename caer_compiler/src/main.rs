@@ -13,8 +13,10 @@ fn main() {
     parser.enable_procs();
 
     let tree = parser.parse_object_tree();
+    println!("PARSED");
 
     let env = frontend::Builder::build(&tree);
+    println!("CFG BUILT");
 
     let llctx = inkwell::context::Context::create();
     let llmod = llctx.create_module("main");
@@ -23,6 +25,7 @@ fn main() {
     let emit_ctx = emit::Context::new(&llctx, &llmod, &llbuild);
     let mut builder = emit::Emit::new(&emit_ctx, &env);
     builder.build_procs();
+    println!("EMIT DONE");
 
     builder.emit();
     builder.run(true);

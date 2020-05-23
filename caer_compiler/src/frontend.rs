@@ -60,7 +60,7 @@ impl<'a, 'b> ProcBuilder<'a, 'b> {
         let mut proc = cfg::Proc::new(name_id, env_id);
         let scope = proc.new_scope(proc.global_scope);
 
-        let mut pb = Self {
+        let pb = Self {
             builder: builder,
             ast_proc: ast_proc,
             vars: HashMap::new(),
@@ -114,7 +114,6 @@ impl<'a, 'b> ProcBuilder<'a, 'b> {
         let mut builder = BlockBuilder::new(self, scope);
 
         for stmt in stmts.iter() {
-            println!("{:?}", stmt);
             builder.build_stmt(&stmt.elem);
         }
 

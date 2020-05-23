@@ -48,3 +48,5 @@
 	for(var/i = 1; i - 4; i = i + 1)
 		for(var/j = 1; j - 4; j = j + 1)
 			world << i + j*/
+
+//#include "badty.dm"

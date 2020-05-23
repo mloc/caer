@@ -96,8 +96,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         let param_locals_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(param_locals_alloca, &[cz, cz], "param_locals_ptr") };
         let argpack_local = self.func.get_params()[0];
 
-        let rt_local = self.ctx.builder.build_load(self.emit.rt_global, "local_runtime");
-        self.ctx.builder.build_call(self.ctx.rt.rt_arg_pack_unpack_into, &[argpack_local, param_locals_ptr.into(), self.ctx.llvm_ctx.i64_type().const_int(self.proc.env_id.index() as u64, false).into(), rt_local], "");
+        self.ctx.builder.build_call(self.ctx.rt.rt_arg_pack_unpack_into, &[argpack_local, param_locals_ptr.into(), self.ctx.llvm_ctx.i64_type().const_int(self.proc.env_id.index() as u64, false).into(), self.emit.rt_global.as_pointer_value().into()], "");
 
         block
     }
@@ -262,8 +261,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 Op::Put(id) => {
                     let norm = self.convert_to_any(*id);
 
-                    let rt_local = self.ctx.builder.build_load(self.emit.rt_global, "local_runtime");
-                    self.ctx.builder.build_call(self.ctx.rt.rt_val_print, &[norm.into(), rt_local], "put");
+                    self.ctx.builder.build_call(self.ctx.rt.rt_val_print, &[norm.into(), self.emit.rt_global.as_pointer_value().into()], "put");
                 },
 
                 Op::Binary(id, op, lhs, rhs) => {
@@ -271,8 +269,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     let rhs_ref = self.convert_to_any(*rhs).into();
                     let op_var = self.ctx.llvm_ctx.i32_type().const_int(*op as u64, false).into();
 
-                    let rt_local = self.ctx.builder.build_load(self.emit.rt_global, "local_runtime");
-                    self.ctx.builder.build_call(self.ctx.rt.rt_val_binary_op, &[self.local_allocs[*id].into(), rt_local, op_var, lhs_ref, rhs_ref], "");
+                    self.ctx.builder.build_call(self.ctx.rt.rt_val_binary_op, &[self.local_allocs[*id].into(), self.emit.rt_global.as_pointer_value().into(), op_var, lhs_ref, rhs_ref], "");
                 },
 
                 Op::Call(id, name, args) => {
@@ -310,8 +307,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     }
 
                     let src_ref = self.convert_to_any(*src).into();
-                    let rt_local = self.ctx.builder.build_load(self.emit.rt_global, "local_runtime");
-                    self.ctx.builder.build_call(self.ctx.rt.rt_val_cast_string_val, &[self.local_allocs[*dst].into(), src_ref, rt_local], "");
+                    self.ctx.builder.build_call(self.ctx.rt.rt_val_cast_string_val, &[self.local_allocs[*dst].into(), src_ref, self.emit.rt_global.as_pointer_value().into()], "");
                 }
 
                 //_ => unimplemented!("{:?}", op),
@@ -379,28 +375,25 @@ pub struct Emit<'a, 'ctx> {
     ctx: &'a Context<'a, 'ctx>,
     env: &'a Environment,
     procs: Vec<(&'a Proc, StringId, inkwell::values::FunctionValue<'ctx>)>,
-    rt_global: inkwell::values::PointerValue<'ctx>,
+    rt_global: inkwell::values::GlobalValue<'ctx>,
     vt_global: inkwell::values::GlobalValue<'ctx>,
-    vt_global_ty: inkwell::types::ArrayType<'ctx>,
     sym: HashMap<StringId, inkwell::values::FunctionValue<'ctx>>,
 }
 
 impl<'a, 'ctx> Emit<'a, 'ctx> {
     pub fn new(ctx: &'a Context<'a, 'ctx>, env: &'a Environment) -> Self {
-        let oppty = ctx.rt.ty.opaque_type.ptr_type(inkwell::AddressSpace::Generic);
-        let rt_global = ctx.module.add_global(oppty, Some(inkwell::AddressSpace::Generic), "runtime");
-        rt_global.set_initializer(&oppty.const_null());
+        let rt_global = ctx.module.add_global(ctx.rt.ty.rt_type, Some(inkwell::AddressSpace::Generic), "runtime");
+        rt_global.set_initializer(&ctx.rt.ty.rt_type.const_zero());
 
         // TODO: don't dig so deep into env?
-        let vt_global_ty= ctx.rt.ty.vt_entry_type.array_type(env.rt_env.type_tree.types.len() as u32);
+        let vt_global_ty = ctx.rt.ty.vt_entry_type.array_type(env.rt_env.type_tree.types.len() as u32);
         let vt_global = ctx.module.add_global(vt_global_ty, Some(inkwell::AddressSpace::Generic), "vtable");
 
         Self {
             ctx: ctx,
             env: env,
-            rt_global: rt_global.as_pointer_value(),
+            rt_global: rt_global,
             vt_global: vt_global,
-            vt_global_ty: vt_global_ty,
             procs: Vec::new(),
             sym: HashMap::new(),
         }
@@ -448,8 +441,7 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
         self.env.string_table.serialize(File::create("stringtable.bincode").unwrap());
         bincode::serialize_into(File::create("environment.bincode").unwrap(), &self.env.rt_env).unwrap();
 
-        let rt_ptr = self.ctx.builder.build_call(self.ctx.rt.rt_runtime_init, &[], "runtime").try_as_basic_value().left().unwrap().into_pointer_value();
-        self.ctx.builder.build_store(self.rt_global, rt_ptr);
+        self.ctx.builder.build_call(self.ctx.rt.rt_runtime_init, &[self.rt_global.as_pointer_value().into()], "");
 
         block
     }
@@ -547,6 +539,7 @@ struct RtFuncTyBundle<'ctx> {
     arg_pack_type: inkwell::types::StructType<'ctx>,
     arg_pack_tuple_type: inkwell::types::StructType<'ctx>,
 
+    rt_type: inkwell::types::ArrayType<'ctx>,
     vt_entry_type: inkwell::types::StructType<'ctx>,
 }
 
@@ -563,6 +556,8 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
 
         let arg_pack_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.ptr_type(inkwell::AddressSpace::Generic).into(), ctx.i64_type().into(), arg_pack_tuple_type_ptr.into()], false);
 
+        let rt_type = ctx.i8_type().array_type(size_of::<caer_runtime::runtime::Runtime>() as u32);
+
         let vt_entry_type = ctx.struct_type(&[
             // var_get fn ptr
             ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic).into(),
@@ -574,6 +569,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             opaque_type: opaque_type,
             arg_pack_type: arg_pack_type,
             arg_pack_tuple_type: arg_pack_tuple_type,
+            rt_type: rt_type,
             vt_entry_type: vt_entry_type,
         }
     }
@@ -623,6 +619,10 @@ macro_rules! rt_funcs {
         rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
     );
 
+    ( @genty $ctx:ident $spec:ident $tyb:ident rt_type $ty:ident) => (
+        rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
+    );
+
     ( @genty $ctx:ident $spec:ident $tyb:ident arg_pack_type $ty:ident) => (
         rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
     );
@@ -653,7 +653,7 @@ rt_funcs!{
         (rt_val_drop, void_type~val, [val_type~ptr]),
         (rt_val_cast_string_val, void_type~val, [val_type~ptr, val_type~ptr, opaque_type~ptr]),
 
-        (rt_runtime_init, opaque_type~ptr, []),
+        (rt_runtime_init, void_type~val, [rt_type~ptr]),
 
         (rt_arg_pack_unpack_into, void_type~val, [arg_pack_type~ptr, val_type_ptr~ptr, i64_type~val, opaque_type~ptr]),
     ]

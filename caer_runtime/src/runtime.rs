@@ -5,6 +5,7 @@ use crate::proc_spec::ProcSpec;
 use crate::environment::Environment;
 
 use std::fs::File;
+use std::mem;
 
 #[derive(Debug)]
 pub struct Runtime {
@@ -15,15 +16,15 @@ pub struct Runtime {
 #[expose_c_stubs(rt_runtime)]
 impl Runtime {
     // TODO: ERRH
-    pub fn init() -> Self {
+    pub fn init(&mut self) {
         let init_st = StringTable::deserialize(File::open("stringtable.bincode").unwrap());
         let init_env = bincode::deserialize_from(File::open("environment.bincode").unwrap()).unwrap();
 
-        println!("RTENV: {:?}", init_env);
-
-        Runtime {
+        let new = Runtime {
             string_table: init_st,
             env: init_env,
-        }
+        };
+
+        mem::forget(mem::replace(self, new));
     }
 }
