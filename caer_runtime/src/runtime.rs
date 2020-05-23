@@ -19,6 +19,8 @@ impl Runtime {
         let init_st = StringTable::deserialize(File::open("stringtable.bincode").unwrap());
         let init_env = bincode::deserialize_from(File::open("environment.bincode").unwrap()).unwrap();
 
+        println!("RTENV: {:?}", init_env);
+
         Runtime {
             string_table: init_st,
             env: init_env,

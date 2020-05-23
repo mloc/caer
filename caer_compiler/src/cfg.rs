@@ -6,6 +6,7 @@ use std::io::{Seek, SeekFrom, Write};
 use std::cmp;
 use caer_runtime::string_table::{StringTable, StringId};
 use caer_runtime::environment::ProcId;
+use serde::{Serialize, Deserialize};
 use caer_runtime;
 use crate::ty;
 use dot;
@@ -26,10 +27,13 @@ pub struct Environment {
 }
 
 impl Environment {
-    pub fn new() -> Self {
+    pub fn new(ot: &dreammaker::objtree::ObjectTree) -> Self {
+        let mut string_table = StringTable::new();
+        // tech debt, TODO: move TT init out of here
+        let tt = caer_runtime::type_tree::TypeTree::from_objtree(ot, &mut string_table);
         Self {
-            string_table: StringTable::new(),
-            rt_env: caer_runtime::environment::Environment::new(),
+            string_table: string_table,
+            rt_env: caer_runtime::environment::Environment::new(tt),
             procs: HashMap::new(),
         }
     }

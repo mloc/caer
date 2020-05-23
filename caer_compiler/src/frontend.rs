@@ -16,7 +16,7 @@ impl<'a> Builder<'a> {
     pub fn build(tree: &'a objtree::ObjectTree) -> cfg::Environment {
         let mut builder = Self {
             tree: tree,
-            env: cfg::Environment::new(),
+            env: cfg::Environment::new(tree),
         };
 
         builder.build_procs();

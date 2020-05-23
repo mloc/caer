@@ -4,20 +4,24 @@ use indexed_vec::{IndexVec, newtype_index, Idx};
 use serde::{Serialize, Deserialize};
 
 use crate::proc_spec::ProcSpec;
-use crate::string_table::StringId;
+use crate::string_table::{StringId, StringTable};
+use crate::type_tree::TypeTree;
 
 newtype_index!(ProcId {pub idx});
 
-// TODO: move stringtable into here, at least static
+// TODO: move stringtable into here, at least intern
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Environment {
+    // move into typetree?
     pub(crate) proc_specs: IndexVec<ProcId, ProcSpec>,
+    pub type_tree: TypeTree,
 }
 
 impl Environment {
-    pub fn new() -> Self {
+    pub fn new(tt: TypeTree) -> Self {
         Self {
             proc_specs: IndexVec::new(),
+            type_tree: tt,
         }
     }
 

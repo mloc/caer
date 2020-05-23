@@ -6,3 +6,4 @@ pub mod string_table;
 pub mod arg_pack;
 pub mod proc_spec;
 pub mod environment;
+pub mod type_tree;

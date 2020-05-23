@@ -7,6 +7,7 @@ version = "0.1.0"
 [dependencies]
 dot = "0.1.4"
 bincode = "1.2.1"
+serde = { version = "1.0", features = ["derive"] }
 
 [dependencies.dreammaker]
 #path = "../SpacemanDMM/src/dreammaker"
@@ -16,7 +17,6 @@ git = "https://github.com/SpaceManiac/SpacemanDMM"
 path = "../caer_runtime"
 
 [dependencies.indexed_vec]
-default-features = false
 path = "../indexed_vec"
 
 [dependencies.inkwell]

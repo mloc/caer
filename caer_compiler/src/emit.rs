@@ -131,23 +131,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 Value::new(Some(lit_val), ty::Primitive::Float.into())
             },
             Literal::String(id) => {
-                /*
-                // TODO make this all better, when inkwell supports GEP directly on const_string
-                // this GEPpery is bad.
-                let const_str = self.ctx.llvm_ctx.const_string(s.as_bytes(), false);
-                let tmp_local = self.ctx.builder.build_alloca(const_str.get_type(), "tmp_str");//.const_cast(self.ctx.llvm_ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic));
-                self.ctx.builder.build_store(tmp_local, const_str);
-
-                let cz = self.ctx.llvm_ctx.i32_type().const_int(0, false);
-                let tmp_local_ptr = unsafe { self.ctx.builder.build_gep(tmp_local, &[cz, cz], "") };
-                let len_val = self.ctx.llvm_ctx.i32_type().const_int(s.len().try_into().unwrap(), false);
-
-                let rt_local = self.ctx.builder.build_load(self.emit.rt_global, "local_runtime");
-                let lit_val = self.ctx.builder.build_call(self.ctx.rt.rt_string_from_utf8, &[rt_local, tmp_local_ptr.into(), len_val.into()], "dmstr_id").try_as_basic_value().left().unwrap().into();
-                */
-
                 let lit_val = self.ctx.llvm_ctx.i64_type().const_int(id.id(), false).into();
-
                 Value::new(Some(lit_val), ty::Primitive::String.into())
             },
             Literal::Null => {
@@ -396,6 +380,8 @@ pub struct Emit<'a, 'ctx> {
     env: &'a Environment,
     procs: Vec<(&'a Proc, StringId, inkwell::values::FunctionValue<'ctx>)>,
     rt_global: inkwell::values::PointerValue<'ctx>,
+    vt_global: inkwell::values::GlobalValue<'ctx>,
+    vt_global_ty: inkwell::types::ArrayType<'ctx>,
     sym: HashMap<StringId, inkwell::values::FunctionValue<'ctx>>,
 }
 
@@ -404,10 +390,17 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
         let oppty = ctx.rt.ty.opaque_type.ptr_type(inkwell::AddressSpace::Generic);
         let rt_global = ctx.module.add_global(oppty, Some(inkwell::AddressSpace::Generic), "runtime");
         rt_global.set_initializer(&oppty.const_null());
+
+        // TODO: don't dig so deep into env?
+        let vt_global_ty= ctx.rt.ty.vt_entry_type.array_type(env.rt_env.type_tree.types.len() as u32);
+        let vt_global = ctx.module.add_global(vt_global_ty, Some(inkwell::AddressSpace::Generic), "vtable");
+
         Self {
             ctx: ctx,
             env: env,
             rt_global: rt_global.as_pointer_value(),
+            vt_global: vt_global,
+            vt_global_ty: vt_global_ty,
             procs: Vec::new(),
             sym: HashMap::new(),
         }
@@ -429,6 +422,7 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
     }
 
     pub fn emit(&mut self) {
+        self.emit_vtable();
         let main_block = self.emit_main();
 
         let mut main_proc = None;
@@ -467,6 +461,26 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
         self.ctx.builder.build_store(argpack_alloca, argpack);
         self.ctx.builder.build_call(entry_func, &[argpack_alloca.into()], "");
         self.ctx.builder.build_return(None);
+    }
+
+    fn emit_vtable(&self) {
+        let fn_get_var_ty = self.ctx.rt.ty.val_type.fn_type(&[self.ctx.llvm_ctx.i64_type().into()], false);
+        let mut vt_entries = Vec::new();
+        // yuck, TODO: encapsulate typetree
+        for ty in self.env.rt_env.type_tree.types.iter() {
+            let var_get_fn = self.ctx.module.add_function(&format!("ty_{}_get_var", ty.id.index()), fn_get_var_ty, None);
+
+            let block = self.ctx.llvm_ctx.append_basic_block(var_get_fn, "");
+            self.ctx.builder.position_at_end(block);
+            let ret: inkwell::values::BasicValueEnum = self.ctx.rt.ty.val_type.const_zero().into();
+            self.ctx.builder.build_return(Some(&ret));
+
+            let var_get_fn_ptr = self.ctx.builder.build_bitcast(var_get_fn.as_global_value().as_pointer_value(), self.ctx.llvm_ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic), "");
+            //let var_get_fn_ptr = self.ctx.llvm_ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic).const_zero().into();
+            let vt_entry = self.ctx.rt.ty.vt_entry_type.const_named_struct(&[var_get_fn_ptr]);
+            vt_entries.push(vt_entry);
+        }
+        self.vt_global.set_initializer(&self.ctx.rt.ty.vt_entry_type.const_array(&vt_entries));
     }
 
     pub fn run(&self, opt: bool) {
@@ -532,6 +546,8 @@ struct RtFuncTyBundle<'ctx> {
 
     arg_pack_type: inkwell::types::StructType<'ctx>,
     arg_pack_tuple_type: inkwell::types::StructType<'ctx>,
+
+    vt_entry_type: inkwell::types::StructType<'ctx>,
 }
 
 impl<'ctx> RtFuncTyBundle<'ctx> {
@@ -547,12 +563,18 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
 
         let arg_pack_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.ptr_type(inkwell::AddressSpace::Generic).into(), ctx.i64_type().into(), arg_pack_tuple_type_ptr.into()], false);
 
+        let vt_entry_type = ctx.struct_type(&[
+            // var_get fn ptr
+            ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic).into(),
+        ], false);
+
         RtFuncTyBundle {
             val_type: val_type,
             val_type_ptr: val_type_ptr,
             opaque_type: opaque_type,
             arg_pack_type: arg_pack_type,
             arg_pack_tuple_type: arg_pack_tuple_type,
+            vt_entry_type: vt_entry_type,
         }
     }
 }
