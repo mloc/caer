@@ -25,6 +25,7 @@ impl Runtime {
             env: init_env,
         };
 
+        // this fn should only be called by init on a zeroed-out Runtime, which we need to ignore
         mem::forget(mem::replace(self, new));
     }
 }

@@ -5,6 +5,7 @@ use std::fs::{self, File};
 use std::borrow::Borrow;
 use crate::ty::{self, Ty};
 use caer_runtime::string_table::StringId;
+use caer_runtime::type_tree::{TypeId, DType};
 use std::convert::TryInto;
 use std::mem::size_of;
 
@@ -377,6 +378,7 @@ pub struct Emit<'a, 'ctx> {
     procs: Vec<(&'a Proc, StringId, inkwell::values::FunctionValue<'ctx>)>,
     rt_global: inkwell::values::GlobalValue<'ctx>,
     vt_global: inkwell::values::GlobalValue<'ctx>,
+    datum_types: IndexVec<TypeId, inkwell::types::StructType<'ctx>>,
     sym: HashMap<StringId, inkwell::values::FunctionValue<'ctx>>,
 }
 
@@ -394,6 +396,7 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
             env: env,
             rt_global: rt_global,
             vt_global: vt_global,
+            datum_types: IndexVec::new(),
             procs: Vec::new(),
             sym: HashMap::new(),
         }
@@ -415,6 +418,7 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
     }
 
     pub fn emit(&mut self) {
+        self.populate_datum_types();
         self.emit_vtable();
         let main_block = self.emit_main();
 
@@ -455,17 +459,21 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
         self.ctx.builder.build_return(None);
     }
 
+    fn populate_datum_types(&mut self) {
+        for ty in self.env.rt_env.type_tree.types.iter() {
+            let vars_field_ty = self.ctx.rt.ty.val_type.array_type(ty.vars.len() as u32);
+            let datum_ty = self.ctx.llvm_ctx.struct_type(&[vars_field_ty.into()], false);
+            assert_eq!(ty.id.index(), self.datum_types.len());
+            self.datum_types.push(datum_ty);
+        }
+    }
+
     fn emit_vtable(&self) {
-        let fn_get_var_ty = self.ctx.rt.ty.val_type.fn_type(&[self.ctx.llvm_ctx.i64_type().into()], false);
         let mut vt_entries = Vec::new();
         // yuck, TODO: encapsulate typetree
         for ty in self.env.rt_env.type_tree.types.iter() {
-            let var_get_fn = self.ctx.module.add_function(&format!("ty_{}_get_var", ty.id.index()), fn_get_var_ty, None);
 
-            let block = self.ctx.llvm_ctx.append_basic_block(var_get_fn, "");
-            self.ctx.builder.position_at_end(block);
-            let ret: inkwell::values::BasicValueEnum = self.ctx.rt.ty.val_type.const_zero().into();
-            self.ctx.builder.build_return(Some(&ret));
+            let var_get_fn = self.make_get_var_func(ty);
 
             let var_get_fn_ptr = self.ctx.builder.build_bitcast(var_get_fn.as_global_value().as_pointer_value(), self.ctx.llvm_ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic), "");
             //let var_get_fn_ptr = self.ctx.llvm_ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic).const_zero().into();
@@ -473,6 +481,52 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
             vt_entries.push(vt_entry);
         }
         self.vt_global.set_initializer(&self.ctx.rt.ty.vt_entry_type.const_array(&vt_entries));
+    }
+
+    fn make_get_var_func(&self, ty: &DType) -> inkwell::values::FunctionValue<'ctx> {
+        let datum_type_ptr = self.datum_types[ty.id].ptr_type(inkwell::AddressSpace::Generic);
+        let func_ty = self.ctx.rt.ty.val_type.fn_type(&[datum_type_ptr.into(), self.ctx.llvm_ctx.i64_type().into()], false);
+        let func = self.ctx.module.add_function(&format!("ty_{}_get_var", ty.id.index()), func_ty, None);
+
+        let entry_block = self.ctx.llvm_ctx.append_basic_block(func, "entry");
+        let dropout_block = self.ctx.llvm_ctx.append_basic_block(func, "dropout");
+        let conv_block = self.ctx.llvm_ctx.append_basic_block(func, "conv");
+
+        self.ctx.builder.position_at_end(dropout_block);
+        // TODO: RTE no such var
+        let ret: inkwell::values::BasicValueEnum = self.ctx.rt.ty.val_type.const_zero().into();
+        self.ctx.builder.build_return(Some(&ret));
+
+        self.ctx.builder.position_at_end(entry_block);
+        let offset_val_alloc = self.ctx.builder.build_alloca(self.ctx.llvm_ctx.i32_type(), "offset_alloc");
+
+        let mut cases = Vec::new();
+        for (i, var_name) in ty.vars.iter().enumerate() {
+            let case_block = self.ctx.llvm_ctx.append_basic_block(func, &format!("case_{}", var_name.id()));
+            self.ctx.builder.position_at_end(case_block);
+            let disc_val = self.ctx.llvm_ctx.i64_type().const_int(var_name.id(), false);
+            let this_offset_val = self.ctx.llvm_ctx.i32_type().const_int(i as u64, false);
+            self.ctx.builder.build_store(offset_val_alloc, this_offset_val);
+            self.ctx.builder.build_unconditional_branch(conv_block);
+            cases.push((disc_val, case_block));
+        }
+
+        self.ctx.builder.position_at_end(entry_block);
+        let param_val = func.get_last_param().unwrap().into_int_value();
+        self.ctx.builder.build_switch(param_val, dropout_block, &cases);
+
+        self.ctx.builder.position_at_end(conv_block);
+        let offset_val = self.ctx.builder.build_load(offset_val_alloc, "offset");
+        let datum_ptr_val = func.get_first_param().unwrap().into_pointer_value();
+        let val_ptr = unsafe { self.ctx.builder.build_gep(datum_ptr_val, &[
+            self.ctx.llvm_ctx.i32_type().const_zero(),
+            self.ctx.llvm_ctx.i32_type().const_zero(),
+            offset_val.into_int_value(),
+        ], "val_ptr") };
+        let ret_val = self.ctx.builder.build_load(val_ptr, "ret_val");
+        self.ctx.builder.build_return(Some(&ret_val));
+
+        func
     }
 
     pub fn run(&self, opt: bool) {
@@ -646,15 +700,15 @@ rt_funcs!{
         (rt_val_float, void_type~val, [val_type~ptr, f32_type~val]),
         (rt_val_string, void_type~val, [val_type~ptr, i64_type~val]),
         //(rt_val_int, void_type, [val_ptr_type, i32_type]),
-        (rt_val_binary_op, void_type~val, [val_type~ptr, opaque_type~ptr, i32_type~val, val_type~ptr, val_type~ptr]),
+        (rt_val_binary_op, void_type~val, [val_type~ptr, rt_type~ptr, i32_type~val, val_type~ptr, val_type~ptr]),
         (rt_val_to_switch_disc, i32_type~val, [val_type~ptr]),
-        (rt_val_print, void_type~val, [val_type~ptr, opaque_type~ptr]),
+        (rt_val_print, void_type~val, [val_type~ptr, rt_type~ptr]),
         (rt_val_cloned, void_type~val, [val_type~ptr]),
         (rt_val_drop, void_type~val, [val_type~ptr]),
-        (rt_val_cast_string_val, void_type~val, [val_type~ptr, val_type~ptr, opaque_type~ptr]),
+        (rt_val_cast_string_val, void_type~val, [val_type~ptr, val_type~ptr, rt_type~ptr]),
 
         (rt_runtime_init, void_type~val, [rt_type~ptr]),
 
-        (rt_arg_pack_unpack_into, void_type~val, [arg_pack_type~ptr, val_type_ptr~ptr, i64_type~val, opaque_type~ptr]),
+        (rt_arg_pack_unpack_into, void_type~val, [arg_pack_type~ptr, val_type_ptr~ptr, i64_type~val, rt_type~ptr]),
     ]
 }
