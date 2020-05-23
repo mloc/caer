@@ -6,7 +6,6 @@ use std::borrow::Borrow;
 use crate::ty::{self, Ty};
 use caer_runtime::string_table::StringId;
 use caer_runtime::type_tree::{TypeId, DType};
-use std::convert::TryInto;
 use std::mem::size_of;
 
 struct Value<'a> {
@@ -497,18 +496,16 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
         let ret: inkwell::values::BasicValueEnum = self.ctx.rt.ty.val_type.const_zero().into();
         self.ctx.builder.build_return(Some(&ret));
 
-        self.ctx.builder.position_at_end(entry_block);
-        let offset_val_alloc = self.ctx.builder.build_alloca(self.ctx.llvm_ctx.i32_type(), "offset_alloc");
-
         let mut cases = Vec::new();
+        let mut phi_incoming = Vec::new();
         for (i, var_name) in ty.vars.iter().enumerate() {
             let case_block = self.ctx.llvm_ctx.append_basic_block(func, &format!("case_{}", var_name.id()));
             self.ctx.builder.position_at_end(case_block);
             let disc_val = self.ctx.llvm_ctx.i64_type().const_int(var_name.id(), false);
             let this_offset_val = self.ctx.llvm_ctx.i32_type().const_int(i as u64, false);
-            self.ctx.builder.build_store(offset_val_alloc, this_offset_val);
             self.ctx.builder.build_unconditional_branch(conv_block);
             cases.push((disc_val, case_block));
+            phi_incoming.push((this_offset_val, case_block));
         }
 
         self.ctx.builder.position_at_end(entry_block);
@@ -516,12 +513,15 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
         self.ctx.builder.build_switch(param_val, dropout_block, &cases);
 
         self.ctx.builder.position_at_end(conv_block);
-        let offset_val = self.ctx.builder.build_load(offset_val_alloc, "offset");
+        let phi_incoming: Vec<_> = phi_incoming.iter().map(|(v, b)| (v as _, *b)).collect();
+        let offset_val = self.ctx.builder.build_phi(self.ctx.llvm_ctx.i32_type(), "offset");
+        offset_val.add_incoming(phi_incoming.as_slice());
+
         let datum_ptr_val = func.get_first_param().unwrap().into_pointer_value();
         let val_ptr = unsafe { self.ctx.builder.build_gep(datum_ptr_val, &[
             self.ctx.llvm_ctx.i32_type().const_zero(),
             self.ctx.llvm_ctx.i32_type().const_zero(),
-            offset_val.into_int_value(),
+            offset_val.as_basic_value().into_int_value(),
         ], "val_ptr") };
         let ret_val = self.ctx.builder.build_load(val_ptr, "ret_val");
         self.ctx.builder.build_return(Some(&ret_val));
