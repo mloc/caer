@@ -5,6 +5,7 @@ use std::fs::{self, File};
 use std::io::{Seek, SeekFrom, Write};
 use std::cmp;
 use caer_runtime::string_table::{StringTable, StringId};
+use caer_runtime::type_tree::TypeId;
 use caer_runtime::environment::ProcId;
 use serde::{Serialize, Deserialize};
 use caer_runtime;
@@ -218,7 +219,9 @@ impl<'a> Proc {
 
                     Op::Cast(_, src, _) => {
                         flow[*src].reads += 1;
-                    }
+                    },
+
+                    Op::AllocDatum(_, _) => {},
                 }
             }
 
@@ -412,6 +415,11 @@ pub enum Op {
     Call(LocalId, StringId, Vec<LocalId>),
 
     Cast(LocalId, LocalId, ty::Primitive),
+
+    // TODO: move into an "RTOP" variant?
+    // TODO: handle args to New()
+    // TODO: handle prefabs: PathId? PrefabId?
+    AllocDatum(LocalId, TypeId),
 }
 
 #[derive(Debug)]

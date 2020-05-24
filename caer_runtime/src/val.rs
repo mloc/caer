@@ -3,6 +3,7 @@ use std::mem;
 use crate::op;
 use crate::string_table::StringId;
 use crate::runtime::Runtime;
+use crate::datum::Datum;
 use std::ops::*;
 
 // null must be first
@@ -11,9 +12,8 @@ use std::ops::*;
 pub enum Val {
     Null,
     Float(f32),
-    //Int(i32),
     String(StringId),
-    Ref(i32),
+    Ref(*mut Datum),
 }
 
 #[expose_c_stubs(rt_val)]
@@ -68,29 +68,33 @@ impl Val {
             Val::Float(val) => (*val != 0.0) as u32,
             Val::Null => 0,
             Val::String(s) => s.is_empty() as u32,
-            Val::Ref(id) => (*id != 0) as u32,
+            Val::Ref(id) => 1,
         }
     }
 
-    fn print(&self, rt: &Runtime) {
+    fn print(&self, rt: &mut Runtime) {
         match self {
             Val::Null => println!("null"),
             Val::Float(n) => println!("{}", n),
             Val::String(s) => println!("{:?}", rt.string_table.get(*s)),
-            _ => unimplemented!(),
+            // disgusting
+            _ => {
+                let sid = self.cast_string(rt);
+                println!("{}", rt.string_table.get(sid));
+            },
         }
     }
 
     fn cloned(&mut self) {
         if let Val::Ref(_) = self {
-            unimplemented!("update refcounts")
+            //unimplemented!("update refcounts")
         }
     }
 
     // this is not Drop and shouldn't be treated as such.
     fn drop(&mut self) {
         if let Val::Ref(_) = self {
-            unimplemented!("update refcounts")
+            //unimplemented!("update refcounts")
         }
         mem::forget(mem::replace(self, Val::Null));
     }
@@ -233,7 +237,16 @@ impl Val {
             Val::Float(n) => rt.string_table.put(n.to_string()),
             //Val::Int(n) => n.to_string(),
             Val::String(s) => *s,
-            Val::Ref(_) => unimplemented!("lookup id + get ty path"),
+            Val::Ref(dp) => {
+                if dp.is_null() {
+                    StringId::new(0)
+                } else {
+                    unsafe {
+                        // TODO: encapsulate env
+                        rt.env.type_tree.types[(**dp).ty].path_str
+                    }
+                }
+            },
         }
     }
 
@@ -241,8 +254,9 @@ impl Val {
         match self {
             Val::Null => Val::Null,
             Val::Float(_) => Val::Float(0.0),
-            Val::String(_) => Val::Ref(0),
-            Val::Ref(_) => Val::Ref(0),
+            Val::String(_) => Val::String(StringId::new(0)),
+            // TODO: rip and tear, ptr in ref is Bad
+            Val::Ref(_) => Val::Ref(0 as *mut Datum),
         }
     }
 }

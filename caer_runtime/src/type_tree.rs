@@ -1,6 +1,7 @@
 use crate::string_table::{StringId, StringTable};
 use serde::{Serialize, Deserialize};
 use indexed_vec::{IndexVec, newtype_index, Idx};
+use std::collections::HashMap;
 
 // probably should do this in compiler to not pull dreammaker into runtime?
 use dreammaker::objtree;
@@ -11,12 +12,14 @@ newtype_index!(TypeId {pub idx});
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TypeTree {
     pub types: IndexVec<TypeId, DType>,
+    pub type_by_path_str: HashMap<StringId, TypeId>,
 }
 
 impl TypeTree {
     pub fn from_objtree(objtree: &objtree::ObjectTree, st: &mut StringTable) -> Self {
         let mut tt = Self {
             types: IndexVec::new(),
+            type_by_path_str: HashMap::new(),
         };
         tt.populate_from_objtree(objtree, st);
         tt
@@ -38,13 +41,14 @@ impl TypeTree {
         let mut open = Vec::new();
         for ty in objtree.root().children() {
             let id = TypeId::new(self.types.len());
-            let mut dty = DType {
+            let dty = DType {
                 id: id,
                 path: path_to_pvec(&ty.path, st),
+                path_str: st.put(&ty.path),
                 parent: None,
                 vars: TypeTree::convert_vars(ty, st),
             };
-            dty.vars.sort_unstable();
+            self.type_by_path_str.insert(dty.path_str, id);
             self.types.push(dty);
             open.push((id, ty));
         }
@@ -52,14 +56,14 @@ impl TypeTree {
         while let Some((parent_id, parent_ty)) = open.pop() {
             for child_ty in parent_ty.children() {
                 // ew
-                let mut child_vars = TypeTree::convert_vars(child_ty, st);
-                child_vars.extend_from_slice(&self.types[parent_id].vars);
-                child_vars.sort_unstable();
+                let mut child_vars = self.types[parent_id].vars.clone();
+                child_vars.extend_from_slice(&TypeTree::convert_vars(child_ty, st));
 
                 let child_id = TypeId::new(self.types.len());
                 let dty = DType {
                     id: child_id,
                     path: path_to_pvec(&child_ty.path, st),
+                    path_str: st.put(&child_ty.path),
                     parent: Some(parent_id),
                     vars: child_vars,
                 };
@@ -89,6 +93,7 @@ pub fn path_to_pvec(path_str: &str, st: &mut StringTable) -> Vec<StringId> {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DType {
     pub id: TypeId,
+    pub path_str: StringId,
     pub path: Vec<StringId>,
     pub parent: Option<TypeId>,
     // TODO: more detail

@@ -5,6 +5,10 @@
     var/s = "hey"
     world << "[s] there[1/90]"
     argfoo(s)
+    var/x = new /obj
+    world << x
+
+
     //world << 1 + 1
 	/*world << simple()
 	var/xx = abc() + 8 + abc()

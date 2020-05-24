@@ -452,6 +452,27 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
 
                 built
             },
+            ast::Term::New { type_: newty,  args } => {
+                assert!(args.is_none());
+                // TODO this is a ref, but we treat it as an Any for now
+                let ref_local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
+
+                let ty_id = match newty {
+                    ast::NewType::Prefab(pf) => {
+                        assert!(pf.vars.is_empty());
+                        // TODO: ughhhh, move path resolving into a helper, better encapsulation
+                        let pf_path = self.pb.builder.tree.root().navigate_path(&pf.path).unwrap().ty();
+                        let path_id = self.pb.builder.add_string(&pf_path.path);
+                        let type_id = self.pb.builder.env.rt_env.type_tree.type_by_path_str[&path_id];
+                        type_id
+                    },
+                    _ => unimplemented!("new with newty {:?}", newty),
+                };
+
+                self.block.ops.push(cfg::Op::AllocDatum(ref_local, ty_id));
+
+                ref_local
+            }
             _ => unimplemented!("{:?}", term),
         }
     }

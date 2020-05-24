@@ -6,6 +6,7 @@ use std::borrow::Borrow;
 use crate::ty::{self, Ty};
 use caer_runtime::string_table::StringId;
 use caer_runtime::type_tree::{TypeId, DType};
+use caer_runtime::datum::DATUM_VARS_FIELD_OFFSET;
 use std::mem::size_of;
 
 struct Value<'a> {
@@ -56,9 +57,9 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         let null_val = self.ctx.rt.ty.val_type.const_zero();
 
         for local in self.proc.locals.iter() {
-            let name = match local.name {
-                Some(id) => self.emit.env.string_table.get(id),
-                None => "",
+            let name = &match local.name {
+                Some(id) => format!("var_{}", self.emit.env.string_table.get(id)),
+                None => format!("local_{}", local.id.index()),
             };
 
             let alloc = match local.ty {
@@ -66,6 +67,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     match prim {
                         ty::Primitive::Float => self.ctx.builder.build_alloca(self.ctx.llvm_ctx.f32_type(), name),
                         ty::Primitive::String => self.ctx.builder.build_alloca(self.ctx.llvm_ctx.i64_type(), name),
+                        ty::Primitive::Ref => self.ctx.builder.build_alloca(self.ctx.rt.ty.opaque_type.ptr_type(inkwell::AddressSpace::Generic), name),
                         _ => unimplemented!("unhandled prim: {:?}", prim),
                     }
                 },
@@ -192,6 +194,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 
                 let local_upd = match val_prim {
                     ty::Primitive::Null => {
+                        // TODO: less magic for disc vals
                         let null_disc = self.ctx.llvm_ctx.i32_type().const_int(0, false);
                         let upd = self.ctx.builder.build_insert_value(local_struct, null_disc, 0, "upd_disc").unwrap();
                         upd
@@ -212,6 +215,15 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                         let val_as_int = self.ctx.builder.build_bitcast(val.val.unwrap(), self.ctx.llvm_ctx.i64_type(), "pack_val");
 
                         let upd = self.ctx.builder.build_insert_value(local_struct, string_disc, 0, "upd_disc").unwrap();
+                        let upd = self.ctx.builder.build_insert_value(upd, val_as_int, 2, "upd_val").unwrap();
+
+                        upd
+                    },
+                    ty::Primitive::Ref => {
+                        let ref_disc = self.ctx.llvm_ctx.i32_type().const_int(3, false);
+                        let val_as_int: inkwell::values::IntValue = self.ctx.builder.build_ptr_to_int(val.val.unwrap().into_pointer_value(), self.ctx.llvm_ctx.i64_type(), "pack_val");
+
+                        let upd = self.ctx.builder.build_insert_value(local_struct, ref_disc, 0, "upd_disc").unwrap();
                         let upd = self.ctx.builder.build_insert_value(upd, val_as_int, 2, "upd_val").unwrap();
 
                         upd
@@ -308,6 +320,15 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 
                     let src_ref = self.convert_to_any(*src).into();
                     self.ctx.builder.build_call(self.ctx.rt.rt_val_cast_string_val, &[self.local_allocs[*dst].into(), src_ref, self.emit.rt_global.as_pointer_value().into()], "");
+                }
+
+                Op::AllocDatum(dst, ty_id) => {
+                    let datum_ptr = self.ctx.builder.build_call(self.ctx.rt.rt_runtime_alloc_datum, &[
+                        self.emit.rt_global.as_pointer_value().into(),
+                        self.ctx.llvm_ctx.i32_type().const_int(ty_id.index() as u64, false).into(),
+                    ], "datum_ptr").try_as_basic_value().left().unwrap();
+                    let ref_val = Value::new(Some(datum_ptr), ty::Primitive::Ref.into());
+                    self.store_local(dst, &ref_val);
                 }
 
                 //_ => unimplemented!("{:?}", op),
@@ -470,7 +491,9 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
         for ty in self.env.rt_env.type_tree.types.iter() {
             let vars_field_ty = self.ctx.rt.ty.val_type.array_type(ty.vars.len() as u32);
             let datum_ty = self.ctx.llvm_ctx.struct_type(&[
-                vars_field_ty.into()], false);
+                self.ctx.llvm_ctx.i32_type().into(),
+                vars_field_ty.into(),
+            ], false);
             assert_eq!(ty.id.index(), self.datum_types.len());
             self.datum_types.push(datum_ty);
         }
@@ -516,7 +539,7 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
         let var_index = self.ctx.builder.build_call(index_func, &[var_name.into()], "var_index").try_as_basic_value().left().unwrap().into_int_value();
         let var_val_ptr = unsafe {self.ctx.builder.build_in_bounds_gep(datum_ptr, &[
             self.ctx.llvm_ctx.i32_type().const_zero(),
-            self.ctx.llvm_ctx.i32_type().const_zero(),
+            self.ctx.llvm_ctx.i32_type().const_int(DATUM_VARS_FIELD_OFFSET, false),
             var_index,
         ], "var_val_ptr")};
         let var_val = self.ctx.builder.build_load(var_val_ptr, "var_val");
@@ -541,7 +564,7 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
         let var_index = self.ctx.builder.build_call(index_func, &[var_name.into()], "var_index").try_as_basic_value().left().unwrap().into_int_value();
         let var_val_ptr = unsafe {self.ctx.builder.build_in_bounds_gep(datum_ptr, &[
             self.ctx.llvm_ctx.i32_type().const_zero(),
-            self.ctx.llvm_ctx.i32_type().const_int(0, false),
+            self.ctx.llvm_ctx.i32_type().const_int(DATUM_VARS_FIELD_OFFSET, false),
             var_index,
         ], "var_val_ptr")};
         self.ctx.builder.build_store(var_val_ptr, asg_val);
@@ -781,7 +804,6 @@ rt_funcs!{
     [
         (rt_val_float, void_type~val, [val_type~ptr, f32_type~val]),
         (rt_val_string, void_type~val, [val_type~ptr, i64_type~val]),
-        //(rt_val_int, void_type, [val_ptr_type, i32_type]),
         (rt_val_binary_op, void_type~val, [val_type~ptr, rt_type~ptr, i32_type~val, val_type~ptr, val_type~ptr]),
         (rt_val_to_switch_disc, i32_type~val, [val_type~ptr]),
         (rt_val_print, void_type~val, [val_type~ptr, rt_type~ptr]),
@@ -790,6 +812,7 @@ rt_funcs!{
         (rt_val_cast_string_val, void_type~val, [val_type~ptr, val_type~ptr, rt_type~ptr]),
 
         (rt_runtime_init, void_type~val, [rt_type~ptr, vt_entry_type~ptr]),
+        (rt_runtime_alloc_datum, opaque_type~ptr, [rt_type~ptr, i32_type~val]),
 
         (rt_arg_pack_unpack_into, void_type~val, [arg_pack_type~ptr, val_type_ptr~ptr, i64_type~val, rt_type~ptr]),
     ]

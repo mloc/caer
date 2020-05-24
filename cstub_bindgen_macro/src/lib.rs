@@ -121,10 +121,14 @@ pub fn expose_c_stubs(attr: TokenStream, input: TokenStream) -> TokenStream {
                         }
 
                         let prim = prim_ty.contains(&**ty);
+                        let ptr = match **ty {
+                            syn::Type::Ptr(_) => true,
+                            _ => false,
+                        };
 
                         let mut pt = None;
 
-                        if !prim {
+                        if !ptr && !prim {
                             res = quote!{
                                 Box::into_raw(Box::new(#res))
                             };
