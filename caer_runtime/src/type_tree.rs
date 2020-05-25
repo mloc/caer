@@ -1,7 +1,7 @@
 use crate::string_table::{StringId, StringTable};
 use serde::{Serialize, Deserialize};
 use indexed_vec::{IndexVec, newtype_index, Idx};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // probably should do this in compiler to not pull dreammaker into runtime?
 use dreammaker::objtree;
@@ -13,6 +13,7 @@ newtype_index!(TypeId {pub idx});
 pub struct TypeTree {
     pub types: IndexVec<TypeId, DType>,
     pub type_by_path_str: HashMap<StringId, TypeId>,
+    pub type_by_node_id: HashMap<u64, TypeId>,
 }
 
 impl TypeTree {
@@ -20,16 +21,26 @@ impl TypeTree {
         let mut tt = Self {
             types: IndexVec::new(),
             type_by_path_str: HashMap::new(),
+            type_by_node_id: HashMap::new(),
         };
         tt.populate_from_objtree(objtree, st);
         tt
     }
 
     // TODO: move to builder struct
-    fn convert_vars<'a>(ty: objtree::TypeRef<'a>, st: &mut StringTable) -> Vec<StringId> {
+    fn convert_vars<'a>(prev: &[StringId], ty: objtree::TypeRef<'a>, st: &mut StringTable) -> Vec<StringId> {
+        let prev_lookup: HashSet<_> = prev.iter().collect();
         let mut vars = Vec::new();
+        let pty = ty.parent_type_without_root();
         for (name, _) in ty.vars.iter() {
-            vars.push(st.put(name));
+            if name == "parent_type" || name == "vars" || name == "type" {
+                continue;
+            }
+            let var_id = st.put(name);
+            if prev_lookup.contains(&var_id) {
+                continue;
+            }
+            vars.push(var_id);
         }
 
         vars
@@ -38,41 +49,40 @@ impl TypeTree {
     // threading stringtable around here is meh. TODO: move to builder struct
     // this whole fn is meh
     fn populate_from_objtree(&mut self, objtree: &objtree::ObjectTree, st: &mut StringTable) {
-        let mut open = Vec::new();
-        for ty in objtree.root().children() {
-            let id = TypeId::new(self.types.len());
-            let dty = DType {
-                id: id,
-                path: path_to_pvec(&ty.path, st),
-                path_str: st.put(&ty.path),
-                parent: None,
-                vars: TypeTree::convert_vars(ty, st),
-            };
-            self.type_by_path_str.insert(dty.path_str, id);
-            self.types.push(dty);
-            open.push((id, ty));
-        }
-
-        while let Some((parent_id, parent_ty)) = open.pop() {
-            for child_ty in parent_ty.children() {
-                // ew
-                let mut child_vars = self.types[parent_id].vars.clone();
-                child_vars.extend_from_slice(&TypeTree::convert_vars(child_ty, st));
-
-                let child_id = TypeId::new(self.types.len());
-                let dty = DType {
-                    id: child_id,
-                    path: path_to_pvec(&child_ty.path, st),
-                    path_str: st.put(&child_ty.path),
-                    parent: Some(parent_id),
-                    vars: child_vars,
-                };
-                assert_eq!(dty.path.len(), self.types[parent_id].path.len() + 1);
-
-                self.types.push(dty);
-                open.push((child_id, child_ty));
+        for ty_ref in objtree.iter_types() {
+            if ty_ref.index().index() == 0 {
+                continue;
             }
+            self.populate_ty(ty_ref, st);
         }
+    }
+
+    fn populate_ty<'a>(&mut self, oty: objtree::TypeRef<'a>, st: &mut StringTable) -> TypeId {
+        if let Some(id) = self.type_by_node_id.get(&(oty.index().index() as u64)) {
+            return *id;
+        }
+
+        let parent_ty = oty.parent_type_without_root().map(|tyr| self.populate_ty(tyr, st));
+
+        let mut vars = match parent_ty {
+            Some(ty_id) => self.types[ty_id].vars.clone(),
+            None => Vec::new(),
+        };
+        vars.extend_from_slice(&TypeTree::convert_vars(&vars, oty, st));
+
+        let id = TypeId::new(self.types.len());
+        let dty = DType {
+            id: id,
+            path: path_to_pvec(&oty.path, st),
+            path_str: st.put(&oty.path),
+            parent: parent_ty,
+            vars: vars,
+        };
+
+        self.type_by_node_id.insert(oty.index().index() as u64, id);
+        self.type_by_path_str.insert(dty.path_str, id);
+        self.types.push(dty);
+        id
     }
 }
 

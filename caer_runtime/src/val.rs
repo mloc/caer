@@ -44,7 +44,6 @@ impl Val {
                 if op_enum != op::BinaryOp::Add {
                     unimplemented!("RTE badop")
                 }
-                // kinda bad, don't need to alloc a new dmstring if rhs is non-str
                 // TODO reconsider this, DM doesn't allow "e" + 2
                 let rval = rhs.cast_string(rt);
                 Val::String(rt.string_table.concat(lval, rval))
@@ -68,7 +67,7 @@ impl Val {
             Val::Float(val) => (*val != 0.0) as u32,
             Val::Null => 0,
             Val::String(s) => s.is_empty() as u32,
-            Val::Ref(id) => 1,
+            Val::Ref(_) => 1,
         }
     }
 

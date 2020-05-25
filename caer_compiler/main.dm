@@ -1,3 +1,6 @@
+/anon_type
+    var/aaa
+
 /proc/argfoo(var/bar)
     world << bar
 
@@ -6,7 +9,7 @@
     world << "[s] there[1/90]"
     argfoo(s)
     var/x = new /obj
-    world << x
+    world << x:name
 
 
     //world << 1 + 1

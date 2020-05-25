@@ -358,11 +358,24 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
     fn build_expr(&mut self, expr: &ast::Expression) -> cfg::LocalId {
         match expr {
             ast::Expression::Base { unary, term, follow } => {
-                let expr = self.build_term(&term.elem);
+                let mut local = self.build_term(&term.elem);
                 assert!(unary.len() == 0);
-                assert!(follow.len() == 0);
 
-                expr
+                for follow_span in follow {
+                    match &follow_span.elem {
+                        ast::Follow::Field(kind, field) => {
+                            // TODO: handle dots and safe indexing, with lookup
+                            assert_eq!(*kind, ast::IndexKind::Colon);
+                            let field_id = self.pb.builder.add_string(field);
+                            let new_local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
+                            self.push_op(cfg::Op::DatumLoadVar(new_local, local, field_id));
+                            local = new_local;
+                        },
+                        f => unimplemented!("follow: {:?}", f),
+                    }
+                }
+
+                local
             },
 
             ast::Expression::BinaryOp { op, lhs, rhs } => {
@@ -407,7 +420,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                 let var_id = self.pb.proc.lookup_var(self.block.scope, name_id).unwrap();
                 // TODO var ty fix
                 let loaded = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
-                self.block.ops.push(cfg::Op::Load(loaded, var_id));
+                self.push_op(cfg::Op::Load(loaded, var_id));
                 loaded
             },
             ast::Term::Call(name, args) => {
@@ -416,7 +429,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                 let arg_exprs: Vec<_> = args.iter().map(|expr| self.build_expr(expr)).collect();
 
                 let name_id = self.pb.builder.add_string(name);
-                self.block.ops.push(cfg::Op::Call(res, name_id, arg_exprs));
+                self.push_op(cfg::Op::Call(res, name_id, arg_exprs));
 
                 res
             },
@@ -432,11 +445,11 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                     let expr_l = self.build_expr(expr);
                     // TODO this is a string, but we treat it as an Any for now
                     let expr_cast_l = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
-                    self.block.ops.push(cfg::Op::Cast(expr_cast_l, expr_l, ty::Primitive::String));
+                    self.push_op(cfg::Op::Cast(expr_cast_l, expr_l, ty::Primitive::String));
 
                     // TODO this is a string, but we treat it as an Any for now
                     let new_built = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
-                    self.block.ops.push(cfg::Op::Binary(new_built, BinaryOp::Add, built, expr_cast_l));
+                    self.push_op(cfg::Op::Binary(new_built, BinaryOp::Add, built, expr_cast_l));
                     built = new_built;
 
                     if sep.len() > 0 {
@@ -445,7 +458,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                         // TODO this cloning is bad, too lazy to fix lifetimes
                         let lit = cfg::Literal::String(self.pb.builder.add_string(sep.clone()));
                         let lit_l = self.build_literal(lit);
-                        self.block.ops.push(cfg::Op::Binary(new_built, BinaryOp::Add, built, lit_l));
+                        self.push_op(cfg::Op::Binary(new_built, BinaryOp::Add, built, lit_l));
                         built = new_built
                     }
                 }
@@ -469,7 +482,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                     _ => unimplemented!("new with newty {:?}", newty),
                 };
 
-                self.block.ops.push(cfg::Op::AllocDatum(ref_local, ty_id));
+                self.push_op(cfg::Op::AllocDatum(ref_local, ty_id));
 
                 ref_local
             }

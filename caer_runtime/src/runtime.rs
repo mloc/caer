@@ -25,7 +25,6 @@ impl Runtime {
         let init_st = StringTable::deserialize(File::open("stringtable.bincode").unwrap());
         let init_env: Environment = bincode::deserialize_from(File::open("environment.bincode").unwrap()).unwrap();
         let vtable = vtable::Vtable::from_static(vtable_ptr, init_env.type_tree.types.len());
-        println!("VTABLE: {:?}", vtable);
 
         let new = Runtime {
             string_table: init_st,

@@ -6,7 +6,8 @@ use std::borrow::Borrow;
 use crate::ty::{self, Ty};
 use caer_runtime::string_table::StringId;
 use caer_runtime::type_tree::{TypeId, DType};
-use caer_runtime::datum::DATUM_VARS_FIELD_OFFSET;
+use caer_runtime::datum;
+use caer_runtime::vtable;
 use std::mem::size_of;
 
 struct Value<'a> {
@@ -144,9 +145,17 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         self.store_local(local_id, &val);
     }
 
-    fn load_local<L: Borrow<LocalId>>(&self, local: L) -> Value {
-        let ty = self.proc.locals[*local.borrow()].ty.clone();
-        let val = self.ctx.builder.build_load(self.local_allocs[*local.borrow()], "").into();
+    // TODO: refactor out as_any, bad.
+    fn load_local<L: Borrow<LocalId>>(&self, local: L, as_any: bool) -> Value {
+        let ty = match as_any {
+            true => ty::Complex::Any,
+            false => self.proc.locals[*local.borrow()].ty.clone(),
+        };
+        let alloc = match as_any {
+            true => self.convert_to_any(*local.borrow()),
+            false => self.local_allocs[*local.borrow()],
+        };
+        let val = self.ctx.builder.build_load(alloc, "").into();
 
         Value::new(val, ty)
     }
@@ -165,7 +174,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
             return self.local_allocs[local_id];
         }
 
-        let val = self.load_local(local_id);
+        let val = self.load_local(local_id, false);
         let temp_alloca = self.ctx.builder.build_alloca(self.ctx.rt.ty.val_type, "temp");
         self.store_val(&val, &ty::Complex::Any, temp_alloca);
         temp_alloca
@@ -252,7 +261,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 }
 
                 Op::Load(local, var) => {
-                    let copy = self.load_local(var);
+                    let copy = self.load_local(var, false);
                     self.store_local(local, &copy);
                     if copy.ty.needs_destructor() {
                         self.ctx.builder.build_call(self.ctx.rt.rt_val_cloned, &[self.local_allocs[*local].into()], "");
@@ -262,7 +271,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 Op::Store(var, local) => {
                     self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[self.local_allocs[*var].into()], "");
 
-                    let copy = self.load_local(local);
+                    let copy = self.load_local(local, false);
                     self.store_local(var, &copy);
 
                     if copy.ty.needs_destructor() && self.proc.locals[*local].movable {
@@ -320,7 +329,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 
                     let src_ref = self.convert_to_any(*src).into();
                     self.ctx.builder.build_call(self.ctx.rt.rt_val_cast_string_val, &[self.local_allocs[*dst].into(), src_ref, self.emit.rt_global.as_pointer_value().into()], "");
-                }
+                },
 
                 Op::AllocDatum(dst, ty_id) => {
                     let datum_ptr = self.ctx.builder.build_call(self.ctx.rt.rt_runtime_alloc_datum, &[
@@ -329,7 +338,39 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     ], "datum_ptr").try_as_basic_value().left().unwrap();
                     let ref_val = Value::new(Some(datum_ptr), ty::Primitive::Ref.into());
                     self.store_local(dst, &ref_val);
-                }
+                },
+
+                // awful
+                Op::DatumLoadVar(dst, src, var_id) => {
+                    // TODO: maybe rework to use GEP
+                    let val = self.load_local(src, true);
+                    // TODO: use some constant instead of 2
+                    // TODO: TYAPI
+                    // TODO: cast val struct instead of int2ptr
+                    let ref_ptr_int = self.ctx.builder.build_extract_value(val.val.unwrap().into_struct_value(), 2, "ref_ptr_int").unwrap().into_int_value();
+                    let ref_ptr = self.ctx.builder.build_int_to_ptr(ref_ptr_int, self.ctx.rt.ty.datum_common_type_ptr, "ref_ptr");
+                    let ty_id_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(ref_ptr, &[
+                        self.ctx.llvm_ctx.i32_type().const_zero(),
+                        self.ctx.llvm_ctx.i32_type().const_int(datum::DATUM_TY_FIELD_OFFSET, false),
+                    ], "ty_id_ptr") };
+                    let ty_id = self.ctx.builder.build_load(ty_id_ptr, "ty_id").into_int_value();
+                    // TODO: vtable lookup helper
+                    // pointer to fn pointer
+                    let var_get_ptr_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(self.emit.vt_global.as_pointer_value(), &[
+                        self.ctx.llvm_ctx.i32_type().const_zero(),
+                        ty_id,
+                        self.ctx.llvm_ctx.i32_type().const_int(vtable::VTABLE_VAR_GET_FIELD_OFFSET, false),
+                    ], "var_get_ptr_ptr") };
+                    let var_get_ptr_ers = self.ctx.builder.build_load(var_get_ptr_ptr, "var_get_ptr_ers").into_pointer_value();
+                    // TODO: factor out, same as in make_get_var_func(), roughly.
+                    let func_ty = self.ctx.rt.ty.val_type.fn_type(&[self.ctx.rt.ty.datum_common_type_ptr.into(), self.ctx.llvm_ctx.i64_type().into()], false).ptr_type(inkwell::AddressSpace::Generic);
+                    let var_get_ptr= self.ctx.builder.build_bitcast(var_get_ptr_ers, func_ty, "var_get_ptr").into_pointer_value();
+                    let var_val = self.ctx.builder.build_call(var_get_ptr, &[
+                        ref_ptr.into(),
+                        self.ctx.llvm_ctx.i64_type().const_int(var_id.id(), false).into(),
+                    ], "var_val").try_as_basic_value().left().unwrap().into_struct_value();
+                    self.store_local(dst, &Value::new(Some(var_val.into()), ty::Complex::Any));
+                },
 
                 //_ => unimplemented!("{:?}", op),
             }
@@ -539,7 +580,7 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
         let var_index = self.ctx.builder.build_call(index_func, &[var_name.into()], "var_index").try_as_basic_value().left().unwrap().into_int_value();
         let var_val_ptr = unsafe {self.ctx.builder.build_in_bounds_gep(datum_ptr, &[
             self.ctx.llvm_ctx.i32_type().const_zero(),
-            self.ctx.llvm_ctx.i32_type().const_int(DATUM_VARS_FIELD_OFFSET, false),
+            self.ctx.llvm_ctx.i32_type().const_int(datum::DATUM_VARS_FIELD_OFFSET, false),
             var_index,
         ], "var_val_ptr")};
         let var_val = self.ctx.builder.build_load(var_val_ptr, "var_val");
@@ -564,7 +605,7 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
         let var_index = self.ctx.builder.build_call(index_func, &[var_name.into()], "var_index").try_as_basic_value().left().unwrap().into_int_value();
         let var_val_ptr = unsafe {self.ctx.builder.build_in_bounds_gep(datum_ptr, &[
             self.ctx.llvm_ctx.i32_type().const_zero(),
-            self.ctx.llvm_ctx.i32_type().const_int(DATUM_VARS_FIELD_OFFSET, false),
+            self.ctx.llvm_ctx.i32_type().const_int(datum::DATUM_VARS_FIELD_OFFSET, false),
             var_index,
         ], "var_val_ptr")};
         self.ctx.builder.build_store(var_val_ptr, asg_val);
@@ -688,6 +729,9 @@ struct RtFuncTyBundle<'ctx> {
     arg_pack_type: inkwell::types::StructType<'ctx>,
     arg_pack_tuple_type: inkwell::types::StructType<'ctx>,
 
+    datum_common_type: inkwell::types::StructType<'ctx>,
+    datum_common_type_ptr: inkwell::types::PointerType<'ctx>,
+
     rt_type: inkwell::types::ArrayType<'ctx>,
     vt_entry_type: inkwell::types::StructType<'ctx>,
 }
@@ -705,8 +749,13 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
 
         let arg_pack_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.ptr_type(inkwell::AddressSpace::Generic).into(), ctx.i64_type().into(), arg_pack_tuple_type_ptr.into()], false);
 
-        let rt_type = ctx.i8_type().array_type(size_of::<caer_runtime::runtime::Runtime>() as u32);
+        let datum_common_type = ctx.struct_type(&[
+            // ref
+            ctx.i32_type().into(),
+        ], false);
+        let datum_common_type_ptr = datum_common_type.ptr_type(inkwell::AddressSpace::Generic);
 
+        let rt_type = ctx.i8_type().array_type(size_of::<caer_runtime::runtime::Runtime>() as u32);
         let vt_entry_type = ctx.struct_type(&[
             // size
             ctx.i64_type().into(),
@@ -724,6 +773,8 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             opaque_type: opaque_type,
             arg_pack_type: arg_pack_type,
             arg_pack_tuple_type: arg_pack_tuple_type,
+            datum_common_type: datum_common_type,
+            datum_common_type_ptr: datum_common_type_ptr,
             rt_type: rt_type,
             vt_entry_type: vt_entry_type,
         }
