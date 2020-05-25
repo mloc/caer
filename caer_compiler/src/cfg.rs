@@ -226,6 +226,10 @@ impl<'a> Proc {
                     Op::DatumLoadVar(_, src, _) => {
                         flow[*src].reads += 1;
                     },
+
+                    Op::DatumStoreVar(_, _, src) => {
+                        flow[*src].reads += 1;
+                    },
                 }
             }
 
@@ -425,7 +429,7 @@ pub enum Op {
     // TODO: handle prefabs: PathId? PrefabId?
     AllocDatum(LocalId, TypeId),
     DatumLoadVar(LocalId, LocalId, StringId), // local1 = local2.var
-    //DatumStoreVar(LocalId, StringId, LocalId), // local1.var = local2
+    DatumStoreVar(LocalId, StringId, LocalId), // local1.var = local2
 }
 
 #[derive(Debug)]

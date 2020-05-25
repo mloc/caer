@@ -183,27 +183,57 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                 self.push_op(cfg::Op::MkVar(local));
 
                 if let Some(expr) = &v.value {
-                    self.build_assign(name_id, expr);
+                    self.build_assign(None, name_id, expr);
                 }
             },
 
             ast::Statement::Expr(expr) => {
                 match expr {
                     ast::Expression::AssignOp { op, lhs, rhs } => {
+                        let mut base = None;
                         let var = match lhs.as_ref() {
                             ast::Expression::Base { unary, term, follow } => {
                                 assert!(unary.len() == 0);
-                                assert!(follow.len() == 0);
-                                match term.elem {
+
+                                let mut final_field = match term.elem {
                                     ast::Term::Ident(ref s) => self.pb.builder.add_string(s),
                                     _ => unimplemented!(),
+                                };
+
+                                for follow_span in follow {
+                                    match &follow_span.elem {
+                                        ast::Follow::Field(kind, field) => {
+                                            // TODO: handle dots and safe indexing, with lookup
+                                            // TODO: we actually care about the *previous* follow's
+                                            // kind
+                                            assert_eq!(*kind, ast::IndexKind::Colon);
+                                            // TODO: this should have a narrower scope.
+                                            let holder = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
+                                            match base {
+                                                None => {
+                                                    let var_id = self.pb.proc.lookup_var(self.block.scope, final_field).unwrap();
+                                                    self.push_op(cfg::Op::Load(holder, var_id));
+                                                },
+                                                Some(id) => {
+                                                    self.push_op(cfg::Op::DatumLoadVar(holder, id, final_field));
+                                                },
+                                            }
+
+                                            base = Some(holder);
+                                            let field_id = self.pb.builder.add_string(field);
+                                            final_field = field_id;
+                                        },
+                                        f => unimplemented!("lhs term follow: {:?}", f),
+                                    }
                                 }
+
+                                final_field
                             },
 
                             _ => unimplemented!(),
                         };
 
-                        self.build_assign(var, &*rhs);
+                        self.build_assign(base, var, &*rhs);
                     },
 
                     ast::Expression::BinaryOp { op, lhs, rhs } => {
@@ -349,10 +379,17 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
         }
     }
 
-    fn build_assign(&mut self, var: StringId, expr: &ast::Expression) {
-        let var_id = self.pb.proc.lookup_var(self.block.scope, var).unwrap();
+    fn build_assign(&mut self, base: Option<cfg::LocalId>, var: StringId, expr: &ast::Expression) {
         let asg_expr = self.build_expr(expr);
-        self.push_op(cfg::Op::Store(var_id, asg_expr));
+        match base {
+            None => {
+                let var_id = self.pb.proc.lookup_var(self.block.scope, var).unwrap();
+                self.push_op(cfg::Op::Store(var_id, asg_expr));
+            },
+            Some(datum_id) => {
+                self.push_op(cfg::Op::DatumStoreVar(datum_id, var, asg_expr));
+            },
+        }
     }
 
     fn build_expr(&mut self, expr: &ast::Expression) -> cfg::LocalId {

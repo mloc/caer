@@ -1,15 +1,17 @@
-/anon_type
-    var/aaa
+/datum/container
+    var/obj/obj
 
-/proc/argfoo(var/bar)
-    world << bar
+///proc/argfoo(var/bar)
+    //world << bar
 
 /proc/entry()
-    var/s = "hey"
-    world << "[s] there[1/90]"
-    argfoo(s)
-    var/x = new /obj
-    world << x:name
+    //var/s = "hey"
+    //world << "[s] there[1/90]"
+    //argfoo(s)
+    var/c = new /datum/container
+    c:obj = new /obj
+    c:obj:name = "hello there"
+    world << "NAME: [c:obj:name]"
 
 
     //world << 1 + 1
