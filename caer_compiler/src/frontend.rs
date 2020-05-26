@@ -80,7 +80,7 @@ impl<'a, 'b> ProcBuilder<'a, 'b> {
         for (i, param) in self.ast_proc.parameters.iter().enumerate() {
             // TODO: need to record name separately for keyword args?
             let name_id = self.builder.add_string(&param.name);
-            let local_id = self.proc.add_local(self.proc.global_scope, ty::Complex::Any, Some(name_id), true);
+            let local_id = self.add_var(self.proc.global_scope, name_id);
             self.proc.params.push(local_id);
 
             let spec = self.builder.env.rt_env.get_proc_mut(self.proc.env_id);
@@ -129,6 +129,13 @@ impl<'a, 'b> ProcBuilder<'a, 'b> {
         self.finalize_block(block);
 
         block_id
+    }
+
+    // maybe make helper in BlBu which infers scope
+    fn add_var(&mut self, scope: cfg::ScopeId, name: StringId) -> cfg::LocalId {
+        let var_local = self.proc.add_local(scope, ty::Complex::Any);
+        self.proc.register_var(var_local, name);
+        var_local
     }
 }
 
@@ -179,7 +186,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
         match stmt {
             ast::Statement::Var(v) => {
                 let name_id = self.pb.builder.add_string(&v.name);
-                let local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, Some(name_id), true);
+                let local = self.pb.add_var(self.block.scope, name_id);
                 self.push_op(cfg::Op::MkVar(local));
 
                 if let Some(expr) = &v.value {
@@ -208,7 +215,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                                             // kind
                                             assert_eq!(*kind, ast::IndexKind::Colon);
                                             // TODO: this should have a narrower scope.
-                                            let holder = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
+                                            let holder = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
                                             match base {
                                                 None => {
                                                     let var_id = self.pb.proc.lookup_var(self.block.scope, final_field).unwrap();
@@ -404,7 +411,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                             // TODO: handle dots and safe indexing, with lookup
                             assert_eq!(*kind, ast::IndexKind::Colon);
                             let field_id = self.pb.builder.add_string(field);
-                            let new_local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
+                            let new_local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
                             self.push_op(cfg::Op::DatumLoadVar(new_local, local, field_id));
                             local = new_local;
                         },
@@ -418,7 +425,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
             ast::Expression::BinaryOp { op, lhs, rhs } => {
                 let lhs_expr = self.build_expr(lhs);
                 let rhs_expr = self.build_expr(rhs);
-                let local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
+                let local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
 
                 let l_op = match op {
                     ast::BinaryOp::Add => BinaryOp::Add,
@@ -438,7 +445,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
     }
 
     fn build_literal(&mut self, lit: cfg::Literal) -> cfg::LocalId {
-        let local = self.pb.proc.add_local(self.block.scope, lit.get_ty(), None, false);
+        let local = self.pb.proc.add_local(self.block.scope, lit.get_ty());
         self.push_op(cfg::Op::Literal(local, lit));
         local
     }
@@ -456,12 +463,12 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                 let name_id = self.pb.builder.add_string(var_name);
                 let var_id = self.pb.proc.lookup_var(self.block.scope, name_id).unwrap();
                 // TODO var ty fix
-                let loaded = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
+                let loaded = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
                 self.push_op(cfg::Op::Load(loaded, var_id));
                 loaded
             },
             ast::Term::Call(name, args) => {
-                let res = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
+                let res = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
 
                 let arg_exprs: Vec<_> = args.iter().map(|expr| self.build_expr(expr)).collect();
 
@@ -481,17 +488,17 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                     let expr = o_expr.as_ref().expect("postfix formatting not supported currently");
                     let expr_l = self.build_expr(expr);
                     // TODO this is a string, but we treat it as an Any for now
-                    let expr_cast_l = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
+                    let expr_cast_l = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
                     self.push_op(cfg::Op::Cast(expr_cast_l, expr_l, ty::Primitive::String));
 
                     // TODO this is a string, but we treat it as an Any for now
-                    let new_built = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
+                    let new_built = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
                     self.push_op(cfg::Op::Binary(new_built, BinaryOp::Add, built, expr_cast_l));
                     built = new_built;
 
                     if sep.len() > 0 {
                         // TODO this is a string, but we treat it as an Any for now
-                        let new_built = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
+                        let new_built = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
                         // TODO this cloning is bad, too lazy to fix lifetimes
                         let lit = cfg::Literal::String(self.pb.builder.add_string(sep.clone()));
                         let lit_l = self.build_literal(lit);
@@ -505,15 +512,14 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
             ast::Term::New { type_: newty,  args } => {
                 assert!(args.is_none());
                 // TODO this is a ref, but we treat it as an Any for now
-                let ref_local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any, None, false);
+                let ref_local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
 
                 let ty_id = match newty {
                     ast::NewType::Prefab(pf) => {
                         assert!(pf.vars.is_empty());
                         // TODO: ughhhh, move path resolving into a helper, better encapsulation
-                        let pf_path = self.pb.builder.tree.root().navigate_path(&pf.path).unwrap().ty();
-                        let path_id = self.pb.builder.add_string(&pf_path.path);
-                        let type_id = self.pb.builder.env.rt_env.type_tree.type_by_path_str[&path_id];
+                        let pf_ty = self.pb.builder.tree.root().navigate_path(&pf.path).unwrap().ty();
+                        let type_id = self.pb.builder.env.rt_env.type_tree.type_by_node_id[&(pf_ty.index().index() as u64)];
                         type_id
                     },
                     _ => unimplemented!("new with newty {:?}", newty),

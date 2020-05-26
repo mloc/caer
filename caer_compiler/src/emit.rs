@@ -59,8 +59,14 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         let null_val = self.ctx.rt.ty.val_type.const_zero();
 
         for local in self.proc.locals.iter() {
-            let name = &match local.name {
-                Some(id) => format!("var_{}", self.emit.env.string_table.get(id)),
+            let name = &match &local.var {
+                Some(var_info) => {
+                    if var_info.name.id() != 0 {
+                        format!("var_{}", self.emit.env.string_table.get(var_info.name))
+                    } else {
+                        format!("ret_var")
+                    }
+                },
                 None => format!("local_{}", local.id.index()),
             };
 

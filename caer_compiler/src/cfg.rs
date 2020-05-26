@@ -45,11 +45,15 @@ pub struct Local {
     pub id: LocalId,
     pub ty: ty::Complex,
     pub movable: bool,
-    pub var:  bool,
-    pub name: Option<StringId>,
+    pub var: Option<Var>,
     pub construct_scope: ScopeId,
     // if a value is moved, it won't be destructed with this local
     pub destruct_scope: Option<ScopeId>,
+}
+
+#[derive(Debug)]
+pub struct Var {
+    pub name: StringId,
 }
 
 #[derive(Debug)]
@@ -110,20 +114,20 @@ impl<'a> Proc {
             next_block_id: 0,
         };
 
-        new.add_local(new.global_scope, ty::Complex::Any, None, true); // return val
+        let ret_local = new.add_local(new.global_scope, ty::Complex::Any); // return val
+        // TODO: compile time intern, "."
+        new.register_var(ret_local, StringId::new(0));
         new
     }
 
-    pub fn add_local(&mut self, scope: ScopeId, ty: ty::Complex, name: Option<StringId>, var: bool) -> LocalId {
+    pub fn add_local(&mut self, scope: ScopeId, ty: ty::Complex) -> LocalId {
         let id = LocalId::new(self.locals.len());
 
         let local = Local {
             id: id,
             ty: ty,
             movable: false,
-            var: var,
-            //name: Some(name.map_or_else(|| {format!("local_{}", id.index())}, |s| {format!("var_{}", s.to_string())})),
-            name: name,
+            var: None,
             construct_scope: scope,
             destruct_scope: Some(scope),
         };
@@ -132,14 +136,21 @@ impl<'a> Proc {
         self.scopes[scope].locals.push(id);
         self.scopes[scope].destruct_locals.insert(id);
 
-        if var {
-            if let Some(var) = name {
-                self.vars.insert(var.into(), id);
-                self.scopes[scope].vars.insert(var.into(), id);
-            }
-        }
-
         id
+    }
+
+    // TODO: ERRH(C), duplicate vars
+    pub fn register_var(&mut self, var_local: LocalId, name: StringId) {
+        let var_info = Var {
+            name: name,
+        };
+
+        let local = &mut self.locals[var_local];
+        assert!(local.var.is_none());
+        local.var = Some(var_info);
+
+        self.vars.insert(name, var_local);
+        self.scopes[local.construct_scope].vars.insert(name, var_local);
     }
 
     pub fn new_block(&mut self, scope: ScopeId) -> Block {
