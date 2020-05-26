@@ -9,14 +9,15 @@ use caer_runtime::type_tree::{TypeId, DType};
 use caer_runtime::datum;
 use caer_runtime::vtable;
 use std::mem::size_of;
+use inkwell::values::AnyValueEnum;
 
-struct Value<'a> {
-    val: Option<inkwell::values::BasicValueEnum<'a>>,
+struct Value<'ctx> {
+    val: Option<inkwell::values::BasicValueEnum<'ctx>>,
     ty: ty::Complex,
 }
 
-impl<'a> Value<'a> {
-    fn new(val: Option<inkwell::values::BasicValueEnum<'a>>, ty: ty::Complex) -> Self {
+impl<'ctx> Value<'ctx> {
+    fn new(val: Option<inkwell::values::BasicValueEnum<'ctx>>, ty: ty::Complex) -> Self {
         if val == None && ty == ty::Primitive::Null.into() {
             panic!("values with non-null ty must have a val")
         }
@@ -146,7 +147,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
     }
 
     // TODO: refactor out as_any, bad.
-    fn load_local<L: Borrow<LocalId>>(&self, local: L, as_any: bool) -> Value {
+    fn load_local<L: Borrow<LocalId>>(&self, local: L, as_any: bool) -> Value<'ctx> {
         let ty = match as_any {
             true => ty::Complex::Any,
             false => self.proc.locals[*local.borrow()].ty.clone(),
@@ -167,7 +168,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         self.store_val(val, local_ty, local_ptr);
     }
 
-    fn convert_to_any(&self, local_id: LocalId) -> inkwell::values::PointerValue {
+    fn convert_to_any(&self, local_id: LocalId) -> inkwell::values::PointerValue<'ctx> {
         let local = &self.proc.locals[local_id];
 
         if local.ty == ty::Complex::Any {
@@ -342,29 +343,11 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 
                 // awful
                 Op::DatumLoadVar(dst, src, var_id) => {
-                    // TODO: maybe rework to use GEP
                     let val = self.load_local(src, true);
-                    // TODO: use some constant instead of 2
-                    // TODO: TYAPI
-                    // TODO: cast val struct instead of int2ptr
-                    let ref_ptr_int = self.ctx.builder.build_extract_value(val.val.unwrap().into_struct_value(), 2, "ref_ptr_int").unwrap().into_int_value();
-                    let ref_ptr = self.ctx.builder.build_int_to_ptr(ref_ptr_int, self.ctx.rt.ty.datum_common_type_ptr, "ref_ptr");
-                    let ty_id_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(ref_ptr, &[
-                        self.ctx.llvm_ctx.i32_type().const_zero(),
-                        self.ctx.llvm_ctx.i32_type().const_int(datum::DATUM_TY_FIELD_OFFSET, false),
-                    ], "ty_id_ptr") };
-                    let ty_id = self.ctx.builder.build_load(ty_id_ptr, "ty_id").into_int_value();
-                    // TODO: vtable lookup helper
-                    // pointer to fn pointer
-                    let var_get_ptr_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(self.emit.vt_global.as_pointer_value(), &[
-                        self.ctx.llvm_ctx.i32_type().const_zero(),
-                        ty_id,
-                        self.ctx.llvm_ctx.i32_type().const_int(vtable::VTABLE_VAR_GET_FIELD_OFFSET, false),
-                    ], "var_get_ptr_ptr") };
-                    let var_get_ptr_ers = self.ctx.builder.build_load(var_get_ptr_ptr, "var_get_ptr_ers").into_pointer_value();
-                    // TODO: factor out, same as in make_get_var_func(), roughly.
-                    let func_ty = self.ctx.rt.ty.val_type.fn_type(&[self.ctx.rt.ty.datum_common_type_ptr.into(), self.ctx.llvm_ctx.i64_type().into()], false).ptr_type(inkwell::AddressSpace::Generic);
-                    let var_get_ptr = self.ctx.builder.build_bitcast(var_get_ptr_ers, func_ty, "var_get_ptr").into_pointer_value();
+                    let ref_ptr = self.build_extract_ref_ptr(val.val.unwrap().into_struct_value());
+                    let ty_id = self.build_extract_ty_id(ref_ptr);
+                    let var_get_ptr = self.build_vtable_lookup(ty_id, vtable::VTABLE_VAR_GET_FIELD_OFFSET).into_pointer_value();
+
                     let var_val = self.ctx.builder.build_call(var_get_ptr, &[
                         ref_ptr.into(),
                         self.ctx.llvm_ctx.i64_type().const_int(var_id.id(), false).into(),
@@ -373,29 +356,11 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 },
 
                 Op::DatumStoreVar(dst, var_id, src) => {
-                    // TODO: maybe rework to use GEP
                     let dst_val = self.load_local(dst, true);
-                    // TODO: use some constant instead of 2
-                    // TODO: TYAPI
-                    // TODO: cast val struct instead of int2ptr
-                    let ref_ptr_int = self.ctx.builder.build_extract_value(dst_val.val.unwrap().into_struct_value(), 2, "ref_ptr_int").unwrap().into_int_value();
-                    let ref_ptr = self.ctx.builder.build_int_to_ptr(ref_ptr_int, self.ctx.rt.ty.datum_common_type_ptr, "ref_ptr");
-                    let ty_id_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(ref_ptr, &[
-                        self.ctx.llvm_ctx.i32_type().const_zero(),
-                        self.ctx.llvm_ctx.i32_type().const_int(datum::DATUM_TY_FIELD_OFFSET, false),
-                    ], "ty_id_ptr") };
-                    let ty_id = self.ctx.builder.build_load(ty_id_ptr, "ty_id").into_int_value();
-                    // TODO: vtable lookup helper
-                    // pointer to fn pointer
-                    let var_set_ptr_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(self.emit.vt_global.as_pointer_value(), &[
-                        self.ctx.llvm_ctx.i32_type().const_zero(),
-                        ty_id,
-                        self.ctx.llvm_ctx.i32_type().const_int(vtable::VTABLE_VAR_SET_FIELD_OFFSET, false),
-                    ], "var_set_ptr_ptr") };
-                    let var_set_ptr_ers = self.ctx.builder.build_load(var_set_ptr_ptr, "var_set_ptr_ers").into_pointer_value();
-                    // TODO: factor out, same as in make_set_var_func(), roughly.
-                    let func_ty = self.ctx.llvm_ctx.void_type().fn_type(&[self.ctx.rt.ty.datum_common_type_ptr.into(), self.ctx.llvm_ctx.i64_type().into(), self.ctx.rt.ty.val_type.into()], false).ptr_type(inkwell::AddressSpace::Generic);
-                    let var_set_ptr = self.ctx.builder.build_bitcast(var_set_ptr_ers, func_ty, "var_set_ptr").into_pointer_value();
+                    let ref_ptr = self.build_extract_ref_ptr(dst_val.val.unwrap().into_struct_value());
+                    let ty_id = self.build_extract_ty_id(ref_ptr);
+                    let var_set_ptr = self.build_vtable_lookup(ty_id, vtable::VTABLE_VAR_SET_FIELD_OFFSET).into_pointer_value();
+
                     let src_val = self.load_local(src, true);
                     self.ctx.builder.build_call(var_set_ptr, &[
                         ref_ptr.into(),
@@ -450,6 +415,35 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 self.ctx.builder.build_switch(disc_int, self.blocks[*default], &llvm_branches[..]);
             },
         }
+    }
+
+    fn build_extract_ref_ptr(&self, val: inkwell::values::StructValue<'ctx>) -> inkwell::values::PointerValue<'ctx> {
+        // TODO: tycheck we're a ref
+        // TODO: use some constant instead of 2
+        // TODO: TYAPI
+        // TODO: cast val struct instead of int2ptr
+        let ref_ptr_int = self.ctx.builder.build_extract_value(val, 2, "ref_ptr_int").unwrap().into_int_value();
+        let ref_ptr = self.ctx.builder.build_int_to_ptr(ref_ptr_int, self.ctx.rt.ty.datum_common_type_ptr, "ref_ptr");
+        ref_ptr
+    }
+
+    fn build_extract_ty_id(&self, datum_ptr: inkwell::values::PointerValue<'ctx>) -> inkwell::values::IntValue<'ctx> {
+        let ty_id_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(datum_ptr, &[
+            self.ctx.llvm_ctx.i32_type().const_zero(),
+            self.ctx.llvm_ctx.i32_type().const_int(datum::DATUM_TY_FIELD_OFFSET, false),
+        ], "ty_id_ptr") };
+        let ty_id = self.ctx.builder.build_load(ty_id_ptr, "ty_id").into_int_value();
+        ty_id
+    }
+
+    fn build_vtable_lookup(&self, ty_id: inkwell::values::IntValue<'ctx>, offset: u64) -> inkwell::values::BasicValueEnum<'ctx> {
+        let field_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(self.emit.vt_global.as_pointer_value(), &[
+            self.ctx.llvm_ctx.i32_type().const_zero(),
+            ty_id,
+            self.ctx.llvm_ctx.i32_type().const_int(offset, false),
+        ], &format!("vtable_field_{}_ptr", offset)) };
+        let field = self.ctx.builder.build_load(field_ptr, &format!("vtable_field_{}", offset));
+        field
     }
 
     fn finalize_block(&self, block: &Block) {
@@ -576,22 +570,27 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
         let mut vt_entries = Vec::new();
         // yuck, TODO: encapsulate typetree
         for ty in self.env.rt_env.type_tree.types.iter() {
-            let size_val = self.datum_types[ty.id].size_of().unwrap().const_cast(self.ctx.llvm_ctx.i64_type(), false).into();
-
             let var_index_fn = self.make_var_index_func(ty);
-            let var_get_fn = self.make_get_var_func(ty, var_index_fn);
-            let var_set_fn = self.make_set_var_func(ty, var_index_fn);
 
-            let var_index_fn_ptr = self.ctx.builder.build_bitcast(var_index_fn.as_global_value().as_pointer_value(), self.ctx.llvm_ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic), "");
-            let var_get_fn_ptr = self.ctx.builder.build_bitcast(var_get_fn.as_global_value().as_pointer_value(), self.ctx.llvm_ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic), "");
-            let var_set_fn_ptr = self.ctx.builder.build_bitcast(var_set_fn.as_global_value().as_pointer_value(), self.ctx.llvm_ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic), "");
-            //let var_get_fn_ptr = self.ctx.llvm_ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic).const_zero().into();
-            let vt_entry = self.ctx.rt.ty.vt_entry_type.const_named_struct(&[
-                size_val,
-                var_index_fn_ptr,
-                var_get_fn_ptr,
-                var_set_fn_ptr
-            ]);
+            let entries = &[
+                // size
+                self.datum_types[ty.id].size_of().unwrap().const_cast(self.ctx.llvm_ctx.i64_type(), false).into(),
+                var_index_fn.into(),
+                self.make_get_var_func(ty, var_index_fn).into(),
+                self.make_set_var_func(ty, var_index_fn).into(),
+            ];
+
+            let field_tys = self.ctx.rt.ty.vt_entry_type.get_field_types();
+            let cast_entries: Vec<_> = entries.into_iter().enumerate().map(|(i, entry)| {
+                match *entry {
+                    AnyValueEnum::FunctionValue(f) => self.ctx.builder.build_bitcast(f.as_global_value().as_pointer_value(), field_tys[i], "").into(),
+                    AnyValueEnum::IntValue(v) => v.into(),
+                    _ => unimplemented!("add handler"),
+                }
+
+            }).collect();
+
+            let vt_entry = self.ctx.rt.ty.vt_entry_type.const_named_struct(&cast_entries);
             vt_entries.push(vt_entry);
         }
         self.vt_global.set_initializer(&self.ctx.rt.ty.vt_entry_type.const_array(&vt_entries));
@@ -792,11 +791,11 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             // size
             ctx.i64_type().into(),
             // var_index fn ptr
-            ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic).into(),
+            ctx.i32_type().fn_type(&[ctx.i64_type().into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
             // var_get fn ptr
-            ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic).into(),
+            val_type.fn_type(&[datum_common_type_ptr.into(), ctx.i64_type().into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
             // var_set fn ptr
-            ctx.i8_type().ptr_type(inkwell::AddressSpace::Generic).into(),
+            ctx.void_type().fn_type(&[datum_common_type_ptr.into(), ctx.i64_type().into(), val_type.into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
         ], false);
 
         RtFuncTyBundle {

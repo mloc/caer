@@ -8,6 +8,7 @@
     //var/s = "hey"
     //world << "[s] there[1/90]"
     //argfoo(s)
+
     var/c = new /datum/container
     c:obj = new /obj
     c:obj:name = "hello there"
