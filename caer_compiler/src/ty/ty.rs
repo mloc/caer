@@ -1,5 +1,6 @@
 use indexed_vec::{newtype_index, Idx};
 use serde::{Serialize, Deserialize};
+use caer_runtime::type_tree;
 
 newtype_index!(TyId {pub idx});
 
@@ -15,7 +16,8 @@ pub enum Primitive {
     Float,
     String,
     Int,
-    Ref,
+    // None => any ref. maybe replace with id 0
+    Ref(Option<type_tree::TypeId>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -41,7 +43,7 @@ impl Complex {
 impl Ty for Primitive {
     fn needs_destructor(&self) -> bool {
         match self {
-            Primitive::Ref => true,
+            Primitive::Ref(_) => true,
             _ => false,
         }
     }

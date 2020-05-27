@@ -75,7 +75,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     match prim {
                         ty::Primitive::Float => self.ctx.builder.build_alloca(self.ctx.llvm_ctx.f32_type(), name),
                         ty::Primitive::String => self.ctx.builder.build_alloca(self.ctx.llvm_ctx.i64_type(), name),
-                        ty::Primitive::Ref => self.ctx.builder.build_alloca(self.ctx.rt.ty.opaque_type.ptr_type(inkwell::AddressSpace::Generic), name),
+                        ty::Primitive::Ref(_) => self.ctx.builder.build_alloca(self.ctx.rt.ty.datum_common_type_ptr, name),
                         _ => unimplemented!("unhandled prim: {:?}", prim),
                     }
                 },
@@ -235,7 +235,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 
                         upd
                     },
-                    ty::Primitive::Ref => {
+                    ty::Primitive::Ref(_) => {
                         let ref_disc = self.ctx.llvm_ctx.i32_type().const_int(3, false);
                         let val_as_int: inkwell::values::IntValue = self.ctx.builder.build_ptr_to_int(val.val.unwrap().into_pointer_value(), self.ctx.llvm_ctx.i64_type(), "pack_val");
 
@@ -343,11 +343,10 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                         self.emit.rt_global.as_pointer_value().into(),
                         self.ctx.llvm_ctx.i32_type().const_int(ty_id.index() as u64, false).into(),
                     ], "datum_ptr").try_as_basic_value().left().unwrap();
-                    let ref_val = Value::new(Some(datum_ptr), ty::Primitive::Ref.into());
+                    let ref_val = Value::new(Some(datum_ptr), ty::Primitive::Ref(Some(*ty_id)).into());
                     self.store_local(dst, &ref_val);
                 },
 
-                // awful
                 Op::DatumLoadVar(dst, src, var_id) => {
                     let val = self.load_local(src, true);
                     let ref_ptr = self.build_extract_ref_ptr(val.val.unwrap().into_struct_value());
@@ -587,6 +586,7 @@ impl<'a, 'ctx> Emit<'a, 'ctx> {
             ];
 
             let field_tys = self.ctx.rt.ty.vt_entry_type.get_field_types();
+            assert_eq!(entries.len(), field_tys.len());
             let cast_entries: Vec<_> = entries.into_iter().enumerate().map(|(i, entry)| {
                 match *entry {
                     AnyValueEnum::FunctionValue(f) => self.ctx.builder.build_bitcast(f.as_global_value().as_pointer_value(), field_tys[i], "").into(),

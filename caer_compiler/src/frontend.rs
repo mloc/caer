@@ -6,6 +6,7 @@ use indexed_vec::Idx;
 use caer_runtime::op::BinaryOp;
 use caer_runtime::string_table::StringId;
 use caer_runtime::proc_spec::ProcSpec;
+use caer_runtime::type_tree;
 use crate::ty;
 
 pub struct Builder<'a> {
@@ -185,8 +186,25 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
     fn build_stmt(&mut self, stmt: &ast::Statement) {
         match stmt {
             ast::Statement::Var(v) => {
+                // TODO: care about var flags?
                 let name_id = self.pb.builder.add_string(&v.name);
                 let local = self.pb.add_var(self.block.scope, name_id);
+
+                if !v.var_type.type_path.is_empty() {
+                    // TODO: handle list types
+                    let var_ty = match self.pb.builder.tree.type_by_path(&v.var_type.type_path) {
+                        Some(ty) => ty,
+                        None => {
+                            // TODO: ERRH(C)
+                            panic!("no such type {:?}", v.var_type.type_path);
+                        },
+                    };
+
+                    // TODO: encapsulate type_tree
+                    let dty_id = self.pb.builder.env.rt_env.type_tree.type_by_node_id[&(var_ty.index().index() as u64)];
+                    self.pb.proc.set_assoc_dty(local, dty_id);
+                }
+
                 self.push_op(cfg::Op::MkVar(local));
 
                 if let Some(expr) = &v.value {
@@ -207,31 +225,33 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                                     _ => unimplemented!(),
                                 };
 
+                                let mut prev_kind = None;
                                 for follow_span in follow {
                                     match &follow_span.elem {
                                         ast::Follow::Field(kind, field) => {
-                                            // TODO: handle dots and safe indexing, with lookup
-                                            // TODO: we actually care about the *previous* follow's
-                                            // kind
-                                            assert_eq!(*kind, ast::IndexKind::Colon);
-                                            // TODO: this should have a narrower scope.
-                                            let holder = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
-                                            match base {
+                                            let holder = match base {
                                                 None => {
+                                                    assert!(prev_kind.is_none());
                                                     let var_id = self.pb.proc.lookup_var(self.block.scope, final_field).unwrap();
-                                                    self.push_op(cfg::Op::Load(holder, var_id));
+                                                    // TODO: this should have a narrower scope.
+                                                    self.build_var_load(var_id)
                                                 },
                                                 Some(id) => {
-                                                    self.push_op(cfg::Op::DatumLoadVar(holder, id, final_field));
+                                                    self.build_datum_load(id, final_field, prev_kind.unwrap())
                                                 },
-                                            }
+                                            };
 
                                             base = Some(holder);
                                             let field_id = self.pb.builder.add_string(field);
                                             final_field = field_id;
+                                            prev_kind = Some(*kind);
                                         },
                                         f => unimplemented!("lhs term follow: {:?}", f),
                                     }
+                                }
+
+                                if let Some(id) = base {
+                                    self.validate_datum_index(id, final_field, prev_kind.unwrap());
                                 }
 
                                 final_field
@@ -399,6 +419,49 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
         }
     }
 
+    fn build_var_load(&mut self, var_local: cfg::LocalId) -> cfg::LocalId {
+        // TODO var ty fix
+        let holder = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
+        if let Some(assoc) = self.pb.proc.get_assoc_dty(var_local) {
+            self.pb.proc.set_assoc_dty(holder, assoc);
+        }
+        self.push_op(cfg::Op::Load(holder, var_local));
+        holder
+    }
+
+    fn build_datum_load(&mut self, datum_local: cfg::LocalId, var: StringId, index_kind: ast::IndexKind) -> cfg::LocalId {
+        let field_dty_id = self.validate_datum_index(datum_local, var, index_kind);
+        // TODO: reconsider the scope here
+        let loaded_local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
+        if let Some(dty_id) = field_dty_id {
+            self.pb.proc.set_assoc_dty(loaded_local, dty_id);
+        }
+        self.push_op(cfg::Op::DatumLoadVar(loaded_local, datum_local, var));
+        loaded_local
+    }
+
+    // TODO: ERRH(C)
+    /// Returns the dtype ID of the indexed field, if indexed with a .-like operator
+    fn validate_datum_index(&mut self, datum_local: cfg::LocalId, var: StringId, index_kind: ast::IndexKind) -> Option<type_tree::TypeId> {
+        match index_kind {
+            ast::IndexKind::Colon | ast::IndexKind::SafeColon => None,
+            ast::IndexKind::Dot | ast::IndexKind::SafeDot => {
+                let dty_id = match self.pb.proc.get_assoc_dty(datum_local) {
+                    Some(id) => id,
+                    None => panic!("NO TYPE"),
+                };
+
+                // TODO: encap tt
+                let dty = &self.pb.builder.env.rt_env.type_tree.types[dty_id];
+                if let Some(var_info) = dty.var_lookup.get(&var) {
+                    var_info.assoc_dty
+                } else {
+                    panic!("type {} has no var {}", self.pb.builder.env.string_table.get(dty.path_str), self.pb.builder.env.string_table.get(var));
+                }
+            },
+        }
+    }
+
     fn build_expr(&mut self, expr: &ast::Expression) -> cfg::LocalId {
         match expr {
             ast::Expression::Base { unary, term, follow } => {
@@ -408,12 +471,8 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                 for follow_span in follow {
                     match &follow_span.elem {
                         ast::Follow::Field(kind, field) => {
-                            // TODO: handle dots and safe indexing, with lookup
-                            assert_eq!(*kind, ast::IndexKind::Colon);
                             let field_id = self.pb.builder.add_string(field);
-                            let new_local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
-                            self.push_op(cfg::Op::DatumLoadVar(new_local, local, field_id));
-                            local = new_local;
+                            local = self.build_datum_load(local, field_id, *kind);
                         },
                         f => unimplemented!("follow: {:?}", f),
                     }
@@ -462,10 +521,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
             ast::Term::Ident(var_name) => {
                 let name_id = self.pb.builder.add_string(var_name);
                 let var_id = self.pb.proc.lookup_var(self.block.scope, name_id).unwrap();
-                // TODO var ty fix
-                let loaded = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
-                self.push_op(cfg::Op::Load(loaded, var_id));
-                loaded
+                self.build_var_load(var_id)
             },
             ast::Term::Call(name, args) => {
                 let res = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
@@ -499,8 +555,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                     if sep.len() > 0 {
                         // TODO this is a string, but we treat it as an Any for now
                         let new_built = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
-                        // TODO this cloning is bad, too lazy to fix lifetimes
-                        let lit = cfg::Literal::String(self.pb.builder.add_string(sep.clone()));
+                        let lit = cfg::Literal::String(self.pb.builder.add_string(sep));
                         let lit_l = self.build_literal(lit);
                         self.push_op(cfg::Op::Binary(new_built, BinaryOp::Add, built, lit_l));
                         built = new_built
@@ -509,7 +564,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
 
                 built
             },
-            ast::Term::New { type_: newty,  args } => {
+            ast::Term::New { type_: newty, args } => {
                 assert!(args.is_none());
                 // TODO this is a ref, but we treat it as an Any for now
                 let ref_local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);

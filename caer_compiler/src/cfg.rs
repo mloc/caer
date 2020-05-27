@@ -49,6 +49,8 @@ pub struct Local {
     pub construct_scope: ScopeId,
     // if a value is moved, it won't be destructed with this local
     pub destruct_scope: Option<ScopeId>,
+    // DM-style "compile-time" typepath
+    pub assoc_dty: Option<caer_runtime::type_tree::TypeId>,
 }
 
 #[derive(Debug)]
@@ -130,6 +132,7 @@ impl<'a> Proc {
             var: None,
             construct_scope: scope,
             destruct_scope: Some(scope),
+            assoc_dty: None,
         };
 
         self.locals.push(local);
@@ -137,6 +140,15 @@ impl<'a> Proc {
         self.scopes[scope].destruct_locals.insert(id);
 
         id
+    }
+
+    // TODO: localref
+    pub fn set_assoc_dty(&mut self, local: LocalId, dty: caer_runtime::type_tree::TypeId) {
+        self.locals[local].assoc_dty = Some(dty);
+    }
+
+    pub fn get_assoc_dty(&self, local: LocalId) -> Option<caer_runtime::type_tree::TypeId> {
+        self.locals[local].assoc_dty
     }
 
     // TODO: ERRH(C), duplicate vars
