@@ -1,0 +1,176 @@
+use inkwell;
+use std::mem::size_of;
+
+#[derive(Debug)]
+pub struct Context<'a, 'ctx> {
+    pub llvm_ctx: &'ctx inkwell::context::Context,
+    pub builder: &'a inkwell::builder::Builder<'ctx>,
+    pub module: &'a inkwell::module::Module<'ctx>,
+    pub rt: RtFuncs<'ctx>,
+}
+
+impl<'a, 'ctx> Context<'a, 'ctx> {
+    pub fn new(llctx: &'ctx inkwell::context::Context, llmod: &'a inkwell::module::Module<'ctx>, llbuild: &'a inkwell::builder::Builder<'ctx>) -> Self {
+        let rt = RtFuncs::new(llctx, llmod);
+
+        Self {
+            builder: llbuild,
+            module: llmod,
+            llvm_ctx: llctx,
+            rt: rt,
+        }
+    }
+}
+
+// TODO: probably move out of context
+// TODO: redo all of this to a friendlier system
+#[derive(Debug)]
+pub struct RtFuncTyBundle<'ctx> {
+    // TODO: undo this, it's a hack to clean up optimized output
+    pub val_type: inkwell::types::StructType<'ctx>,
+    pub val_type_ptr: inkwell::types::PointerType<'ctx>,
+    //val_type: inkwell::types::IntType<'ctx>,
+    pub opaque_type: inkwell::types::StructType<'ctx>,
+
+    pub arg_pack_type: inkwell::types::StructType<'ctx>,
+    pub arg_pack_tuple_type: inkwell::types::StructType<'ctx>,
+
+    pub datum_common_type: inkwell::types::StructType<'ctx>,
+    pub datum_common_type_ptr: inkwell::types::PointerType<'ctx>,
+
+    pub rt_type: inkwell::types::ArrayType<'ctx>,
+    pub vt_entry_type: inkwell::types::StructType<'ctx>,
+}
+
+impl<'ctx> RtFuncTyBundle<'ctx> {
+    fn new(ctx: &'ctx inkwell::context::Context) -> Self {
+        let val_padding_type = ctx.i32_type();
+        let val_type = ctx.struct_type(&[ctx.i32_type().into(), val_padding_type.into(), ctx.i64_type().into()], true);
+        let val_type_ptr = val_type.ptr_type(inkwell::AddressSpace::Generic);
+
+        let opaque_type = ctx.opaque_struct_type("opaque");
+
+        let arg_pack_tuple_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.ptr_type(inkwell::AddressSpace::Generic).into()], false);
+        let arg_pack_tuple_type_ptr = arg_pack_tuple_type.ptr_type(inkwell::AddressSpace::Generic);
+
+        let arg_pack_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.ptr_type(inkwell::AddressSpace::Generic).into(), ctx.i64_type().into(), arg_pack_tuple_type_ptr.into()], false);
+
+        let datum_common_type = ctx.struct_type(&[
+            // ref
+            ctx.i32_type().into(),
+        ], false);
+        let datum_common_type_ptr = datum_common_type.ptr_type(inkwell::AddressSpace::Generic);
+
+        let rt_type = ctx.i8_type().array_type(size_of::<caer_runtime::runtime::Runtime>() as u32);
+        let vt_entry_type = ctx.struct_type(&[
+            // size
+            ctx.i64_type().into(),
+            // var_index fn ptr
+            ctx.i32_type().fn_type(&[ctx.i64_type().into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
+            // var_get fn ptr
+            val_type.fn_type(&[datum_common_type_ptr.into(), ctx.i64_type().into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
+            // var_set fn ptr
+            ctx.void_type().fn_type(&[datum_common_type_ptr.into(), ctx.i64_type().into(), val_type.into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
+        ], false);
+
+        RtFuncTyBundle {
+            val_type: val_type,
+            val_type_ptr: val_type_ptr,
+            opaque_type: opaque_type,
+            arg_pack_type: arg_pack_type,
+            arg_pack_tuple_type: arg_pack_tuple_type,
+            datum_common_type: datum_common_type,
+            datum_common_type_ptr: datum_common_type_ptr,
+            rt_type: rt_type,
+            vt_entry_type: vt_entry_type,
+        }
+    }
+}
+
+macro_rules! rt_funcs {
+    ( $name:ident, [ $( ( $func:ident, $ret:ident ~ $retspec:ident, [ $( $arg:ident ~ $argspec:ident ),* $(,)* ] ) ),* $(,)* ] ) => {
+        #[derive(Debug)]
+        pub struct $name <'ctx> {
+            pub ty: RtFuncTyBundle<'ctx>,
+            $(
+                pub $func: inkwell::values::FunctionValue<'ctx>,
+            )*
+        }
+
+        impl<'ctx> $name <'ctx> {
+            fn new(ctx: &'ctx inkwell::context::Context, module: &inkwell::module::Module<'ctx>) -> $name<'ctx> {
+                let padding_size = size_of::<caer_runtime::val::Val>() - 4; // u32 discrim
+
+                let tyb = RtFuncTyBundle::new(ctx);
+
+                $name {
+                    $(
+                        $func: module.add_function(stringify!($func),
+                            rt_funcs!(@genty ctx $retspec tyb $ret $ret).fn_type(&[
+                                $(
+                                    rt_funcs!(@genty ctx $argspec tyb $arg $arg).into(),
+                                )*
+                            ], false),
+                        None),
+                    )*
+                    ty: tyb,
+                }
+            }
+        }
+    };
+
+    ( @genty $ctx:ident $spec:ident $tyb:ident val_type $ty:ident) => (
+        rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
+    );
+
+    ( @genty $ctx:ident $spec:ident $tyb:ident val_type_ptr $ty:ident) => (
+        rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
+    );
+
+    ( @genty $ctx:ident $spec:ident $tyb:ident opaque_type $ty:ident) => (
+        rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
+    );
+
+    ( @genty $ctx:ident $spec:ident $tyb:ident rt_type $ty:ident) => (
+        rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
+    );
+
+    ( @genty $ctx:ident $spec:ident $tyb:ident arg_pack_type $ty:ident) => (
+        rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
+    );
+
+    ( @genty $ctx:ident $spec:ident $tyb:ident vt_entry_type $ty:ident) => (
+        rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
+    );
+
+    ( @genty $ctx:ident $spec:ident $tyb:ident $tym:ident $ty:ident) => (
+        rt_funcs!(@genty @ptrify $spec , $ctx.$ty())
+    );
+
+    ( @genty @ptrify val , $e:expr) => (
+        $e
+    );
+
+    ( @genty @ptrify ptr , $e:expr) => (
+        $e.ptr_type(inkwell::AddressSpace::Generic)
+    );
+}
+
+rt_funcs!{
+    RtFuncs,
+    [
+        (rt_val_float, void_type~val, [val_type~ptr, f32_type~val]),
+        (rt_val_string, void_type~val, [val_type~ptr, i64_type~val]),
+        (rt_val_binary_op, void_type~val, [val_type~ptr, rt_type~ptr, i32_type~val, val_type~ptr, val_type~ptr]),
+        (rt_val_to_switch_disc, i32_type~val, [val_type~ptr]),
+        (rt_val_print, void_type~val, [val_type~ptr, rt_type~ptr]),
+        (rt_val_cloned, void_type~val, [val_type~ptr]),
+        (rt_val_drop, void_type~val, [val_type~ptr]),
+        (rt_val_cast_string_val, void_type~val, [val_type~ptr, val_type~ptr, rt_type~ptr]),
+
+        (rt_runtime_init, void_type~val, [rt_type~ptr, vt_entry_type~ptr]),
+        (rt_runtime_alloc_datum, opaque_type~ptr, [rt_type~ptr, i32_type~val]),
+
+        (rt_arg_pack_unpack_into, void_type~val, [arg_pack_type~ptr, val_type_ptr~ptr, i64_type~val, rt_type~ptr]),
+    ]
+}

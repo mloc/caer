@@ -1,44 +1,14 @@
 use std::collections::{HashMap, HashSet};
-use dreammaker::ast;
-use indexed_vec::{IndexVec, newtype_index, Idx};
+use indexed_vec::{IndexVec, Idx};
 use std::fs::{self, File};
 use std::io::{Seek, SeekFrom, Write};
-use std::cmp;
-use caer_runtime::string_table::{StringTable, StringId};
+use caer_runtime::string_table::StringId;
 use caer_runtime::type_tree::TypeId;
 use caer_runtime::environment::ProcId;
-use serde::{Serialize, Deserialize};
 use caer_runtime;
 use crate::ty;
 use dot;
-
-newtype_index!(LocalId {pub idx});
-newtype_index!(BlockId {pub idx});
-newtype_index!(ScopeId {pub idx});
-
-// this should be renamed and moved out of env.
-#[derive(Debug)]
-pub struct Environment {
-    // is this bad? yes
-    // but it's easy
-    // TODO: do something less tightly coupled
-    pub string_table: StringTable,
-    pub rt_env: caer_runtime::environment::Environment,
-    pub procs: HashMap<StringId, Proc>,
-}
-
-impl Environment {
-    pub fn new(ot: &dreammaker::objtree::ObjectTree) -> Self {
-        let mut string_table = StringTable::new();
-        // tech debt, TODO: move TT init out of here
-        let tt = caer_runtime::type_tree::TypeTree::from_objtree(ot, &mut string_table);
-        Self {
-            string_table: string_table,
-            rt_env: caer_runtime::environment::Environment::new(tt),
-            procs: HashMap::new(),
-        }
-    }
-}
+use super::id::*;
 
 #[derive(Debug)]
 pub struct Local {

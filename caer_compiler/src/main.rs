@@ -1,4 +1,4 @@
-mod cfg;
+mod ir;
 mod emit;
 mod frontend;
 mod ty;
@@ -15,7 +15,7 @@ fn main() {
     let tree = parser.parse_object_tree();
     println!("PARSED");
 
-    let env = frontend::Builder::build(&tree);
+    let env = frontend::builder::Builder::build(&tree);
     println!("CFG BUILT");
 
     let llctx = inkwell::context::Context::create();
@@ -23,7 +23,7 @@ fn main() {
     let llbuild = llctx.create_builder();
 
     let emit_ctx = emit::Context::new(&llctx, &llmod, &llbuild);
-    let mut builder = emit::Emit::new(&emit_ctx, &env);
+    let mut builder = emit::ProgEmit::new(&emit_ctx, &env);
     builder.build_procs();
     println!("EMIT DONE");
 

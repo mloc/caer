@@ -1,0 +1,281 @@
+use super::proc::ProcEmit;
+use super::context::Context;
+use crate::ir::cfg::*;
+use crate::ir::env::Environment;
+use caer_runtime::string_table::StringId;
+use caer_runtime::type_tree::{TypeId, DType};
+use indexed_vec::{IndexVec, Idx};
+use std::collections::HashMap;
+use std::fs::{self, File};
+use inkwell::values::AnyValueEnum;
+use caer_runtime::datum;
+
+#[derive(Debug)]
+pub struct ProgEmit<'a, 'ctx> {
+    pub ctx: &'a Context<'a, 'ctx>,
+    pub env: &'a Environment,
+    pub procs: Vec<(&'a Proc, StringId, inkwell::values::FunctionValue<'ctx>)>,
+    pub rt_global: inkwell::values::GlobalValue<'ctx>,
+    pub vt_global: inkwell::values::GlobalValue<'ctx>,
+    pub datum_types: IndexVec<TypeId, inkwell::types::StructType<'ctx>>,
+    pub sym: HashMap<StringId, inkwell::values::FunctionValue<'ctx>>,
+}
+
+impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
+    pub fn new(ctx: &'a Context<'a, 'ctx>, env: &'a Environment) -> Self {
+        let rt_global = ctx.module.add_global(ctx.rt.ty.rt_type, Some(inkwell::AddressSpace::Generic), "runtime");
+        rt_global.set_initializer(&ctx.rt.ty.rt_type.const_zero());
+
+        // TODO: don't dig so deep into env?
+        let vt_global_ty = ctx.rt.ty.vt_entry_type.array_type(env.rt_env.type_tree.types.len() as u32);
+        let vt_global = ctx.module.add_global(vt_global_ty, Some(inkwell::AddressSpace::Generic), "vtable");
+
+        Self {
+            ctx: ctx,
+            env: env,
+            rt_global: rt_global,
+            vt_global: vt_global,
+            datum_types: IndexVec::new(),
+            procs: Vec::new(),
+            sym: HashMap::new(),
+        }
+    }
+
+    pub fn build_procs(&mut self) {
+        for (name, proc) in self.env.procs.iter() {
+            self.add_proc(*name, &proc);
+        }
+    }
+
+    fn add_proc(&mut self, name: StringId, proc: &'a Proc) {
+        //let mut proc_emit = ProcEmit::new(self.ctx, proc, name);
+        let func_type = self.ctx.rt.ty.val_type.fn_type(&[self.ctx.rt.ty.arg_pack_type.ptr_type(inkwell::AddressSpace::Generic).into()], false);
+        let func = self.ctx.module.add_function(self.env.string_table.get(name), func_type, None);
+
+        self.sym.insert(name, func);
+        self.procs.push((proc, name, func));
+    }
+
+    pub fn emit(&mut self) {
+        self.populate_datum_types();
+        self.emit_vtable();
+        let main_block = self.emit_main();
+
+        let mut main_proc = None;
+        for (proc, name, func) in self.procs.drain(..).collect::<Vec<_>>() { // TODO no
+            let mut proc_emit = ProcEmit::new(self.ctx, self, proc, func, name);
+            proc_emit.emit_proc(self);
+            if self.env.string_table.get(name) == "entry" {
+                main_proc = Some(proc_emit.func.clone());
+            }
+        }
+
+        self.finalize_main(main_block, main_proc.unwrap());
+    }
+
+    fn emit_main(&mut self) -> inkwell::basic_block::BasicBlock<'ctx> {
+        let func_type = self.ctx.llvm_ctx.void_type().fn_type(&[], false);
+        let func = self.ctx.module.add_function("main", func_type, None);
+
+        let block = self.ctx.llvm_ctx.append_basic_block(func, "entry");
+        self.ctx.builder.position_at_end(block);
+
+        // TODO: move file emit to a better place
+        self.env.string_table.serialize(File::create("stringtable.bincode").unwrap());
+        bincode::serialize_into(File::create("environment.bincode").unwrap(), &self.env.rt_env).unwrap();
+
+        let vt_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(self.vt_global.as_pointer_value(), &[
+            self.ctx.llvm_ctx.i32_type().const_zero(),
+            self.ctx.llvm_ctx.i32_type().const_zero(),
+        ], "vt_ptr") };
+
+        self.ctx.builder.build_call(self.ctx.rt.rt_runtime_init, &[
+            self.rt_global.as_pointer_value().into(),
+            vt_ptr.into(),
+        ], "");
+
+        block
+    }
+
+    fn finalize_main(&self, block: inkwell::basic_block::BasicBlock, entry_func: inkwell::values::FunctionValue) {
+        self.ctx.builder.position_at_end(block);
+        let argpack_alloca = self.ctx.builder.build_alloca(self.ctx.rt.ty.arg_pack_type, "argpack_ptr");
+        let argpack = self.ctx.rt.ty.arg_pack_type.const_zero();
+        self.ctx.builder.build_store(argpack_alloca, argpack);
+        self.ctx.builder.build_call(entry_func, &[argpack_alloca.into()], "");
+        self.ctx.builder.build_return(None);
+    }
+
+    fn populate_datum_types(&mut self) {
+        for ty in self.env.rt_env.type_tree.types.iter() {
+            let vars_field_ty = self.ctx.rt.ty.val_type.array_type(ty.vars.len() as u32);
+            let datum_ty = self.ctx.llvm_ctx.struct_type(&[
+                self.ctx.llvm_ctx.i32_type().into(),
+                vars_field_ty.into(),
+            ], false);
+            assert_eq!(ty.id.index(), self.datum_types.len());
+            self.datum_types.push(datum_ty);
+        }
+    }
+
+    fn emit_vtable(&self) {
+        let mut vt_entries = Vec::new();
+        // yuck, TODO: encapsulate typetree
+        for ty in self.env.rt_env.type_tree.types.iter() {
+            let var_index_fn = self.make_var_index_func(ty);
+
+            let entries = &[
+                // size
+                self.datum_types[ty.id].size_of().unwrap().const_cast(self.ctx.llvm_ctx.i64_type(), false).into(),
+                var_index_fn.into(),
+                self.make_get_var_func(ty, var_index_fn).into(),
+                self.make_set_var_func(ty, var_index_fn).into(),
+            ];
+
+            let field_tys = self.ctx.rt.ty.vt_entry_type.get_field_types();
+            assert_eq!(entries.len(), field_tys.len());
+            let cast_entries: Vec<_> = entries.into_iter().enumerate().map(|(i, entry)| {
+                match *entry {
+                    AnyValueEnum::FunctionValue(f) => self.ctx.builder.build_bitcast(f.as_global_value().as_pointer_value(), field_tys[i], "").into(),
+                    AnyValueEnum::IntValue(v) => v.into(),
+                    _ => unimplemented!("add handler"),
+                }
+
+            }).collect();
+
+            let vt_entry = self.ctx.rt.ty.vt_entry_type.const_named_struct(&cast_entries);
+            vt_entries.push(vt_entry);
+        }
+        self.vt_global.set_initializer(&self.ctx.rt.ty.vt_entry_type.const_array(&vt_entries));
+    }
+
+    fn make_get_var_func(&self, ty: &DType, index_func: inkwell::values::FunctionValue<'ctx>) -> inkwell::values::FunctionValue<'ctx> {
+        let datum_type_ptr = self.datum_types[ty.id].ptr_type(inkwell::AddressSpace::Generic);
+        let func_ty = self.ctx.rt.ty.val_type.fn_type(&[datum_type_ptr.into(), self.ctx.llvm_ctx.i64_type().into()], false);
+        // TODO: MANGLE
+        let func = self.ctx.module.add_function(&format!("ty_{}_get_var", ty.id.index()), func_ty, None);
+
+        let entry_block = self.ctx.llvm_ctx.append_basic_block(func, "entry");
+        self.ctx.builder.position_at_end(entry_block);
+
+        let datum_ptr = func.get_first_param().unwrap().into_pointer_value();
+        let var_name = func.get_last_param().unwrap().into_int_value();
+
+        let var_index = self.ctx.builder.build_call(index_func, &[var_name.into()], "var_index").try_as_basic_value().left().unwrap().into_int_value();
+        let var_val_ptr = unsafe {self.ctx.builder.build_in_bounds_gep(datum_ptr, &[
+            self.ctx.llvm_ctx.i32_type().const_zero(),
+            self.ctx.llvm_ctx.i32_type().const_int(datum::DATUM_VARS_FIELD_OFFSET, false),
+            var_index,
+        ], "var_val_ptr")};
+        let var_val = self.ctx.builder.build_load(var_val_ptr, "var_val");
+        self.ctx.builder.build_return(Some(&var_val));
+
+        func
+    }
+
+    fn make_set_var_func(&self, ty: &DType, index_func: inkwell::values::FunctionValue<'ctx>) -> inkwell::values::FunctionValue<'ctx> {
+        let datum_type_ptr = self.datum_types[ty.id].ptr_type(inkwell::AddressSpace::Generic);
+        let func_ty = self.ctx.llvm_ctx.void_type().fn_type(&[datum_type_ptr.into(), self.ctx.llvm_ctx.i64_type().into(), self.ctx.rt.ty.val_type.into()], false);
+        // TODO: MANGLE
+        let func = self.ctx.module.add_function(&format!("ty_{}_set_var", ty.id.index()), func_ty, None);
+
+        let entry_block = self.ctx.llvm_ctx.append_basic_block(func, "entry");
+        self.ctx.builder.position_at_end(entry_block);
+
+        let datum_ptr = func.get_params()[0].into_pointer_value();
+        let var_name = func.get_params()[1].into_int_value();
+        let asg_val = func.get_params()[2].into_struct_value();
+
+        let var_index = self.ctx.builder.build_call(index_func, &[var_name.into()], "var_index").try_as_basic_value().left().unwrap().into_int_value();
+        let var_val_ptr = unsafe {self.ctx.builder.build_in_bounds_gep(datum_ptr, &[
+            self.ctx.llvm_ctx.i32_type().const_zero(),
+            self.ctx.llvm_ctx.i32_type().const_int(datum::DATUM_VARS_FIELD_OFFSET, false),
+            var_index,
+        ], "var_val_ptr")};
+        self.ctx.builder.build_store(var_val_ptr, asg_val);
+        self.ctx.builder.build_return(None);
+
+        func
+    }
+
+    fn make_var_index_func(&self, ty: &DType) -> inkwell::values::FunctionValue<'ctx> {
+        let func_ty = self.ctx.llvm_ctx.i32_type().fn_type(&[self.ctx.llvm_ctx.i64_type().into()], false);
+        // TODO: MANGLE
+        let func = self.ctx.module.add_function(&format!("ty_{}_var_index", ty.id.index()), func_ty, None);
+        // TODO: revisit
+        let attr = self.ctx.llvm_ctx.create_string_attribute("alwaysinline", "");
+        func.add_attribute(inkwell::attributes::AttributeLoc::Function, attr);
+
+        let entry_block = self.ctx.llvm_ctx.append_basic_block(func, "entry");
+        let dropout_block = self.ctx.llvm_ctx.append_basic_block(func, "dropout");
+        let conv_block = self.ctx.llvm_ctx.append_basic_block(func, "conv");
+
+        self.ctx.builder.position_at_end(dropout_block);
+        // TODO: RTE no such var
+        // TODO: add trap here for now?
+        self.ctx.builder.build_return(Some(&self.ctx.llvm_ctx.i32_type().const_int(1 << 31, false)));
+
+        let mut cases = Vec::new();
+        let mut phi_incoming = Vec::new();
+        for (i, var_name) in ty.vars.iter().enumerate() {
+            let case_block = self.ctx.llvm_ctx.append_basic_block(func, &format!("case_{}", var_name.id()));
+            self.ctx.builder.position_at_end(case_block);
+            let disc_val = self.ctx.llvm_ctx.i64_type().const_int(var_name.id(), false);
+            let this_offset_val = self.ctx.llvm_ctx.i32_type().const_int(i as u64, false);
+            self.ctx.builder.build_unconditional_branch(conv_block);
+            cases.push((disc_val, case_block));
+            phi_incoming.push((this_offset_val, case_block));
+        }
+
+        self.ctx.builder.position_at_end(entry_block);
+
+        if cases.len() == 0 {
+            // hack, TODO: replace
+            self.ctx.builder.build_unconditional_branch(conv_block);
+            self.ctx.builder.position_at_end(conv_block);
+            self.ctx.builder.build_unconditional_branch(dropout_block);
+            return func
+        }
+
+        let param_val = func.get_first_param().unwrap().into_int_value();
+        self.ctx.builder.build_switch(param_val, dropout_block, &cases);
+
+        self.ctx.builder.position_at_end(conv_block);
+        let phi_incoming: Vec<_> = phi_incoming.iter().map(|(v, b)| (v as _, *b)).collect();
+        let offset_val = self.ctx.builder.build_phi(self.ctx.llvm_ctx.i32_type(), "offset");
+        offset_val.add_incoming(phi_incoming.as_slice());
+        self.ctx.builder.build_return(Some(&offset_val.as_basic_value()));
+
+        func
+    }
+
+    pub fn run(&self, opt: bool) {
+        //self.ctx.module.print_to_stderr();
+        self.dump_module("unopt");
+
+        let engine = self.ctx.module.create_jit_execution_engine(inkwell::OptimizationLevel::None).unwrap();
+
+        if opt {
+            let pm_builder = inkwell::passes::PassManagerBuilder::create();
+            pm_builder.set_optimization_level(inkwell::OptimizationLevel::Aggressive);
+            let pm = inkwell::passes::PassManager::create(());
+            pm_builder.populate_module_pass_manager(&pm);
+            pm.run_on(&self.ctx.module);
+
+            //self.ctx.module.print_to_stderr();
+            self.dump_module("opt");
+        }
+
+        unsafe {
+            let func = engine.get_function::<unsafe extern "C" fn()>("main").unwrap();
+            func.call();
+        }
+    }
+
+    pub fn dump_module(&self, name: &str) {
+        let buf = self.ctx.module.print_to_string().to_string();
+        fs::create_dir_all("dbgout/llvm/").unwrap();
+        fs::write(format!("dbgout/llvm/{}.ll", name), buf).unwrap();
+    }
+
+}

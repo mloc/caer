@@ -37,6 +37,7 @@ impl TypeTree {
             }
             self.populate_ty(ty_ref, st, &mut var_queue);
         }
+        self.populate_ty(objtree.root(), st, &mut var_queue);
         for (id, oty) in var_queue {
             self.populate_ty_vars(id, oty, objtree, st);
         }
@@ -49,11 +50,21 @@ impl TypeTree {
 
         let parent_ty = oty.parent_type_without_root().map(|tyr| self.populate_ty(tyr, st, var_queue));
 
+        let path = path_to_pvec(oty, st);
+        let mut type_path = parent_ty.map_or_else(
+            || { Vec::new() },
+            |id| { self.types[id].type_path.clone() },
+        );
+        if !oty.is_root() {
+            type_path.push(*path.last().unwrap());
+        }
+
         let id = TypeId::new(self.types.len());
         let dty = DType {
             id: id,
-            path: path_to_pvec(&oty.path, st),
             path_str: st.put(&oty.path),
+            path: path,
+            type_path: type_path,
             parent: parent_ty,
             vars: Vec::new(),
             var_lookup: HashMap::new(),
@@ -115,11 +126,11 @@ impl TypeTree {
 }
 
 // TODO: move into environment when env contains intern stringtable?
-pub fn path_to_pvec(path_str: &str, st: &mut StringTable) -> Vec<StringId> {
-    assert!(path_str.starts_with("/"));
+pub fn path_to_pvec<'ot>(tyr: objtree::TypeRef<'ot>, st: &mut StringTable) -> Vec<StringId> {
+    assert!(tyr.is_root() || tyr.path.starts_with("/"));
     let mut path_vec = Vec::new();
 
-    for seg in path_str.split("/").skip(1) {
+    for seg in tyr.path.split("/").skip(1) {
         assert_ne!(seg, "");
         path_vec.push(st.put(seg));
     }
@@ -133,6 +144,7 @@ pub struct DType {
     pub id: TypeId,
     pub path_str: StringId,
     pub path: Vec<StringId>,
+    pub type_path: Vec<StringId>,
     pub parent: Option<TypeId>,
     // TODO: more detail
     pub vars: Vec<StringId>,
