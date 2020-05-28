@@ -1,13 +1,13 @@
 /datum/container
     var/obj/obj
 
-///proc/argfoo(var/bar)
-    //world << bar
+/proc/argfoo(var/bar)
+    world << bar
 
 /proc/entry()
-    //var/s = "hey"
-    //world << "[s] there[1/90]"
-    //argfoo(s)
+    var/s = "hey"
+    world << "[s] there[1/90]"
+    argfoo(s)
 
     var/datum/container/c = new /datum/container
     c.obj = new /obj

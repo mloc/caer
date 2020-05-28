@@ -8,14 +8,15 @@ use caer_runtime::string_table::StringId;
 use caer_runtime::type_tree;
 use crate::ty;
 
-pub struct BlockBuilder<'a, 'p, 'b> {
-    pb: &'a mut ProcBuilder<'p, 'b>,
+// these lifetimes are probably extraneous, they're a kludge for speed
+pub struct BlockBuilder<'a, 'pb, 'cb, 'ot> {
+    pb: &'a mut ProcBuilder<'pb, 'cb, 'ot>,
     block: cfg::Block,
     pub root_block_id: BlockId,
 }
 
-impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
-    pub fn new(pb: &'a mut ProcBuilder<'p, 'b>, scope: ScopeId) -> Self {
+impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
+    pub fn new(pb: &'a mut ProcBuilder<'pb, 'cb, 'ot>, scope: ScopeId) -> Self {
         let block = pb.proc.new_block(scope);
 
         Self {
@@ -60,7 +61,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
 
                 if !v.var_type.type_path.is_empty() {
                     // TODO: handle list types
-                    let var_ty = match self.pb.builder.tree.type_by_path(&v.var_type.type_path) {
+                    let var_ty = match self.pb.builder.objtree.type_by_path(&v.var_type.type_path) {
                         Some(ty) => ty,
                         None => {
                             // TODO: ERRH(C)
@@ -441,7 +442,7 @@ impl<'a, 'p, 'b> BlockBuilder<'a, 'p, 'b> {
                     ast::NewType::Prefab(pf) => {
                         assert!(pf.vars.is_empty());
                         // TODO: ughhhh, move path resolving into a helper, better encapsulation
-                        let pf_ty = self.pb.builder.tree.root().navigate_path(&pf.path).unwrap().ty();
+                        let pf_ty = self.pb.builder.objtree.root().navigate_path(&pf.path).unwrap().ty();
                         let type_id = self.pb.builder.env.rt_env.type_tree.type_by_node_id[&(pf_ty.index().index() as u64)];
                         type_id
                     },

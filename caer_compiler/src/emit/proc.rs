@@ -18,11 +18,10 @@ pub struct ProcEmit<'a, 'ctx> {
     pub blocks: IndexVec<BlockId, inkwell::basic_block::BasicBlock<'ctx>>,
     pub func: inkwell::values::FunctionValue<'ctx>,
     pub proc: &'a Proc,
-    pub name: StringId,
 }
 
 impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
-    pub fn new(ctx: &'a Context<'a, 'ctx>, emit: &'a ProgEmit<'a, 'ctx>, proc: &'a Proc, func: inkwell::values::FunctionValue<'ctx>, name: StringId) -> Self {
+    pub fn new(ctx: &'a Context<'a, 'ctx>, emit: &'a ProgEmit<'a, 'ctx>, proc: &'a Proc, func: inkwell::values::FunctionValue<'ctx>) -> Self {
         Self {
             ctx: ctx,
             emit: emit,
@@ -30,7 +29,6 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
             blocks: IndexVec::new(),
             func: func,
             proc: proc,
-            name: name,
         }
     }
 
@@ -88,7 +86,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         let param_locals_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(param_locals_alloca, &[cz, cz], "param_locals_ptr") };
         let argpack_local = self.func.get_params()[0];
 
-        self.ctx.builder.build_call(self.ctx.rt.rt_arg_pack_unpack_into, &[argpack_local, param_locals_ptr.into(), self.ctx.llvm_ctx.i64_type().const_int(self.proc.env_id.index() as u64, false).into(), self.emit.rt_global.as_pointer_value().into()], "");
+        self.ctx.builder.build_call(self.ctx.rt.rt_arg_pack_unpack_into, &[argpack_local, param_locals_ptr.into(), self.ctx.llvm_ctx.i64_type().const_int(self.proc.id.index() as u64, false).into(), self.emit.rt_global.as_pointer_value().into()], "");
 
         block
     }
@@ -305,7 +303,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     self.ctx.builder.build_store(argpack_alloca, argpack);
 
                     // TODO: don't lookup procs by symbol table like this
-                    let func = emit.sym[name];
+                    let func = emit.lookup_global_proc(*name);
                     let res_val = self.ctx.builder.build_call(func, &[argpack_alloca.into()], "res").try_as_basic_value().left().unwrap();
                     let val = Value::new(Some(res_val), ty::Complex::Any);
                     self.store_local(id, &val);

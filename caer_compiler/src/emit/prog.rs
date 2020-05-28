@@ -1,7 +1,7 @@
 use super::proc::ProcEmit;
 use super::context::Context;
 use crate::ir::cfg::*;
-use crate::ir::env::Environment;
+use crate::ir::env::Env;
 use caer_runtime::string_table::StringId;
 use caer_runtime::type_tree::{TypeId, DType};
 use indexed_vec::{IndexVec, Idx};
@@ -9,20 +9,21 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use inkwell::values::AnyValueEnum;
 use caer_runtime::datum;
+use caer_runtime::environment::ProcId;
 
 #[derive(Debug)]
 pub struct ProgEmit<'a, 'ctx> {
     pub ctx: &'a Context<'a, 'ctx>,
-    pub env: &'a Environment,
-    pub procs: Vec<(&'a Proc, StringId, inkwell::values::FunctionValue<'ctx>)>,
+    pub env: &'a Env,
+    pub procs: Vec<(&'a Proc, inkwell::values::FunctionValue<'ctx>)>,
     pub rt_global: inkwell::values::GlobalValue<'ctx>,
     pub vt_global: inkwell::values::GlobalValue<'ctx>,
     pub datum_types: IndexVec<TypeId, inkwell::types::StructType<'ctx>>,
-    pub sym: HashMap<StringId, inkwell::values::FunctionValue<'ctx>>,
+    pub sym: IndexVec<ProcId, inkwell::values::FunctionValue<'ctx>>,
 }
 
 impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
-    pub fn new(ctx: &'a Context<'a, 'ctx>, env: &'a Environment) -> Self {
+    pub fn new(ctx: &'a Context<'a, 'ctx>, env: &'a Env) -> Self {
         let rt_global = ctx.module.add_global(ctx.rt.ty.rt_type, Some(inkwell::AddressSpace::Generic), "runtime");
         rt_global.set_initializer(&ctx.rt.ty.rt_type.const_zero());
 
@@ -33,27 +34,34 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         Self {
             ctx: ctx,
             env: env,
+            procs: Vec::new(),
             rt_global: rt_global,
             vt_global: vt_global,
             datum_types: IndexVec::new(),
-            procs: Vec::new(),
-            sym: HashMap::new(),
+            sym: IndexVec::new(),
         }
     }
 
     pub fn build_procs(&mut self) {
-        for (name, proc) in self.env.procs.iter() {
-            self.add_proc(*name, &proc);
+        for proc in self.env.procs.iter() {
+            self.add_proc(proc);
         }
     }
 
-    fn add_proc(&mut self, name: StringId, proc: &'a Proc) {
+    pub fn lookup_global_proc(&self, name: StringId) -> inkwell::values::FunctionValue<'ctx> {
+        let global_dty = self.env.rt_env.type_tree.global_type();
+        let proc_id = global_dty.proc_lookup[&name].top_proc;
+        self.sym[proc_id]
+    }
+
+    fn add_proc(&mut self, proc: &'a Proc) {
         //let mut proc_emit = ProcEmit::new(self.ctx, proc, name);
         let func_type = self.ctx.rt.ty.val_type.fn_type(&[self.ctx.rt.ty.arg_pack_type.ptr_type(inkwell::AddressSpace::Generic).into()], false);
-        let func = self.ctx.module.add_function(self.env.string_table.get(name), func_type, None);
+        let func = self.ctx.module.add_function(&format!("proc_{}", proc.id.index()), func_type, None);
 
-        self.sym.insert(name, func);
-        self.procs.push((proc, name, func));
+        assert_eq!(proc.id.index(), self.sym.len());
+        self.sym.push(func);
+        self.procs.push((proc, func));
     }
 
     pub fn emit(&mut self) {
@@ -61,16 +69,13 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         self.emit_vtable();
         let main_block = self.emit_main();
 
-        let mut main_proc = None;
-        for (proc, name, func) in self.procs.drain(..).collect::<Vec<_>>() { // TODO no
-            let mut proc_emit = ProcEmit::new(self.ctx, self, proc, func, name);
+        for (proc, func) in self.procs.drain(..).collect::<Vec<_>>() { // TODO no
+            let mut proc_emit = ProcEmit::new(self.ctx, self, proc, func);
             proc_emit.emit_proc(self);
-            if self.env.string_table.get(name) == "entry" {
-                main_proc = Some(proc_emit.func.clone());
-            }
         }
+        let main_proc = self.lookup_global_proc(self.env.intern_string_ro("entry"));
 
-        self.finalize_main(main_block, main_proc.unwrap());
+        self.finalize_main(main_block, main_proc);
     }
 
     fn emit_main(&mut self) -> inkwell::basic_block::BasicBlock<'ctx> {

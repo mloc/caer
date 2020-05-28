@@ -1,27 +1,25 @@
-use super::builder::Builder;
+use super::cfg_builder::CfgBuilder;
 use super::block_builder::BlockBuilder;
 use std::collections::HashMap;
 use crate::ir::cfg;
 use crate::ir::id::*;
 use dreammaker::{ast, objtree};
 use caer_runtime::string_table::StringId;
+use caer_runtime::environment::ProcId;
 use crate::ty;
 
-pub struct ProcBuilder<'a, 'b> {
-    pub builder: &'a mut Builder<'b>,
-    pub ast_proc: &'a objtree::ProcValue,
+pub struct ProcBuilder<'a, 'cb, 'ot> {
+    pub builder: &'a mut CfgBuilder<'cb, 'ot>,
+    pub ast_proc: &'ot objtree::ProcValue,
     pub vars: HashMap<String, LocalId>,
     pub proc: cfg::Proc,
 
     finished_blocks: Vec<cfg::Block>,
 }
 
-impl<'a, 'b> ProcBuilder<'a, 'b> {
-    pub fn build(builder: &'a mut Builder<'b>, name: &str, ast_proc: &'a objtree::ProcValue) -> cfg::Proc {
-        let name_id = builder.add_string(name);
-        let env_id = builder.env.rt_env.add_proc(name_id);
-
-        let mut proc = cfg::Proc::new(name_id, env_id);
+impl<'a, 'cb, 'ot> ProcBuilder<'a, 'cb, 'ot> {
+    pub fn build(builder: &'a mut CfgBuilder<'cb, 'ot>, id: ProcId, ast_proc: &'ot objtree::ProcValue) -> cfg::Proc {
+        let mut proc = cfg::Proc::new(id);
         let scope = proc.new_scope(proc.global_scope);
 
         let pb = Self {
@@ -47,11 +45,11 @@ impl<'a, 'b> ProcBuilder<'a, 'b> {
             let local_id = self.add_var(self.proc.global_scope, name_id);
             self.proc.params.push(local_id);
 
-            let spec = self.builder.env.rt_env.get_proc_mut(self.proc.env_id);
+            let spec = self.builder.env.rt_env.get_proc_mut(self.proc.id);
             spec.params.push(name_id);
             spec.names.push((name_id, i as u32));
         }
-        let spec = self.builder.env.rt_env.get_proc_mut(self.proc.env_id);
+        let spec = self.builder.env.rt_env.get_proc_mut(self.proc.id);
         spec.names.sort_unstable_by_key(|(ref s, _)| {*s});
 
         let body = if let objtree::Code::Present(ref b) = self.ast_proc.code {

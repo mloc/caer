@@ -61,7 +61,11 @@ impl StringTable {
         &self.strings[&id]
     }
 
-    pub fn put<'a, S: Into<Cow<'a, str>>>(&mut self, s: S) -> StringId {
+    pub fn lookup(&self, s: impl AsRef<str>) -> Option<StringId> {
+        self.ids.get(s.as_ref()).map(|id| *id)
+    }
+
+    pub fn put<'a>(&mut self, s: impl Into<Cow<'a, str>>) -> StringId {
         let s = s.into();
         if s.is_empty() {
             return StringId(0)

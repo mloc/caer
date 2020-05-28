@@ -50,7 +50,7 @@ impl LocalFlow {
 #[derive(Debug)]
 pub struct Proc {
     pub name: StringId,
-    pub env_id: ProcId,
+    pub id: ProcId,
 
     pub locals: IndexVec<LocalId, Local>,
     pub vars: HashMap<StringId, LocalId>,
@@ -64,7 +64,7 @@ pub struct Proc {
 }
 
 impl<'a> Proc {
-    pub fn new(name: StringId, env_id: ProcId) -> Self {
+    pub fn new(id: ProcId) -> Self {
         // ids map to indices in the scopes list; we can assume this scope will have id 0
         // TODO sounder way to handle this + locals?
         let global_scope = Scope::new(ScopeId::new(0), None);
@@ -72,8 +72,9 @@ impl<'a> Proc {
         scopes.push(global_scope);
 
         let mut new = Self {
-            name: name,
-            env_id: env_id,
+            // awful, TODO: fetch a better name, MANGLE?
+            name: StringId::new(0),
+            id: id,
 
             locals: IndexVec::new(),
             vars: HashMap::new(),

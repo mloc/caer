@@ -15,7 +15,9 @@ fn main() {
     let tree = parser.parse_object_tree();
     println!("PARSED");
 
-    let env = frontend::builder::Builder::build(&tree);
+    let mut env = ir::env::Env::new();
+    let mut tb = frontend::TreeBuilder::new(&tree, &mut env);
+    tb.build();
     println!("CFG BUILT");
 
     let llctx = inkwell::context::Context::create();

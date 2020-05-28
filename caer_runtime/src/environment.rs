@@ -4,7 +4,7 @@ use indexed_vec::{IndexVec, newtype_index, Idx};
 use serde::{Serialize, Deserialize};
 
 use crate::proc_spec::ProcSpec;
-use crate::string_table::{StringId, StringTable};
+use crate::string_table::StringId;
 use crate::type_tree::TypeTree;
 
 newtype_index!(ProcId {pub idx});
@@ -18,10 +18,10 @@ pub struct Environment {
 }
 
 impl Environment {
-    pub fn new(tt: TypeTree) -> Self {
+    pub fn new() -> Self {
         Self {
             proc_specs: IndexVec::new(),
-            type_tree: tt,
+            type_tree: TypeTree::new(),
         }
     }
 
