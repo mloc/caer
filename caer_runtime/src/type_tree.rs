@@ -1,11 +1,8 @@
-use crate::string_table::{StringId, StringTable};
+use crate::string_table::StringId;
 use serde::{Serialize, Deserialize};
 use indexed_vec::{IndexVec, newtype_index, Idx};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use crate::environment::ProcId;
-
-// probably should do this in compiler to not pull dreammaker into runtime?
-use dreammaker::objtree;
 
 // TODO: move all ids into their own mod?
 newtype_index!(TypeId {pub idx});

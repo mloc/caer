@@ -109,6 +109,7 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
             };
 
             if let Some(decl) = &tv.declaration {
+                // TODO: handle static vars
                 if !decl.var_type.type_path.is_empty() {
                     let assoc_dty_id = match &self.objtree.type_by_path(&decl.var_type.type_path) {
                         Some(assoc_ty) => {

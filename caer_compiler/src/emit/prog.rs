@@ -135,6 +135,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
                 var_index_fn.into(),
                 self.make_get_var_func(ty, var_index_fn).into(),
                 self.make_set_var_func(ty, var_index_fn).into(),
+                self.make_proc_lookup_func(ty).into(),
             ];
 
             let field_tys = self.ctx.rt.ty.vt_entry_type.get_field_types();
@@ -152,55 +153,6 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             vt_entries.push(vt_entry);
         }
         self.vt_global.set_initializer(&self.ctx.rt.ty.vt_entry_type.const_array(&vt_entries));
-    }
-
-    fn make_get_var_func(&self, ty: &DType, index_func: inkwell::values::FunctionValue<'ctx>) -> inkwell::values::FunctionValue<'ctx> {
-        let datum_type_ptr = self.datum_types[ty.id].ptr_type(inkwell::AddressSpace::Generic);
-        let func_ty = self.ctx.rt.ty.val_type.fn_type(&[datum_type_ptr.into(), self.ctx.llvm_ctx.i64_type().into()], false);
-        // TODO: MANGLE
-        let func = self.ctx.module.add_function(&format!("ty_{}_get_var", ty.id.index()), func_ty, None);
-
-        let entry_block = self.ctx.llvm_ctx.append_basic_block(func, "entry");
-        self.ctx.builder.position_at_end(entry_block);
-
-        let datum_ptr = func.get_first_param().unwrap().into_pointer_value();
-        let var_name = func.get_last_param().unwrap().into_int_value();
-
-        let var_index = self.ctx.builder.build_call(index_func, &[var_name.into()], "var_index").try_as_basic_value().left().unwrap().into_int_value();
-        let var_val_ptr = unsafe {self.ctx.builder.build_in_bounds_gep(datum_ptr, &[
-            self.ctx.llvm_ctx.i32_type().const_zero(),
-            self.ctx.llvm_ctx.i32_type().const_int(datum::DATUM_VARS_FIELD_OFFSET, false),
-            var_index,
-        ], "var_val_ptr")};
-        let var_val = self.ctx.builder.build_load(var_val_ptr, "var_val");
-        self.ctx.builder.build_return(Some(&var_val));
-
-        func
-    }
-
-    fn make_set_var_func(&self, ty: &DType, index_func: inkwell::values::FunctionValue<'ctx>) -> inkwell::values::FunctionValue<'ctx> {
-        let datum_type_ptr = self.datum_types[ty.id].ptr_type(inkwell::AddressSpace::Generic);
-        let func_ty = self.ctx.llvm_ctx.void_type().fn_type(&[datum_type_ptr.into(), self.ctx.llvm_ctx.i64_type().into(), self.ctx.rt.ty.val_type.into()], false);
-        // TODO: MANGLE
-        let func = self.ctx.module.add_function(&format!("ty_{}_set_var", ty.id.index()), func_ty, None);
-
-        let entry_block = self.ctx.llvm_ctx.append_basic_block(func, "entry");
-        self.ctx.builder.position_at_end(entry_block);
-
-        let datum_ptr = func.get_params()[0].into_pointer_value();
-        let var_name = func.get_params()[1].into_int_value();
-        let asg_val = func.get_params()[2].into_struct_value();
-
-        let var_index = self.ctx.builder.build_call(index_func, &[var_name.into()], "var_index").try_as_basic_value().left().unwrap().into_int_value();
-        let var_val_ptr = unsafe {self.ctx.builder.build_in_bounds_gep(datum_ptr, &[
-            self.ctx.llvm_ctx.i32_type().const_zero(),
-            self.ctx.llvm_ctx.i32_type().const_int(datum::DATUM_VARS_FIELD_OFFSET, false),
-            var_index,
-        ], "var_val_ptr")};
-        self.ctx.builder.build_store(var_val_ptr, asg_val);
-        self.ctx.builder.build_return(None);
-
-        func
     }
 
     fn make_var_index_func(&self, ty: &DType) -> inkwell::values::FunctionValue<'ctx> {
@@ -250,6 +202,122 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         let offset_val = self.ctx.builder.build_phi(self.ctx.llvm_ctx.i32_type(), "offset");
         offset_val.add_incoming(phi_incoming.as_slice());
         self.ctx.builder.build_return(Some(&offset_val.as_basic_value()));
+
+        func
+    }
+
+    fn make_get_var_func(&self, ty: &DType, index_func: inkwell::values::FunctionValue<'ctx>) -> inkwell::values::FunctionValue<'ctx> {
+        let datum_type_ptr = self.datum_types[ty.id].ptr_type(inkwell::AddressSpace::Generic);
+        let func_ty = self.ctx.rt.ty.val_type.fn_type(&[datum_type_ptr.into(), self.ctx.llvm_ctx.i64_type().into()], false);
+        // TODO: MANGLE
+        let func = self.ctx.module.add_function(&format!("ty_{}_var_get", ty.id.index()), func_ty, None);
+
+        let entry_block = self.ctx.llvm_ctx.append_basic_block(func, "entry");
+        self.ctx.builder.position_at_end(entry_block);
+
+        let datum_ptr = func.get_first_param().unwrap().into_pointer_value();
+        let var_name = func.get_last_param().unwrap().into_int_value();
+
+        let var_index = self.ctx.builder.build_call(index_func, &[var_name.into()], "var_index").try_as_basic_value().left().unwrap().into_int_value();
+        let var_val_ptr = unsafe {self.ctx.builder.build_in_bounds_gep(datum_ptr, &[
+            self.ctx.llvm_ctx.i32_type().const_zero(),
+            self.ctx.llvm_ctx.i32_type().const_int(datum::DATUM_VARS_FIELD_OFFSET, false),
+            var_index,
+        ], "var_val_ptr")};
+        let var_val = self.ctx.builder.build_load(var_val_ptr, "var_val");
+        self.ctx.builder.build_return(Some(&var_val));
+
+        func
+    }
+
+    fn make_set_var_func(&self, ty: &DType, index_func: inkwell::values::FunctionValue<'ctx>) -> inkwell::values::FunctionValue<'ctx> {
+        let datum_type_ptr = self.datum_types[ty.id].ptr_type(inkwell::AddressSpace::Generic);
+        let func_ty = self.ctx.llvm_ctx.void_type().fn_type(&[datum_type_ptr.into(), self.ctx.llvm_ctx.i64_type().into(), self.ctx.rt.ty.val_type.into()], false);
+        // TODO: MANGLE
+        let func = self.ctx.module.add_function(&format!("ty_{}_var_set", ty.id.index()), func_ty, None);
+
+        let entry_block = self.ctx.llvm_ctx.append_basic_block(func, "entry");
+        self.ctx.builder.position_at_end(entry_block);
+
+        let datum_ptr = func.get_params()[0].into_pointer_value();
+        let var_name = func.get_params()[1].into_int_value();
+        let asg_val = func.get_params()[2].into_struct_value();
+
+        let var_index = self.ctx.builder.build_call(index_func, &[var_name.into()], "var_index").try_as_basic_value().left().unwrap().into_int_value();
+        let var_val_ptr = unsafe {self.ctx.builder.build_in_bounds_gep(datum_ptr, &[
+            self.ctx.llvm_ctx.i32_type().const_zero(),
+            self.ctx.llvm_ctx.i32_type().const_int(datum::DATUM_VARS_FIELD_OFFSET, false),
+            var_index,
+        ], "var_val_ptr")};
+        self.ctx.builder.build_store(var_val_ptr, asg_val);
+        self.ctx.builder.build_return(None);
+
+        func
+    }
+
+    fn make_proc_lookup_func(&self, ty: &DType) -> inkwell::values::FunctionValue<'ctx> {
+        let datum_type_ptr = self.datum_types[ty.id].ptr_type(inkwell::AddressSpace::Generic);
+        let ret_ty = self.ctx.rt.ty.proc_type.ptr_type(inkwell::AddressSpace::Generic);
+        let func_ty = ret_ty.fn_type(&[self.ctx.llvm_ctx.i32_type().into()], false);
+        let func = self.ctx.module.add_function(&format!("ty_{}_proc_lookup", ty.id.index()), func_ty, None);
+
+        let entry_block = self.ctx.llvm_ctx.append_basic_block(func, "entry");
+        let dropout_block = self.ctx.llvm_ctx.append_basic_block(func, "dropout");
+        let conv_block = self.ctx.llvm_ctx.append_basic_block(func, "conv");
+
+        self.ctx.builder.position_at_end(dropout_block);
+        // TODO: RTE no such proc
+        // TODO: add trap here for now?
+        self.ctx.builder.build_return(Some(&ret_ty.const_null()));
+
+        let mut cases = Vec::new();
+        let mut phi_incoming = Vec::new();
+        let mut proc_lookup_vals = Vec::new();
+        for (i, proc_name) in ty.procs.iter().enumerate() {
+            let case_block = self.ctx.llvm_ctx.append_basic_block(func, &format!("case_{}", proc_name.id()));
+            self.ctx.builder.position_at_end(case_block);
+            let disc_val = self.ctx.llvm_ctx.i32_type().const_int(proc_name.id(), false);
+            let proc_index_val = self.ctx.llvm_ctx.i32_type().const_int(i as u64, false);
+            self.ctx.builder.build_unconditional_branch(conv_block);
+            cases.push((disc_val, case_block));
+            phi_incoming.push((proc_index_val, case_block));
+            proc_lookup_vals.push(self.sym[ty.proc_lookup[proc_name].top_proc].as_global_value().as_pointer_value());
+        }
+        let proc_lookup_tbl_ty = ret_ty.array_type(cases.len() as u32);
+        let proc_lookup_tbl_global = self.ctx.module.add_global(
+            proc_lookup_tbl_ty,
+            Some(inkwell::AddressSpace::Generic),
+            &format!("ty_{}_proc_lookup_tbl", ty.id.index()));
+        proc_lookup_tbl_global.set_initializer(&ret_ty.const_array(proc_lookup_vals.as_slice()));
+
+        self.ctx.builder.position_at_end(entry_block);
+
+        if cases.len() == 0 {
+            // hack, TODO: replace
+            self.ctx.builder.build_unconditional_branch(conv_block);
+            self.ctx.builder.position_at_end(conv_block);
+            self.ctx.builder.build_unconditional_branch(dropout_block);
+            return func
+        }
+
+        let param_val = func.get_first_param().unwrap().into_int_value();
+        self.ctx.builder.build_switch(param_val, dropout_block, &cases);
+
+        self.ctx.builder.position_at_end(conv_block);
+        let phi_incoming: Vec<_> = phi_incoming.iter().map(|(v, b)| (v as _, *b)).collect();
+        let proc_index_val = self.ctx.builder.build_phi(self.ctx.llvm_ctx.i32_type(), "offset");
+        proc_index_val.add_incoming(phi_incoming.as_slice());
+
+        let proc_ptr_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(
+            proc_lookup_tbl_global.as_pointer_value(),
+            &[
+                self.ctx.llvm_ctx.i32_type().const_zero(),
+                proc_index_val.as_basic_value().into_int_value(),
+            ],
+            "proc_ptr_ptr",
+        ) };
+        let proc_ptr = self.ctx.builder.build_load(proc_ptr_ptr, "proc_ptr");
+        self.ctx.builder.build_return(Some(&proc_ptr));
 
         func
     }

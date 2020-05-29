@@ -35,6 +35,8 @@ pub struct RtFuncTyBundle<'ctx> {
     pub arg_pack_type: inkwell::types::StructType<'ctx>,
     pub arg_pack_tuple_type: inkwell::types::StructType<'ctx>,
 
+    pub proc_type: inkwell::types::FunctionType<'ctx>,
+
     pub datum_common_type: inkwell::types::StructType<'ctx>,
     pub datum_common_type_ptr: inkwell::types::PointerType<'ctx>,
 
@@ -55,6 +57,8 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
 
         let arg_pack_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.ptr_type(inkwell::AddressSpace::Generic).into(), ctx.i64_type().into(), arg_pack_tuple_type_ptr.into()], false);
 
+        let proc_type = val_type.fn_type(&[arg_pack_type.ptr_type(inkwell::AddressSpace::Generic).into()], false);
+
         let datum_common_type = ctx.struct_type(&[
             // ref
             ctx.i32_type().into(),
@@ -71,6 +75,8 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             val_type.fn_type(&[datum_common_type_ptr.into(), ctx.i64_type().into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
             // var_set fn ptr
             ctx.void_type().fn_type(&[datum_common_type_ptr.into(), ctx.i64_type().into(), val_type.into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
+            // proc_lookup fn ptr
+            proc_type.ptr_type(inkwell::AddressSpace::Generic).fn_type(&[ctx.i32_type().into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
         ], false);
 
         RtFuncTyBundle {
@@ -79,6 +85,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             opaque_type: opaque_type,
             arg_pack_type: arg_pack_type,
             arg_pack_tuple_type: arg_pack_tuple_type,
+            proc_type: proc_type,
             datum_common_type: datum_common_type,
             datum_common_type_ptr: datum_common_type_ptr,
             rt_type: rt_type,
