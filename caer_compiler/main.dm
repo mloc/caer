@@ -1,6 +1,9 @@
 /datum/container
     var/obj/obj
 
+/datum/container/proc/foo()
+    world << "hi am foo"
+
 /proc/argfoo(var/bar)
     world << bar
 
@@ -13,6 +16,7 @@
     c.obj = new /obj
     c.obj.name = "hello there"
     world << "NAME: [c.obj.name]"
+    c.foo()
 
 
     //world << 1 + 1

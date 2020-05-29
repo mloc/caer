@@ -84,51 +84,7 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
             ast::Statement::Expr(expr) => {
                 match expr {
                     ast::Expression::AssignOp { op, lhs, rhs } => {
-                        let mut base = None;
-                        let var = match lhs.as_ref() {
-                            ast::Expression::Base { unary, term, follow } => {
-                                assert!(unary.len() == 0);
-
-                                let mut final_field = match term.elem {
-                                    ast::Term::Ident(ref s) => self.pb.builder.add_string(s),
-                                    _ => unimplemented!(),
-                                };
-
-                                let mut prev_kind = None;
-                                for follow_span in follow {
-                                    match &follow_span.elem {
-                                        ast::Follow::Field(kind, field) => {
-                                            let holder = match base {
-                                                None => {
-                                                    assert!(prev_kind.is_none());
-                                                    let var_id = self.pb.proc.lookup_var(self.block.scope, final_field).unwrap();
-                                                    // TODO: this should have a narrower scope.
-                                                    self.build_var_load(var_id)
-                                                },
-                                                Some(id) => {
-                                                    self.build_datum_load(id, final_field, prev_kind.unwrap())
-                                                },
-                                            };
-
-                                            base = Some(holder);
-                                            let field_id = self.pb.builder.add_string(field);
-                                            final_field = field_id;
-                                            prev_kind = Some(*kind);
-                                        },
-                                        f => unimplemented!("lhs term follow: {:?}", f),
-                                    }
-                                }
-
-                                if let Some(id) = base {
-                                    self.validate_datum_index(id, final_field, prev_kind.unwrap());
-                                }
-
-                                final_field
-                            },
-
-                            _ => unimplemented!(),
-                        };
-
+                        let (base, var) = self.build_expr_lhs(lhs.as_ref());
                         self.build_assign(base, var, &*rhs);
                     },
 
@@ -275,6 +231,67 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
         }
     }
 
+    fn build_expr_base(&mut self, term: &ast::Spanned<ast::Term>, unary_ops: &[ast::UnaryOp], follow: &[ast::Spanned<ast::Follow>]) -> LocalId {
+        let mut local = self.build_term(&term.elem);
+        assert!(unary_ops.len() == 0);
+
+        for follow_span in follow {
+            local = self.build_follow(local, follow_span);
+        }
+
+        local
+    }
+
+    fn build_follow(&mut self, local: LocalId, follow: &ast::Spanned<ast::Follow>) -> LocalId {
+        match &follow.elem {
+            ast::Follow::Field(kind, field) => {
+                let field_id = self.pb.builder.add_string(field);
+                self.build_datum_load(local, field_id, *kind)
+            },
+            ast::Follow::Call(kind, proc_name, args) => {
+                let proc_name_id = self.pb.builder.add_string(proc_name);
+                let arg_exprs: Vec<_> = args.iter().map(|expr| self.build_expr(expr)).collect();
+                self.build_datum_call(local, proc_name_id, arg_exprs, *kind)
+            },
+            f => unimplemented!("follow: {:?}", f),
+        }
+    }
+
+    fn build_expr_lhs(&mut self, expr: &ast::Expression) -> (Option<LocalId>, StringId) {
+        match expr {
+            ast::Expression::Base { unary, term, follow } => {
+                assert!(unary.len() == 0);
+
+                if follow.is_empty() {
+                    match &term.elem {
+                        ast::Term::Ident(ref s) => { return (None, self.pb.builder.add_string(s)) },
+                        t => panic!("singleton lhs term must be an ident, not {:?}", t),
+                    }
+                };
+
+                let mut base = self.build_term(&term.elem);
+
+                let (follow_last, follow_rest) = follow.split_last().unwrap();
+
+                for follow_span in follow_rest.iter() {
+                    base = self.build_follow(base, follow_span);
+                }
+
+                match &follow_last.elem {
+                    ast::Follow::Field(kind, field) => {
+                        let field_id = self.pb.builder.add_string(field);
+                        self.validate_datum_index(base, field_id, *kind);
+                        return (Some(base), field_id);
+                    }
+                    // TODO: handle indexes
+                    f => panic!("bad follow on lhs: {:?}", f),
+                }
+            },
+
+            _ => unimplemented!(),
+        }
+    }
+
     fn build_assign(&mut self, base: Option<LocalId>, var: StringId, expr: &ast::Expression) {
         let asg_expr = self.build_expr(expr);
         match base {
@@ -298,7 +315,7 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
         holder
     }
 
-    // TODO: ERRH(C)
+    // TODO: ERRH(fe)
     fn build_datum_load(&mut self, datum_local: LocalId, var: StringId, index_kind: ast::IndexKind) -> LocalId {
         let field_dty_id = self.validate_datum_index(datum_local, var, index_kind);
         // TODO: reconsider the scope here
@@ -310,7 +327,29 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
         loaded_local
     }
 
-    // TODO: ERRH(C)
+    fn build_datum_call(&mut self, datum_local: LocalId, proc_name: StringId, args: Vec<LocalId>, index_kind: ast::IndexKind) -> LocalId {
+        match index_kind {
+            ast::IndexKind::Colon | ast::IndexKind::SafeColon => {},
+            ast::IndexKind::Dot | ast::IndexKind::SafeDot => {
+                let dty_id = match self.pb.proc.get_assoc_dty(datum_local) {
+                    Some(id) => id,
+                    None => panic!("no associated dty on local {:?}, but attempted dot-dereference for proc", datum_local),
+                };
+
+                // TODO: encap tt
+                let dty = &self.pb.builder.env.rt_env.type_tree.types[dty_id];
+                if !dty.proc_lookup.contains_key(&proc_name) {
+                    panic!("type {} has no proc {}", self.pb.builder.env.string_table.get(dty.path_str), self.pb.builder.env.string_table.get(proc_name));
+                }
+            },
+        }
+
+        let res_local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
+        self.push_op(cfg::Op::DatumCallProc(res_local, datum_local, proc_name, args));
+        res_local
+    }
+
+    // TODO: ERRH(fe)
     /// Returns the dtype ID of the indexed field, if indexed with a .-like operator
     fn validate_datum_index(&mut self, datum_local: LocalId, var: StringId, index_kind: ast::IndexKind) -> Option<type_tree::TypeId> {
         match index_kind {
@@ -318,7 +357,7 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
             ast::IndexKind::Dot | ast::IndexKind::SafeDot => {
                 let dty_id = match self.pb.proc.get_assoc_dty(datum_local) {
                     Some(id) => id,
-                    None => panic!("NO TYPE"),
+                    None => panic!("no associated dty on local {:?}, but attempted dot-dereference for var", datum_local),
                 };
 
                 // TODO: encap tt
@@ -335,20 +374,7 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
     fn build_expr(&mut self, expr: &ast::Expression) -> LocalId {
         match expr {
             ast::Expression::Base { unary, term, follow } => {
-                let mut local = self.build_term(&term.elem);
-                assert!(unary.len() == 0);
-
-                for follow_span in follow {
-                    match &follow_span.elem {
-                        ast::Follow::Field(kind, field) => {
-                            let field_id = self.pb.builder.add_string(field);
-                            local = self.build_datum_load(local, field_id, *kind);
-                        },
-                        f => unimplemented!("follow: {:?}", f),
-                    }
-                }
-
-                local
+                self.build_expr_base(term, &unary, &follow)
             },
 
             ast::Expression::BinaryOp { op, lhs, rhs } => {

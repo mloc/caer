@@ -224,6 +224,13 @@ impl<'a> Proc {
                     Op::DatumStoreVar(_, _, src) => {
                         flow[*src].reads += 1;
                     },
+
+                    Op::DatumCallProc(_, dl, _, args) => {
+                        flow[*dl].reads += 1;
+                        for arg in args.iter() {
+                            flow[*arg].reads += 1;
+                        }
+                    }
                 }
             }
 
@@ -424,6 +431,7 @@ pub enum Op {
     AllocDatum(LocalId, TypeId),
     DatumLoadVar(LocalId, LocalId, StringId), // local1 = local2.var
     DatumStoreVar(LocalId, StringId, LocalId), // local1.var = local2
+    DatumCallProc(LocalId, LocalId, StringId, Vec<LocalId>), // local1 = local2.proc(args)
 }
 
 #[derive(Debug)]

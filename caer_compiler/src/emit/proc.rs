@@ -281,30 +281,11 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 },
 
                 Op::Call(id, name, args) => {
-                    // create argpack
-                    let n_val = self.ctx.llvm_ctx.i64_type().const_int(args.len() as u64, false);
-                    let array_type = self.ctx.rt.ty.val_type.ptr_type(inkwell::AddressSpace::Generic).array_type(args.len() as u32);
-                    let argpack_unnamed_alloca = self.ctx.builder.build_alloca(array_type, "argpack_unnamed_arr");
-                    let mut argpack_unnamed = array_type.const_zero();
-                    for (i, arg) in args.iter().enumerate() {
-                        argpack_unnamed = self.ctx.builder.build_insert_value(argpack_unnamed, self.convert_to_any(*arg), i as u32, "arg").unwrap().into_array_value();
-                    }
-                    self.ctx.builder.build_store(argpack_unnamed_alloca, argpack_unnamed);
-
-                    // this GEPpery is bad?
-                    let cz = self.ctx.llvm_ctx.i32_type().const_zero();
-                    let argpack_unnamed_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(argpack_unnamed_alloca, &[cz, cz], "argpack_unnamed_ptr") };
-
-                    let argpack_alloca = self.ctx.builder.build_alloca(self.ctx.rt.ty.arg_pack_type, "argpack_ptr");
-                    let argpack = self.ctx.rt.ty.arg_pack_type.const_zero();
-                    let argpack = self.ctx.builder.build_insert_value(argpack, n_val, 0, "argpack").unwrap();
-                    let argpack = self.ctx.builder.build_insert_value(argpack, argpack_unnamed_ptr, 1, "argpack").unwrap();
-
-                    self.ctx.builder.build_store(argpack_alloca, argpack);
+                    let argpack_ptr = self.build_argpack(&args);
 
                     // TODO: don't lookup procs by symbol table like this
                     let func = emit.lookup_global_proc(*name);
-                    let res_val = self.ctx.builder.build_call(func, &[argpack_alloca.into()], "res").try_as_basic_value().left().unwrap();
+                    let res_val = self.ctx.builder.build_call(func, &[argpack_ptr.into()], "res").try_as_basic_value().left().unwrap();
                     let val = Value::new(Some(res_val), ty::Complex::Any);
                     self.store_local(id, &val);
                 },
@@ -354,6 +335,25 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     ], "");
                 },
 
+                Op::DatumCallProc(dst, src, proc_name, args) => {
+                    let argpack_ptr = self.build_argpack(&args);
+
+                    let src_val = self.load_local(src, true);
+                    let ref_ptr = self.build_extract_ref_ptr(src_val.val.unwrap().into_struct_value());
+                    let ty_id = self.build_extract_ty_id(ref_ptr);
+                    let proc_lookup_ptr = self.build_vtable_lookup(ty_id, vtable::VTABLE_PROC_LOOKUP_FIELD_OFFSET).into_pointer_value();
+
+                    let proc_ptr = self.ctx.builder.build_call(proc_lookup_ptr, &[
+                        self.ctx.llvm_ctx.i64_type().const_int(proc_name.id(), false).into(),
+                    ], "").try_as_basic_value().left().unwrap().into_pointer_value();
+
+                    let res_val = self.ctx.builder.build_call(proc_ptr, &[
+                        argpack_ptr.into(),
+                    ], "res").try_as_basic_value().left().unwrap();
+
+                    self.store_local(dst, &Value::new(Some(res_val.into()), ty::Complex::Any));
+                },
+
                 //_ => unimplemented!("{:?}", op),
             }
         }
@@ -400,6 +400,30 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 self.ctx.builder.build_switch(disc_int, self.blocks[*default], &llvm_branches[..]);
             },
         }
+    }
+
+    fn build_argpack(&self, args: &[LocalId]) -> inkwell::values::PointerValue<'ctx> {
+        let n_val = self.ctx.llvm_ctx.i64_type().const_int(args.len() as u64, false);
+        let array_type = self.ctx.rt.ty.val_type.ptr_type(inkwell::AddressSpace::Generic).array_type(args.len() as u32);
+        let argpack_unnamed_alloca = self.ctx.builder.build_alloca(array_type, "argpack_unnamed_arr");
+        let mut argpack_unnamed = array_type.const_zero();
+        for (i, arg) in args.iter().enumerate() {
+            argpack_unnamed = self.ctx.builder.build_insert_value(argpack_unnamed, self.convert_to_any(*arg), i as u32, "arg").unwrap().into_array_value();
+        }
+        self.ctx.builder.build_store(argpack_unnamed_alloca, argpack_unnamed);
+
+        // this GEPpery is bad?
+        let cz = self.ctx.llvm_ctx.i32_type().const_zero();
+        let argpack_unnamed_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(argpack_unnamed_alloca, &[cz, cz], "argpack_unnamed_ptr") };
+
+        let argpack_alloca = self.ctx.builder.build_alloca(self.ctx.rt.ty.arg_pack_type, "argpack_ptr");
+        let argpack = self.ctx.rt.ty.arg_pack_type.const_zero();
+        let argpack = self.ctx.builder.build_insert_value(argpack, n_val, 0, "argpack").unwrap();
+        let argpack = self.ctx.builder.build_insert_value(argpack, argpack_unnamed_ptr, 1, "argpack").unwrap();
+
+        self.ctx.builder.build_store(argpack_alloca, argpack);
+
+        argpack_alloca
     }
 
     fn build_extract_ref_ptr(&self, val: inkwell::values::StructValue<'ctx>) -> inkwell::values::PointerValue<'ctx> {

@@ -35,7 +35,7 @@ pub const VTABLE_SIZE_FIELD_OFFSET: u64 = 0;
 pub const VTABLE_VAR_INDEX_FIELD_OFFSET: u64 = 1;
 pub const VTABLE_VAR_GET_FIELD_OFFSET: u64 = 2;
 pub const VTABLE_VAR_SET_FIELD_OFFSET: u64 = 3;
-pub const VTABLE_PROC_LOOKUP_FIELD_OFFSET: u64 = 3;
+pub const VTABLE_PROC_LOOKUP_FIELD_OFFSET: u64 = 4;
 
 /// A single vtable entry for a type
 /// **MUST BE KEPT IN SYNC WITH LLVM TYPE**; if not, Bad Things will happen
