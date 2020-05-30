@@ -2,7 +2,7 @@
     var/obj/obj
 
 /datum/container/proc/foo()
-    world << "hi am foo"
+    return "hi am foo"
 
 /proc/argfoo(var/bar)
     world << bar
@@ -16,7 +16,8 @@
     c.obj = new /obj
     c.obj.name = "hello there"
     world << "NAME: [c.obj.name]"
-    c.foo()
+    var/msg = c.foo()
+    world << msg
 
 
     //world << 1 + 1
