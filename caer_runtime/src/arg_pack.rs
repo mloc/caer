@@ -1,6 +1,6 @@
 use cstub_bindgen_macro::expose_c_stubs;
 use std::mem;
-use indexed_vec::Idx;
+use index_vec::Idx;
 
 use crate::string_table::StringId;
 use crate::runtime::Runtime;

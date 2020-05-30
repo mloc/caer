@@ -3,7 +3,7 @@ use crate::datum::Datum;
 use crate::type_tree::TypeId;
 use crate::arg_pack::ArgPack;
 
-use indexed_vec::Idx;
+use index_vec::Idx;
 
 use std::slice::from_raw_parts;
 use std::ops::Index;

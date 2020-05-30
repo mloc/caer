@@ -1,8 +1,7 @@
-use indexed_vec::{newtype_index, Idx};
-use serde::{Serialize, Deserialize};
+use index_vec::{define_index_type};
 use caer_runtime::type_tree;
 
-newtype_index!(TyId {pub idx});
+define_index_type!{pub struct TyId = u32;}
 
 pub trait Ty {
     fn needs_destructor(&self) -> bool;

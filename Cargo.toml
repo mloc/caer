@@ -4,4 +4,5 @@ members = [
     "caer_runtime",
     "cstub_bindgen_macro",
     "indexed_vec",
+    "index_vec",
 ]

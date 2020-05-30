@@ -1,6 +1,6 @@
-use indexed_vec::{newtype_index, Idx};
+use index_vec::{define_index_type};
 use serde::{Serialize, Deserialize};
 
-newtype_index!(LocalId {pub idx});
-newtype_index!(BlockId {pub idx});
-newtype_index!(ScopeId {pub idx});
+define_index_type!{pub struct LocalId = u32;}
+define_index_type!{pub struct BlockId = u32;}
+define_index_type!{pub struct ScopeId = u32;}

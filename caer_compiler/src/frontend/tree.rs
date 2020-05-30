@@ -3,7 +3,7 @@ use caer_runtime::type_tree::{self, TypeId};
 use caer_runtime::string_table::StringId;
 use caer_runtime::environment::ProcId;
 use dreammaker::objtree;
-use indexed_vec::{IndexVec, Idx};
+use index_vec::IndexVec;
 use std::collections::HashMap;
 use crate::ir;
 

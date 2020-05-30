@@ -2,11 +2,10 @@ use std::borrow::Borrow;
 use super::context::Context;
 use super::value::Value;
 use super::prog::ProgEmit;
-use indexed_vec::{IndexVec, Idx};
+use index_vec::IndexVec;
 use crate::ir::cfg::*;
 use crate::ir::id::*;
 use crate::ty::{self, Ty};
-use caer_runtime::string_table::StringId;
 use caer_runtime::datum;
 use caer_runtime::vtable;
 
@@ -104,8 +103,8 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
             self.blocks.push(block);
         }
 
-        for (id, block) in self.proc.blocks.iter().enumerate() { // TODO port iter_enumerated
-            let ll_block = self.blocks[BlockId::new(id)];
+        for (id, block) in self.proc.blocks.iter_enumerated() {
+            let ll_block = self.blocks[id];
             self.ctx.builder.position_at_end(ll_block);
             self.emit_block(block, emit);
         }

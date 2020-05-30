@@ -8,16 +8,13 @@ version = "0.1.0"
 dot = "0.1.4"
 bincode = "1.2.1"
 serde = { version = "1.0", features = ["derive"] }
+index_vec = { path = "../index_vec", features = ["serde"] }
 
 [dependencies.dreammaker]
-#path = "../SpacemanDMM/src/dreammaker"
 git = "https://github.com/SpaceManiac/SpacemanDMM"
 
 [dependencies.caer_runtime]
 path = "../caer_runtime"
-
-[dependencies.indexed_vec]
-path = "../indexed_vec"
 
 [dependencies.inkwell]
 branch = "llvm8-0"

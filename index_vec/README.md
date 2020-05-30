@@ -115,7 +115,7 @@ Yes, although it uses `extern crate alloc;`, of course.
 
 #### Does it support serde?
 
-Yes, but only if you turn on the `serde` feature.
+Yes, but only if you turn on the `serde_impl` feature.
 
 #### What features are planned?
 

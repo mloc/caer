@@ -45,7 +45,7 @@ dependencies = [
  "caer_runtime",
  "dot",
  "dreammaker",
- "indexed_vec",
+ "index_vec",
  "inkwell",
  "serde",
 ]
@@ -57,7 +57,7 @@ dependencies = [
  "bincode",
  "cstub_bindgen_macro",
  "dreammaker",
- "indexed_vec",
+ "index_vec",
  "serde",
 ]
 
@@ -137,6 +137,13 @@ name = "guard"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1f3d64ec55b293a2ddfee276c6d7733616925b55dd337ddc0dc83aba96fbbb1"
+
+[[package]]
+name = "index_vec"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "indexed_vec"

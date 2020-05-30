@@ -1,11 +1,11 @@
 use crate::string_table::StringId;
 use serde::{Serialize, Deserialize};
-use indexed_vec::{IndexVec, newtype_index, Idx};
+use index_vec::{IndexVec, define_index_type};
 use std::collections::HashMap;
 use crate::environment::ProcId;
 
 // TODO: move all ids into their own mod?
-newtype_index!(TypeId {pub idx});
+define_index_type!{pub struct TypeId = u32;}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TypeTree {

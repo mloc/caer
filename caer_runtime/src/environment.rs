@@ -1,13 +1,13 @@
 // this is gonna be too monolithic, split it up;
 
-use indexed_vec::{IndexVec, newtype_index, Idx};
+use index_vec::{IndexVec, define_index_type, Idx};
 use serde::{Serialize, Deserialize};
 
 use crate::proc_spec::ProcSpec;
 use crate::string_table::StringId;
 use crate::type_tree::TypeTree;
 
-newtype_index!(ProcId {pub idx});
+define_index_type!{pub struct ProcId = u32;}
 
 // TODO: move stringtable into here, at least intern
 #[derive(Debug, Serialize, Deserialize)]

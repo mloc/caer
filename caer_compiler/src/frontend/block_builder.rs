@@ -2,7 +2,6 @@ use super::proc_builder::ProcBuilder;
 use crate::ir::cfg;
 use crate::ir::id::*;
 use dreammaker::ast;
-use indexed_vec::Idx;
 use caer_runtime::op::BinaryOp;
 use caer_runtime::string_table::StringId;
 use caer_runtime::type_tree;

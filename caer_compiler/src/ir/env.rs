@@ -1,7 +1,6 @@
-use std::collections::HashMap;
 use std::borrow::Cow;
 use caer_runtime::string_table::{StringTable, StringId};
-use indexed_vec::{IndexVec, Idx};
+use index_vec::IndexVec;
 use caer_runtime::environment::ProcId;
 use caer_runtime;
 use super::cfg::*;
@@ -20,7 +19,7 @@ pub struct Env {
 
 impl Env {
     pub fn new() -> Self {
-        let mut string_table = StringTable::new();
+        let string_table = StringTable::new();
         Self {
             string_table: string_table,
             rt_env: caer_runtime::environment::Environment::new(),

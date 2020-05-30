@@ -4,7 +4,7 @@ use caer_runtime::string_table::StringId;
 use caer_runtime::environment::ProcId;
 use std::borrow::Cow;
 use super::proc_builder::ProcBuilder;
-use indexed_vec::{IndexVec, Idx};
+use index_vec::{IndexVec};
 
 pub struct CfgBuilder<'a, 'ot> {
     pub env: &'a mut Env,
@@ -22,8 +22,8 @@ impl<'a, 'ot> CfgBuilder<'a, 'ot> {
 
     // TODO: ERRH(fe)
     pub fn build(&mut self) {
-        self.env.procs = self.procs.iter().enumerate().map(|(i, proc)| {
-            ProcBuilder::build(self, ProcId::new(i), &proc)
+        self.env.procs = self.procs.iter_enumerated().map(|(i, proc)| {
+            ProcBuilder::build(self, i, &proc)
         }).collect();
     }
 

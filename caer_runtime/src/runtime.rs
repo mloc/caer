@@ -5,7 +5,6 @@ use crate::type_tree::TypeId;
 use crate::datum::Datum;
 
 use cstub_bindgen_macro::expose_c_stubs;
-use indexed_vec::Idx;
 
 use std::fs::File;
 use std::mem;

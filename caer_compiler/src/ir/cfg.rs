@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use indexed_vec::{IndexVec, Idx};
+use index_vec::IndexVec;
 use std::fs::{self, File};
 use std::io::{Seek, SeekFrom, Write};
 use caer_runtime::string_table::StringId;
