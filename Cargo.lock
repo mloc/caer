@@ -140,17 +140,11 @@ checksum = "e1f3d64ec55b293a2ddfee276c6d7733616925b55dd337ddc0dc83aba96fbbb1"
 
 [[package]]
 name = "index_vec"
-version = "0.1.0"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d2d1585c10842c1bbc5abdceebf2b35d1aa81e66db83370f0e02d2189babe0d"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "indexed_vec"
-version = "1.0.2"
-dependencies = [
- "serde",
- "serde_derive",
 ]
 
 [[package]]
