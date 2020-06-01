@@ -67,9 +67,9 @@ impl<'a> Proc {
     pub fn new(id: ProcId) -> Self {
         // ids map to indices in the scopes list; we can assume this scope will have id 0
         // TODO sounder way to handle this + locals?
-        let global_scope = Scope::new(ScopeId::new(0), None);
         let mut scopes = IndexVec::new();
-        scopes.push(global_scope);
+        let global_scope_id = scopes.next_idx();
+        scopes.push(Scope::new(global_scope_id, None));
 
         let mut new = Self {
             // awful, TODO: fetch a better name, MANGLE?
@@ -82,19 +82,20 @@ impl<'a> Proc {
             blocks: IndexVec::new(),
             scopes: scopes,
 
-            global_scope: ScopeId::new(0),
+            global_scope: global_scope_id,
 
             next_block_id: 0,
         };
 
         let ret_local = new.add_local(new.global_scope, ty::Complex::Any); // return val
+
         // TODO: compile time intern, "."
         new.register_var(ret_local, StringId::new(0));
         new
     }
 
     pub fn add_local(&mut self, scope: ScopeId, ty: ty::Complex) -> LocalId {
-        let id = LocalId::new(self.locals.len());
+        let id = self.locals.next_idx();
 
         let local = Local {
             id: id,
@@ -144,7 +145,7 @@ impl<'a> Proc {
     }
 
     pub fn add_block(&mut self, block: Block) {
-        assert!(block.id == BlockId::new(self.blocks.len()));
+        assert!(block.id == self.blocks.next_idx());
         self.blocks.push(block);
     }
 
@@ -166,7 +167,7 @@ impl<'a> Proc {
     }
 
     pub fn new_scope(&mut self, parent: ScopeId) -> ScopeId {
-        let id = ScopeId::new(self.scopes.len());
+        let id = self.scopes.next_idx();
         self.scopes[parent].children.push(id);
         let scope = Scope::new(id, Some((parent, self.scopes[parent].depth)));
         self.scopes.push(scope);
@@ -379,6 +380,17 @@ impl Block {
             scope_end: false,
         }
     }
+
+    // bad
+    pub fn iter_successors(&self) -> Box<dyn Iterator<Item=BlockId>> {
+        match &self.terminator {
+            Terminator::Return => Box::new(std::iter::empty()),
+            Terminator::Jump(id) => Box::new(std::iter::once(*id)),
+            Terminator::Switch { discriminant: _, branches, default } => {
+                Box::new(branches.clone().into_iter().map(|(_, id)| id).chain(std::iter::once(*default)))
+            },
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -432,6 +444,47 @@ pub enum Op {
     DatumLoadVar(LocalId, LocalId, StringId), // local1 = local2.var
     DatumStoreVar(LocalId, StringId, LocalId), // local1.var = local2
     DatumCallProc(LocalId, LocalId, StringId, Vec<LocalId>), // local1 = local2.proc(args)
+}
+
+impl Op {
+    pub fn dest_local(&self) -> Option<LocalId> {
+        match self {
+            Op::Literal(dst, _) => Some(*dst),
+            Op::MkVar(dst) => Some(*dst),
+            Op::Load(dst, _) => Some(*dst),
+            Op::Store(_, _) => None,
+            Op::Put(_) => None,
+            Op::Binary(dst, _, _, _) => Some(*dst),
+            Op::Call(dst, _, _) => Some(*dst),
+            Op::Cast(dst, _, _) => Some(*dst),
+            Op::AllocDatum(dst, _) => Some(*dst),
+            Op::DatumLoadVar(dst, _, _) => Some(*dst),
+            Op::DatumStoreVar(dst, _, _) => Some(*dst),
+            Op::DatumCallProc(dst, _, _, _) => Some(*dst),
+        }
+    }
+
+    // vec is meh, oh well
+    pub fn source_locals(&self) -> Vec<LocalId> {
+        match self {
+            Op::Literal(_, _) => vec![],
+            Op::MkVar(_) => vec![],
+            Op::Load(_, src) => vec![*src],
+            Op::Store(_, src) => vec![*src],
+            Op::Put(src) => vec![*src],
+            Op::Binary(_, _, lhs, rhs) => vec![*lhs, *rhs],
+            Op::Call(_, _, args) => args.clone(),
+            Op::Cast(_, src, _) => vec![*src],
+            Op::AllocDatum(_, _) => vec![],
+            Op::DatumLoadVar(_, src, _) => vec![*src],
+            Op::DatumStoreVar(_, _, src) => vec![*src], // unsure about other local here
+            Op::DatumCallProc(_, src, _, args) => {
+                let mut v = args.clone();
+                v.push(*src);
+                v
+            },
+        }
+    }
 }
 
 #[derive(Debug)]

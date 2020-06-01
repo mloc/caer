@@ -1,7 +1,7 @@
 use cstub_bindgen_macro::expose_c_stubs;
 use std::mem;
 use crate::op;
-use crate::string_table::StringId;
+use crate::string_table::{StringId, StringTable};
 use crate::runtime::Runtime;
 use crate::datum::Datum;
 use std::ops::*;
@@ -34,7 +34,7 @@ impl Val {
         let mut lhs = *lhs;
 
         if let Val::Null = lhs {
-            lhs = lhs.zero_value();
+            lhs = rhs.zero_value();
         }
 
         let res = match lhs {
@@ -107,6 +107,28 @@ impl Val {
 
 //this whole block is an awful mess, TODO: fix at some point
 impl Val {
+    pub fn binary_op_const(op: op::BinaryOp, lhs: &Val, rhs: &Val, st: &mut StringTable) -> Val {
+        let mut lhs = *lhs;
+
+        if let Val::Null = lhs {
+            lhs = rhs.zero_value();
+        }
+
+        match lhs {
+            Val::Null => Val::Null,
+            Val::Float(lval) => Val::Float(Val::binary_arithm(op, lval, rhs.cast_float())),
+            Val::String(lval) => {
+                if op != op::BinaryOp::Add {
+                    unimplemented!("RTE badop")
+                }
+                // TODO reconsider this, DM doesn't allow "e" + 2. compile error?
+                let rval = rhs.cast_string_const(st);
+                Val::String(st.concat(lval, rval))
+            },
+            Val::Ref(_) => unimplemented!(),
+        }
+    }
+
     // move somewhere else? not very val specific
     fn binary_arithm(op: op::BinaryOp, l: f32, r: f32) -> f32 {
         let f = match op {
@@ -246,6 +268,15 @@ impl Val {
                     }
                 }
             },
+        }
+    }
+
+    fn cast_string_const(&self, st: &mut StringTable) -> StringId {
+        match self {
+            Val::Null => st.put("null"),
+            Val::Float(n) => st.put(n.to_string()),
+            Val::String(s) => *s,
+            Val::Ref(dp) => unimplemented!(),
         }
     }
 
