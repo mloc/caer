@@ -25,6 +25,12 @@ impl<'a, 'ot> CfgBuilder<'a, 'ot> {
         self.env.procs = self.procs.iter_enumerated().map(|(i, proc)| {
             ProcBuilder::build(self, i, &proc)
         }).collect();
+
+        // wow ew
+        for proc_id_n in 0..self.procs.len() {
+            let proc_id = ProcId::new(proc_id_n);
+            crate::ir::analysis::ProcAnalysis::analyse_proc(self.env, proc_id);
+        }
     }
 
     pub fn add_string<'s>(&mut self, s: impl Into<Cow<'s, str>>) -> StringId {

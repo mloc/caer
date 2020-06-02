@@ -10,7 +10,7 @@ use crate::ty;
 use dot;
 use super::id::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Local {
     pub id: LocalId,
     pub ty: ty::Complex,
@@ -23,7 +23,7 @@ pub struct Local {
     pub assoc_dty: Option<caer_runtime::type_tree::TypeId>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Var {
     pub name: StringId,
 }
@@ -47,7 +47,7 @@ impl LocalFlow {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Proc {
     pub name: StringId,
     pub id: ProcId,
@@ -361,7 +361,7 @@ impl<'a> dot::GraphWalk<'a, BlockId, (BlockId, BlockId, String)> for Proc {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Block {
     pub id: BlockId,
     pub ops: Vec<Op>,
@@ -393,7 +393,7 @@ impl Block {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Scope {
     pub id: ScopeId,
     pub parent: Option<ScopeId>,
@@ -420,7 +420,7 @@ impl Scope {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Op {
     Literal(LocalId, Literal),
 
@@ -485,9 +485,16 @@ impl Op {
             },
         }
     }
+
+    pub fn dest_is_ssa(&self) -> bool {
+        match self {
+            Op::Store(_, _) | Op::DatumStoreVar(_, _, _) => false,
+            _ => true,
+        }
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Literal {
     Null,
     Num(f32),
@@ -506,7 +513,7 @@ impl Literal {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Terminator {
     Return,
     Jump(BlockId),

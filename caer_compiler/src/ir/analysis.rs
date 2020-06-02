@@ -3,17 +3,20 @@ use super::id::*;
 use super::env::Env;
 
 use caer_runtime::val::Val;
+use caer_runtime::environment::ProcId;
 
 use index_vec::IndexVec;
 
+// modifies a clone of the proc, for now. proc-level cfg opts
 pub struct ProcAnalysis<'a> {
     env: &'a mut Env,
-    proc: &'a cfg::Proc,
+    proc: cfg::Proc,
     local_info: IndexVec<LocalId, LocalInfo>,
 }
 
 impl<'a> ProcAnalysis<'a> {
-    pub fn analyse_proc(env: &'a mut Env, proc: &'a cfg::Proc) -> IndexVec<LocalId, LocalInfo> {
+    pub fn analyse_proc(env: &'a mut Env, proc_id: ProcId) -> IndexVec<LocalId, LocalInfo> {
+        let proc = env.procs[proc_id].clone();
         let initial_info = proc
             .locals
             .iter_enumerated()
@@ -27,6 +30,8 @@ impl<'a> ProcAnalysis<'a> {
         };
 
         pa.do_analyse();
+
+        pa.env.procs[proc_id] = pa.proc;
 
         pa.local_info
     }
@@ -45,9 +50,14 @@ impl<'a> ProcAnalysis<'a> {
                 let idx = OpIndex::Op(block.id, i, dest);
 
                 if let Some(dest) = dest {
-                    let dest_info = &mut self.local_info[dest];
-                    assert!(dest_info.decl_op.is_none());
-                    dest_info.decl_op = Some(idx);
+                    if op.dest_is_ssa() {
+                        let dest_info = &mut self.local_info[dest];
+                        if let Some(fff) = dest_info.decl_op {
+                            println!("PREV: {:?}, NEW: {:?}", fff, idx);
+                        }
+                        assert!(dest_info.decl_op.is_none());
+                        dest_info.decl_op = Some(idx);
+                    }
                 }
 
                 for src in op.source_locals() {
@@ -63,10 +73,20 @@ impl<'a> ProcAnalysis<'a> {
             }
         }
 
-        while self.fold_consts(&postorder) {}
+        loop {
+            let mut modified = false;
+
+            if self.fold_consts(&postorder) {
+                modified = true;
+            }
+
+            if !modified {
+                break
+            }
+        }
     }
 
-    fn build_postorder(&mut self, block: &cfg::Block, visited: &mut IndexVec<BlockId, bool>, postorder: &mut Vec<BlockId>) {
+    fn build_postorder(&self, block: &cfg::Block, visited: &mut IndexVec<BlockId, bool>, postorder: &mut Vec<BlockId>) {
         if visited[block.id] {
             return
         }
@@ -80,32 +100,44 @@ impl<'a> ProcAnalysis<'a> {
 
     fn fold_consts(&mut self, order: &[BlockId]) -> bool {
         let mut changed = false;
-        for block_id in order.iter() {
+        /*for block_id in order.iter() {
             let block = &self.proc.blocks[*block_id];
             for op in block.ops.iter() {
                 if let Op::Binary(dst, op, lhs, rhs) = op {
-                    if self.resolve_const_binary(*dst, *op, *lhs, *rhs) {
+                    if Self::resolve_const_binary(&mut self.local_info, *dst, *op, *lhs, *rhs) {
                         changed = true;
                     }
                 }
             }
-        }
+        }*/
         changed
     }
 
-    fn resolve_const_binary(&mut self, dest: LocalId, op: caer_runtime::op::BinaryOp, lhs: LocalId, rhs: LocalId) -> bool {
-        let lhs_i = &self.local_info[lhs];
-        let rhs_i = &self.local_info[rhs];
+    /*fn resolve_const_binary(local_info: &mut IndexVec<LocalId, LocalInfo>, stdest: LocalId, op: caer_runtime::op::BinaryOp, lhs: LocalId, rhs: LocalId) -> bool {
+        if local_info[dest].const_val.is_some() {
+            return false
+        }
+        let lhs_i = &local_info[lhs];
+        let rhs_i = &local_info[rhs];
 
         let mut const_v = None;
         if let Some(ref lhs_v) = lhs_i.const_val {
             if let Some(ref rhs_v) = rhs_i.const_val {
-                const_v = Some(Val::binary_op_const(op, lhs_v, rhs_v, &mut self.env.string_table));
+                const_v = Some(Val::binary_op_const(op, lhs_v, rhs_v, st));
             }
         }
 
         self.local_info[dest].const_val = const_v;
         const_v.is_some()
+    }*/
+
+    fn val_to_lit(val: Val) -> cfg::Literal {
+        match val {
+            Val::Null => cfg::Literal::Null,
+            Val::Float(n) => cfg::Literal::Num(n),
+            Val::String(id) => cfg::Literal::String(id),
+            _ => unimplemented!("other val {:?}", val),
+        }
     }
 }
 
