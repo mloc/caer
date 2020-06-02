@@ -343,7 +343,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     let proc_lookup_ptr = self.build_vtable_lookup(ty_id, vtable::VTABLE_PROC_LOOKUP_FIELD_OFFSET).into_pointer_value();
 
                     let proc_ptr = self.ctx.builder.build_call(proc_lookup_ptr, &[
-                        self.ctx.llvm_ctx.i64_type().const_int(proc_name.id(), false).into(),
+                        self.ctx.llvm_ctx.i32_type().const_int(proc_name.id(), false).into(),
                     ], "").try_as_basic_value().left().unwrap().into_pointer_value();
 
                     let res_val = self.ctx.builder.build_call(proc_ptr, &[
