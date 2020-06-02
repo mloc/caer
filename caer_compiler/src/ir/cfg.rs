@@ -459,7 +459,7 @@ impl Op {
             Op::Cast(dst, _, _) => Some(*dst),
             Op::AllocDatum(dst, _) => Some(*dst),
             Op::DatumLoadVar(dst, _, _) => Some(*dst),
-            Op::DatumStoreVar(dst, _, _) => Some(*dst),
+            Op::DatumStoreVar(_, _, _) => None,
             Op::DatumCallProc(dst, _, _, _) => Some(*dst),
         }
     }
@@ -483,13 +483,6 @@ impl Op {
                 v.push(*src);
                 v
             },
-        }
-    }
-
-    pub fn dest_is_ssa(&self) -> bool {
-        match self {
-            Op::Store(_, _) | Op::DatumStoreVar(_, _, _) => false,
-            _ => true,
         }
     }
 }

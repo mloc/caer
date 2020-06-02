@@ -50,14 +50,12 @@ impl<'a> ProcAnalysis<'a> {
                 let idx = OpIndex::Op(block.id, i, dest);
 
                 if let Some(dest) = dest {
-                    if op.dest_is_ssa() {
-                        let dest_info = &mut self.local_info[dest];
-                        if let Some(fff) = dest_info.decl_op {
-                            println!("PREV: {:?}, NEW: {:?}", fff, idx);
-                        }
-                        assert!(dest_info.decl_op.is_none());
-                        dest_info.decl_op = Some(idx);
+                    let dest_info = &mut self.local_info[dest];
+                    if let Some(fff) = dest_info.decl_op {
+                        println!("PREV: {:?}, NEW: {:?}", fff, idx);
                     }
+                    assert!(dest_info.decl_op.is_none());
+                    dest_info.decl_op = Some(idx);
                 }
 
                 for src in op.source_locals() {
