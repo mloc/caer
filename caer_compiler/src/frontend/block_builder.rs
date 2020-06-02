@@ -406,6 +406,7 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
 
     fn build_term(&mut self, term: &ast::Term) -> LocalId {
         match term {
+            ast::Term::Null => self.build_literal(cfg::Literal::Null),
             ast::Term::Int(x) => self.build_literal(cfg::Literal::Num(*x as f32)),
             ast::Term::Float(x) => self.build_literal(cfg::Literal::Num(*x)),
             ast::Term::String(s) => {

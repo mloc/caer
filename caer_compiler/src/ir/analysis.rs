@@ -72,18 +72,6 @@ impl<'a> ProcAnalysis<'a> {
                 _ => {},
             }
         }
-
-        loop {
-            let mut modified = false;
-
-            if self.fold_consts(&postorder) {
-                modified = true;
-            }
-
-            if !modified {
-                break
-            }
-        }
     }
 
     fn build_postorder(&self, block: &cfg::Block, visited: &mut IndexVec<BlockId, bool>, postorder: &mut Vec<BlockId>) {
