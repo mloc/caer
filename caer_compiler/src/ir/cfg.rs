@@ -15,7 +15,6 @@ pub struct Local {
     pub id: LocalId,
     pub ty: ty::Complex,
     pub movable: bool,
-    pub var: Option<Var>,
     pub construct_scope: ScopeId,
     // if a value is moved, it won't be destructed with this local
     pub destruct_scope: Option<ScopeId>,
@@ -25,7 +24,13 @@ pub struct Local {
 
 #[derive(Debug, Clone)]
 pub struct Var {
+    pub id: VarId,
     pub name: StringId,
+    pub scope: ScopeId,
+    pub ty: ty::Complex,
+    // DM-style "compile-time" typepath
+    // TODO: maybe fold into ty?
+    pub assoc_dty: Option<caer_runtime::type_tree::TypeId>,
 }
 
 #[derive(Debug)]
@@ -53,8 +58,9 @@ pub struct Proc {
     pub id: ProcId,
 
     pub locals: IndexVec<LocalId, Local>,
-    pub vars: HashMap<StringId, LocalId>,
-    pub params: Vec<LocalId>,
+    pub vars: IndexVec<VarId, Var>,
+    pub vars_by_name: HashMap<StringId, VarId>,
+    pub params: Vec<VarId>,
     pub blocks: IndexVec<BlockId, Block>,
     pub scopes: IndexVec<ScopeId, Scope>,
 
@@ -77,7 +83,8 @@ impl<'a> Proc {
             id: id,
 
             locals: IndexVec::new(),
-            vars: HashMap::new(),
+            vars: IndexVec::new(),
+            vars_by_name: HashMap::new(),
             params: Vec::new(),
             blocks: IndexVec::new(),
             scopes: scopes,
@@ -87,10 +94,8 @@ impl<'a> Proc {
             next_block_id: 0,
         };
 
-        let ret_local = new.add_local(new.global_scope, ty::Complex::Any); // return val
-
         // TODO: compile time intern, "."
-        new.register_var(ret_local, StringId::new(0));
+        new.add_var(new.global_scope, ty::Complex::Any, StringId::new(0)); // return var
         new
     }
 
@@ -101,7 +106,6 @@ impl<'a> Proc {
             id: id,
             ty: ty,
             movable: false,
-            var: None,
             construct_scope: scope,
             destruct_scope: Some(scope),
             assoc_dty: None,
@@ -124,17 +128,21 @@ impl<'a> Proc {
     }
 
     // TODO: ERRH(C), duplicate vars
-    pub fn register_var(&mut self, var_local: LocalId, name: StringId) {
+    pub fn add_var(&mut self, scope: ScopeId, ty: ty::Complex, name: StringId) -> VarId {
+        let id = self.vars.next_idx();
         let var_info = Var {
+            id: id,
+            scope: scope,
             name: name,
+            ty: ty,
+            assoc_dty: None,
         };
 
-        let local = &mut self.locals[var_local];
-        assert!(local.var.is_none());
-        local.var = Some(var_info);
+        self.vars.push(var_info);
+        self.scopes[scope].vars.push(id);
+        self.scopes[scope].vars_by_name.insert(name, id);
 
-        self.vars.insert(name, var_local);
-        self.scopes[local.construct_scope].vars.insert(name, var_local);
+        id
     }
 
     pub fn new_block(&mut self, scope: ScopeId) -> Block {
@@ -150,11 +158,11 @@ impl<'a> Proc {
     }
 
     // scope tree search to find matching var
-    pub fn lookup_var(&self, root_scope: ScopeId, var: StringId) -> Option<LocalId> {
+    pub fn lookup_var(&self, root_scope: ScopeId, var: StringId) -> Option<VarId> {
         let mut cur_scope = root_scope;
         loop {
             let scope = &self.scopes[cur_scope];
-            match scope.vars.get(&var) {
+            match scope.vars_by_name.get(&var) {
                 Some(local) => return Some(*local),
                 None => match scope.parent {
                     Some(parent) => cur_scope = parent,
@@ -191,9 +199,7 @@ impl<'a> Proc {
 
                     Op::MkVar(_) => {},
 
-                    Op::Load(_, src) => {
-                        flow[*src].takes += 1;
-                    },
+                    Op::Load(_, _) => {},
 
                     Op::Store(_, _) => {},
 
@@ -401,7 +407,9 @@ pub struct Scope {
     pub depth: i32,
     pub locals: Vec<LocalId>,
     pub destruct_locals: HashSet<LocalId>,
-    pub vars: HashMap<StringId, LocalId>,
+    pub destruct_vars: HashSet<VarId>,
+    pub vars: Vec<VarId>,
+    pub vars_by_name: HashMap<StringId, VarId>,
     pub blocks: Vec<BlockId>,
 }
 
@@ -414,7 +422,9 @@ impl Scope {
             depth: parent.map_or(0, |(_, d)| d + 1),
             locals: Vec::new(),
             destruct_locals: HashSet::new(),
-            vars: HashMap::new(),
+            destruct_vars: HashSet::new(),
+            vars: Vec::new(),
+            vars_by_name: HashMap::new(),
             blocks: Vec::new(),
         }
     }
@@ -424,9 +434,9 @@ impl Scope {
 pub enum Op {
     Literal(LocalId, Literal),
 
-    MkVar(LocalId),
-    Load(LocalId, LocalId),
-    Store(LocalId, LocalId),
+    MkVar(VarId),
+    Load(LocalId, VarId),
+    Store(VarId, LocalId),
 
     Put(LocalId),
     Binary(LocalId, caer_runtime::op::BinaryOp, LocalId, LocalId),
@@ -450,7 +460,7 @@ impl Op {
     pub fn dest_local(&self) -> Option<LocalId> {
         match self {
             Op::Literal(dst, _) => Some(*dst),
-            Op::MkVar(dst) => Some(*dst),
+            Op::MkVar(_) => None,
             Op::Load(dst, _) => Some(*dst),
             Op::Store(_, _) => None,
             Op::Put(_) => None,
@@ -469,7 +479,7 @@ impl Op {
         match self {
             Op::Literal(_, _) => vec![],
             Op::MkVar(_) => vec![],
-            Op::Load(_, src) => vec![*src],
+            Op::Load(_, _) => vec![],
             Op::Store(_, src) => vec![*src],
             Op::Put(src) => vec![*src],
             Op::Binary(_, _, lhs, rhs) => vec![*lhs, *rhs],

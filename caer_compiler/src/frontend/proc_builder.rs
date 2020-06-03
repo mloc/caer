@@ -42,8 +42,8 @@ impl<'a, 'cb, 'ot> ProcBuilder<'a, 'cb, 'ot> {
         for (i, param) in self.ast_proc.parameters.iter().enumerate() {
             // TODO: need to record name separately for keyword args?
             let name_id = self.builder.add_string(&param.name);
-            let local_id = self.add_var(self.proc.global_scope, name_id);
-            self.proc.params.push(local_id);
+            let var_id = self.add_var(self.proc.global_scope, name_id);
+            self.proc.params.push(var_id);
 
             let spec = self.builder.env.rt_env.get_proc_mut(self.proc.id);
             spec.params.push(name_id);
@@ -94,9 +94,7 @@ impl<'a, 'cb, 'ot> ProcBuilder<'a, 'cb, 'ot> {
     }
 
     // maybe make helper in BlBu which infers scope
-    pub fn add_var(&mut self, scope: ScopeId, name: StringId) -> LocalId {
-        let var_local = self.proc.add_local(scope, ty::Complex::Any);
-        self.proc.register_var(var_local, name);
-        var_local
+    pub fn add_var(&mut self, scope: ScopeId, name: StringId) -> VarId {
+        self.proc.add_var(scope, ty::Complex::Any, name)
     }
 }

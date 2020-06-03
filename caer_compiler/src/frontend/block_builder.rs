@@ -56,7 +56,7 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
             ast::Statement::Var(v) => {
                 // TODO: care about var flags?
                 let name_id = self.pb.builder.add_string(&v.name);
-                let local = self.pb.add_var(self.block.scope, name_id);
+                let var = self.pb.add_var(self.block.scope, name_id);
 
                 if !v.var_type.type_path.is_empty() {
                     // TODO: handle list types
@@ -70,10 +70,10 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
 
                     // TODO: encapsulate type_tree
                     let dty_id = self.pb.builder.env.rt_env.type_tree.type_by_node_id[&(var_ty.index().index() as u64)];
-                    self.pb.proc.set_assoc_dty(local, dty_id);
+                    self.pb.proc.vars[var].assoc_dty = Some(dty_id);
                 }
 
-                self.push_op(cfg::Op::MkVar(local));
+                self.push_op(cfg::Op::MkVar(var));
 
                 if let Some(expr) = &v.value {
                     self.build_assign(None, name_id, expr);
@@ -106,7 +106,8 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
             ast::Statement::Return(val) => {
                 if let Some(val) = val {
                     let val_expr = self.build_expr(val);
-                    self.push_op(cfg::Op::Store(LocalId::new(0), val_expr));
+                    // TODO: no magic number for ret var
+                    self.push_op(cfg::Op::Store(VarId::new(0), val_expr));
                     // TODO make sure we check the rest of the ops somehow?
                     // create an unreachable block and continue? need a more robust builder
                     return;
@@ -304,13 +305,13 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
         }
     }
 
-    fn build_var_load(&mut self, var_local: LocalId) -> LocalId {
+    fn build_var_load(&mut self, var: VarId) -> LocalId {
         // TODO var ty fix
         let holder = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
-        if let Some(assoc) = self.pb.proc.get_assoc_dty(var_local) {
+        if let Some(assoc) = self.pb.proc.vars[var].assoc_dty {
             self.pb.proc.set_assoc_dty(holder, assoc);
         }
-        self.push_op(cfg::Op::Load(holder, var_local));
+        self.push_op(cfg::Op::Load(holder, var));
         holder
     }
 

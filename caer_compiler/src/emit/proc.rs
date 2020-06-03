@@ -13,7 +13,7 @@ use caer_runtime::vtable;
 pub struct ProcEmit<'a, 'ctx> {
     pub ctx: &'a Context<'a, 'ctx>,
     pub emit: &'a ProgEmit<'a, 'ctx>,
-    pub local_allocs: IndexVec<LocalId, Option<inkwell::values::PointerValue<'ctx>>>,
+    pub var_allocs: IndexVec<VarId, inkwell::values::PointerValue<'ctx>>,
     pub locals: IndexVec<LocalId, Option<inkwell::values::BasicValueEnum<'ctx>>>,
     pub blocks: IndexVec<BlockId, inkwell::basic_block::BasicBlock<'ctx>>,
     pub func: inkwell::values::FunctionValue<'ctx>,
@@ -25,7 +25,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         Self {
             ctx: ctx,
             emit: emit,
-            local_allocs: IndexVec::new(),
+            var_allocs: IndexVec::new(),
             locals: IndexVec::new(),
             blocks: IndexVec::new(),
             func: func,
@@ -40,48 +40,40 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         let null_val = self.ctx.rt.ty.val_type.const_zero();
 
         for local in self.proc.locals.iter() {
-            let name = &match &local.var {
-                Some(var_info) => {
-                    if var_info.name.id() != 0 {
-                        format!("var_{}", self.emit.env.string_table.get(var_info.name))
-                    } else {
-                        format!("ret_var")
+            self.locals.push(None);
+        }
+
+        for var in self.proc.vars.iter() {
+            let name = &if var.name.id() != 0 {
+                format!("var_{}", self.emit.env.string_table.get(var.name))
+            } else {
+                format!("ret_var")
+            };
+
+            let alloca = match var.ty {
+                ty::Complex::Primitive(prim) => {
+                    match prim {
+                        ty::Primitive::Float => self.ctx.builder.build_alloca(self.ctx.llvm_ctx.f32_type(), name),
+                        ty::Primitive::String => self.ctx.builder.build_alloca(self.ctx.llvm_ctx.i64_type(), name),
+                        ty::Primitive::Ref(_) => self.ctx.builder.build_alloca(self.ctx.rt.ty.datum_common_type_ptr, name),
+                        _ => unimplemented!("unhandled prim: {:?}", prim),
                     }
                 },
-                None => format!("local_{}", local.id.index()),
-            };
-
-            let alloc = match local.var {
-                Some(_) => {
-                    Some(match local.ty {
-                        ty::Complex::Primitive(prim) => {
-                            match prim {
-                                ty::Primitive::Float => self.ctx.builder.build_alloca(self.ctx.llvm_ctx.f32_type(), name),
-                                ty::Primitive::String => self.ctx.builder.build_alloca(self.ctx.llvm_ctx.i64_type(), name),
-                                ty::Primitive::Ref(_) => self.ctx.builder.build_alloca(self.ctx.rt.ty.datum_common_type_ptr, name),
-                                _ => unimplemented!("unhandled prim: {:?}", prim),
-                            }
-                        },
-                        ty::Complex::Any => {
-                            let alloc = self.ctx.builder.build_alloca(self.ctx.rt.ty.val_type, name);
-                            self.ctx.builder.build_store(alloc, null_val);
-                            alloc
-                        },
-                        _ => unimplemented!("unhandled ty: {:?}", local.ty),
-                    })
+                ty::Complex::Any => {
+                    let alloc = self.ctx.builder.build_alloca(self.ctx.rt.ty.val_type, name);
+                    self.ctx.builder.build_store(alloc, null_val);
+                    alloc
                 },
-                None => None,
+                _ => unimplemented!("unhandled ty: {:?}", var.ty),
             };
-
-            self.local_allocs.push(alloc);
-            self.locals.push(None);
+            self.var_allocs.push(alloca);
         }
 
         let param_locals_arr_ty = self.ctx.rt.ty.val_type.ptr_type(inkwell::AddressSpace::Generic).array_type(self.proc.params.len() as u32);
         let mut param_locals_arr = param_locals_arr_ty.const_zero();
 
-        for (i, local_id) in self.proc.params.iter().enumerate() {
-            let alloc = self.local_allocs[*local_id].unwrap();
+        for (i, var_id) in self.proc.params.iter().enumerate() {
+            let alloc = self.var_allocs[*var_id];
             // TODO: handle keyword args
             param_locals_arr = self.ctx.builder.build_insert_value(param_locals_arr, alloc, i as u32, "param_locals_arr").unwrap().into_array_value();
         }
@@ -164,16 +156,16 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         self.locals[local_id] = Some(self.conv_val(val, local_ty));
     }
 
-    fn load_var(&self, var_id: LocalId) -> Value<'ctx> {
-        let var_ptr = self.local_allocs[var_id].unwrap();
-        let var_ty = &self.proc.locals[var_id].ty;
+    fn load_var(&self, var_id: VarId) -> Value<'ctx> {
+        let var_ptr = self.var_allocs[var_id];
+        let var_ty = &self.proc.vars[var_id].ty;
         let llval = self.ctx.builder.build_load(var_ptr, "");
         Value::new(Some(llval), var_ty.clone())
     }
 
-    fn store_var(&self, var_id: LocalId, val: &Value<'ctx>) {
-        let var_ptr = self.local_allocs[var_id].unwrap();
-        let var_ty = &self.proc.locals[var_id].ty;
+    fn store_var(&self, var_id: VarId, val: &Value<'ctx>) {
+        let var_ptr = self.var_allocs[var_id];
+        let var_ty = &self.proc.vars[var_id].ty;
         let llval = self.conv_val(val, var_ty);
         self.ctx.builder.build_store(var_ptr, llval);
     }
@@ -254,7 +246,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 },
 
                 Op::Store(var, local) => {
-                    let var_ty = &self.proc.locals[*var].ty;
+                    let var_ty = &self.proc.vars[*var].ty;
                     if var_ty.needs_destructor() {
                         let val = self.load_var(*var);
                         let val_any = self.conv_val(&val, &ty::Complex::Any);
@@ -373,8 +365,8 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         match &block.terminator {
             Terminator::Return => {
                 self.finalize_block(block);
-                let ret = self.ctx.builder.build_load(self.local_allocs[LocalId::new(0)].unwrap(), "ret");
-                self.ctx.builder.build_return(Some(&ret));
+                let ret = self.load_var(VarId::new(0));
+                self.ctx.builder.build_return(Some(&ret.val.unwrap()));
             },
 
             Terminator::Jump(id) => {
@@ -472,13 +464,15 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
             for local_id in self.proc.scopes[block.scope].destruct_locals.iter() {
                 let local = &self.proc.locals[*local_id];
                 if local.ty.needs_destructor() {
-                    if local.var.is_some() {
-                        let var_val = self.load_var(*local_id);
-                        let var_any = self.conv_val(&var_val, &ty::Complex::Any);
-                        self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[var_any], "");
-                    } else {
-                        self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[self.get_local_any(*local_id)], "");
-                    }
+                    self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[self.get_local_any(*local_id)], "");
+                }
+            }
+            for var_id in self.proc.scopes[block.scope].destruct_vars.iter() {
+                let var = &self.proc.vars[*var_id];
+                if var.ty.needs_destructor() {
+                    let var_val = self.load_var(*var_id);
+                    let var_any = self.conv_val(&var_val, &ty::Complex::Any);
+                    self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[var_any], "");
                 }
             }
         }
