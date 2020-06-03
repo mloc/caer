@@ -379,7 +379,7 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
             ast::Expression::BinaryOp { op, lhs, rhs } => {
                 let lhs_expr = self.build_expr(lhs);
                 let rhs_expr = self.build_expr(rhs);
-                let local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
+                let res_local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
 
                 let l_op = match op {
                     ast::BinaryOp::Add => BinaryOp::Add,
@@ -389,9 +389,9 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
                     _ => unimplemented!("binary op {:?}", op),
                 };
 
-                self.push_op(cfg::Op::Binary(local, l_op, lhs_expr, rhs_expr));
+                self.push_op(cfg::Op::Binary(res_local, l_op, lhs_expr, rhs_expr));
 
-                local
+                res_local
             },
 
             _ => unimplemented!("{:?}", expr),
@@ -438,17 +438,16 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
                 for (o_expr, sep) in es_pairs.iter() {
                     let expr = o_expr.as_ref().expect("postfix formatting not supported currently");
                     let expr_l = self.build_expr(expr);
-                    // TODO this is a string, but we treat it as an Any for now
-                    let expr_cast_l = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
+                    let expr_cast_l = self.pb.proc.add_local(self.block.scope, ty::Primitive::String.into());
                     self.push_op(cfg::Op::Cast(expr_cast_l, expr_l, ty::Primitive::String));
 
-                    // TODO this is a string, but we treat it as an Any for now
+                    // TODO: we know this is a string, but Binary doesn't
                     let new_built = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
                     self.push_op(cfg::Op::Binary(new_built, BinaryOp::Add, built, expr_cast_l));
                     built = new_built;
 
                     if sep.len() > 0 {
-                        // TODO this is a string, but we treat it as an Any for now
+                        // TODO: we know this is a string, but Binary doesn't
                         let new_built = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
                         let lit = cfg::Literal::String(self.pb.builder.add_string(sep));
                         let lit_l = self.build_literal(lit);
@@ -461,8 +460,6 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
             },
             ast::Term::New { type_: newty, args } => {
                 assert!(args.is_none());
-                // TODO this is a ref, but we treat it as an Any for now
-                let ref_local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
 
                 let ty_id = match newty {
                     ast::NewType::Prefab(pf) => {
@@ -474,6 +471,8 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
                     },
                     _ => unimplemented!("new with newty {:?}", newty),
                 };
+
+                let ref_local = self.pb.proc.add_local(self.block.scope, ty::Primitive::Ref(Some(ty_id)).into());
 
                 self.push_op(cfg::Op::AllocDatum(ref_local, ty_id));
 

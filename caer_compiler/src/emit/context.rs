@@ -172,7 +172,7 @@ rt_funcs!{
         (rt_val_print, void_type~val, [val_type~val, rt_type~ptr]),
         (rt_val_cloned, void_type~val, [val_type~val]),
         (rt_val_drop, void_type~val, [val_type~val]),
-        (rt_val_cast_string_val, val_type~val, [val_type~val, rt_type~ptr]),
+        (rt_val_cast_string_val, i64_type~val, [val_type~val, rt_type~ptr]),
 
         (rt_runtime_init, void_type~val, [rt_type~ptr, vt_entry_type~ptr]),
         (rt_runtime_alloc_datum, opaque_type~ptr, [rt_type~ptr, i32_type~val]),

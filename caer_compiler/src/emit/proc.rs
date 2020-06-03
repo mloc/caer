@@ -185,7 +185,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
             val.val.unwrap()
             //if let Some(ll_val) = val.val {
         } else if val.ty == ty::Complex::Any {
-            panic!("attempted to store Any val in non-Any local")
+            panic!("attempted to store Any val in non-Any local with ty {:?}", ty)
         } else if let Some(val_prim) = val.ty.as_primitive() {
             if let Some(local_prim) = ty.as_primitive() {
                 // autocast?
@@ -195,47 +195,36 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 }
             }
             if ty.contains(val_prim) {
-                let local_struct = self.ctx.rt.ty.val_type.const_zero();
                 let val_val = val.val.unwrap();
 
-                match val_prim {
+                let (disc, llval) = match val_prim {
                     ty::Primitive::Null => {
+                        let null_val = self.ctx.llvm_ctx.i64_type().const_zero();
                         // TODO: less magic for disc vals
-                        let null_disc = self.ctx.llvm_ctx.i32_type().const_int(0, false);
-                        let upd = self.ctx.builder.build_insert_value(local_struct, null_disc, 0, "upd_disc").unwrap();
-                        upd
+                        (0, null_val)
                     },
                     ty::Primitive::Float => {
-                        let float_disc = self.ctx.llvm_ctx.i32_type().const_int(1, false);
                         // TODO fix this, this is mega bad, won't work on big endian systems
                         let val_as_i32 = self.ctx.builder.build_bitcast(val_val, self.ctx.llvm_ctx.i32_type(), "pack_val");
                         let val_as_i64: inkwell::values::IntValue = self.ctx.builder.build_int_z_extend(val_as_i32.into_int_value(), self.ctx.llvm_ctx.i64_type(), "pack_val");
-                        let upd = self.ctx.builder.build_insert_value(local_struct, float_disc, 0, "upd_disc").unwrap();
-                        // TODO: revisit this 2. it's here because of padding in the val struct -
-                        // use offset_of?
-                        let upd = self.ctx.builder.build_insert_value(upd, val_as_i64, 1, "upd_val").unwrap();
-                        upd
+                        (1, val_as_i64)
                     },
                     ty::Primitive::String => {
-                        let string_disc = self.ctx.llvm_ctx.i32_type().const_int(2, false);
-                        let val_as_int = self.ctx.builder.build_bitcast(val_val, self.ctx.llvm_ctx.i64_type(), "pack_val");
-
-                        let upd = self.ctx.builder.build_insert_value(local_struct, string_disc, 0, "upd_disc").unwrap();
-                        let upd = self.ctx.builder.build_insert_value(upd, val_as_int, 1, "upd_val").unwrap();
-
-                        upd
+                        let val_as_int = self.ctx.builder.build_bitcast(val_val, self.ctx.llvm_ctx.i64_type(), "pack_val").into_int_value();
+                        (2, val_as_int)
                     },
                     ty::Primitive::Ref(_) => {
-                        let ref_disc = self.ctx.llvm_ctx.i32_type().const_int(3, false);
                         let val_as_int: inkwell::values::IntValue = self.ctx.builder.build_ptr_to_int(val_val.into_pointer_value(), self.ctx.llvm_ctx.i64_type(), "pack_val");
-
-                        let upd = self.ctx.builder.build_insert_value(local_struct, ref_disc, 0, "upd_disc").unwrap();
-                        let upd = self.ctx.builder.build_insert_value(upd, val_as_int, 1, "upd_val").unwrap();
-
-                        upd
+                        (3, val_as_int)
                     },
                     _ => unimplemented!(),
-                }.into_struct_value().into()
+                };
+
+                let mut local_struct = self.ctx.rt.ty.val_type.const_zero();
+                local_struct = self.ctx.builder.build_insert_value(local_struct, self.ctx.llvm_ctx.i32_type().const_int(disc, false), 0, "").unwrap().into_struct_value();
+                local_struct = self.ctx.builder.build_insert_value(local_struct, llval, 1, "").unwrap().into_struct_value();
+
+                local_struct.into()
             } else {
                 panic!("primitive val (ty {:?}) does not fit in local (ty {:?})", val.ty, ty);
             }
@@ -269,7 +258,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     if var_ty.needs_destructor() {
                         let val = self.load_var(*var);
                         let val_any = self.conv_val(&val, &ty::Complex::Any);
-                        self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[val.val.unwrap()], "");
+                        self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[val_any], "");
                     }
 
                     let store_val = self.get_local(*local, false);
@@ -306,17 +295,21 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 },
 
                 Op::Cast(dst, src, ty) => {
+                    // TODO: impl eq for prim<->complex
+                    assert!(self.proc.locals[*dst].ty == (*ty).into());
                     if *ty != ty::Primitive::String {
                         unimplemented!("can only cast to string, not {:?}", ty);
                     }
 
                     let src_llval = self.get_local_any(*src);
                     let res_llval = self.ctx.builder.build_call(self.ctx.rt.rt_val_cast_string_val, &[src_llval, self.emit.rt_global.as_pointer_value().into()], "").try_as_basic_value().left().unwrap();
-                    let res_val = Value::new(Some(res_llval), ty::Complex::Any);
+                    let res_val = Value::new(Some(res_llval), (*ty).into());
                     self.set_local(*dst, &res_val);
                 },
 
                 Op::AllocDatum(dst, ty_id) => {
+                    // TODO: impl eq for prim<->complex
+                    assert!(self.proc.locals[*dst].ty == ty::Primitive::Ref(Some(*ty_id)).into());
                     let datum_ptr = self.ctx.builder.build_call(self.ctx.rt.rt_runtime_alloc_datum, &[
                         self.emit.rt_global.as_pointer_value().into(),
                         self.ctx.llvm_ctx.i32_type().const_int(ty_id.index() as u64, false).into(),
@@ -447,7 +440,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 
     fn build_extract_ref_ptr(&self, val: inkwell::values::StructValue<'ctx>) -> inkwell::values::PointerValue<'ctx> {
         // TODO: tycheck we're a ref
-        // TODO: use some constant instead of 2
+        // TODO: use some constant instead of 1
         // TODO: TYAPI
         // TODO: cast val struct instead of int2ptr
         let ref_ptr_int = self.ctx.builder.build_extract_value(val, 1, "ref_ptr_int").unwrap().into_int_value();

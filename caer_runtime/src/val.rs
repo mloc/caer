@@ -50,8 +50,8 @@ pub extern fn rt_val_binary_op(rt: &mut Runtime, op: op::BinaryOp, lhs: Val, rhs
 
 // bad, needed for now
 #[no_mangle]
-pub extern fn rt_val_cast_string_val(val: Val, rt: &mut Runtime) -> Val {
-    Val::String(val.cast_string(rt))
+pub extern fn rt_val_cast_string_val(val: Val, rt: &mut Runtime) -> StringId {
+    val.cast_string(rt)
 }
 
 #[no_mangle]
