@@ -46,16 +46,15 @@ pub struct RtFuncTyBundle<'ctx> {
 
 impl<'ctx> RtFuncTyBundle<'ctx> {
     fn new(ctx: &'ctx inkwell::context::Context) -> Self {
-        let val_padding_type = ctx.i32_type();
-        let val_type = ctx.struct_type(&[ctx.i32_type().into(), val_padding_type.into(), ctx.i64_type().into()], true);
+        let val_type = ctx.struct_type(&[ctx.i32_type().into(), ctx.i64_type().into()], false);
         let val_type_ptr = val_type.ptr_type(inkwell::AddressSpace::Generic);
 
         let opaque_type = ctx.opaque_struct_type("opaque");
 
-        let arg_pack_tuple_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.ptr_type(inkwell::AddressSpace::Generic).into()], false);
+        let arg_pack_tuple_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.into()], false);
         let arg_pack_tuple_type_ptr = arg_pack_tuple_type.ptr_type(inkwell::AddressSpace::Generic);
 
-        let arg_pack_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.ptr_type(inkwell::AddressSpace::Generic).into(), ctx.i64_type().into(), arg_pack_tuple_type_ptr.into()], false);
+        let arg_pack_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.into(), ctx.i64_type().into(), arg_pack_tuple_type_ptr.into()], false);
 
         let proc_type = val_type.fn_type(&[arg_pack_type.ptr_type(inkwell::AddressSpace::Generic).into()], false);
 
@@ -166,14 +165,14 @@ macro_rules! rt_funcs {
 rt_funcs!{
     RtFuncs,
     [
-        (rt_val_float, void_type~val, [val_type~ptr, f32_type~val]),
-        (rt_val_string, void_type~val, [val_type~ptr, i64_type~val]),
-        (rt_val_binary_op, void_type~val, [val_type~ptr, rt_type~ptr, i32_type~val, val_type~ptr, val_type~ptr]),
-        (rt_val_to_switch_disc, i32_type~val, [val_type~ptr]),
-        (rt_val_print, void_type~val, [val_type~ptr, rt_type~ptr]),
-        (rt_val_cloned, void_type~val, [val_type~ptr]),
-        (rt_val_drop, void_type~val, [val_type~ptr]),
-        (rt_val_cast_string_val, void_type~val, [val_type~ptr, val_type~ptr, rt_type~ptr]),
+        (rt_val_float, val_type~val, [f32_type~val]),
+        (rt_val_string, val_type~val, [i64_type~val]),
+        (rt_val_binary_op, val_type~val, [rt_type~ptr, i32_type~val, val_type~val, val_type~val]),
+        (rt_val_to_switch_disc, i32_type~val, [val_type~val]),
+        (rt_val_print, void_type~val, [val_type~val, rt_type~ptr]),
+        (rt_val_cloned, void_type~val, [val_type~val]),
+        (rt_val_drop, void_type~val, [val_type~val]),
+        (rt_val_cast_string_val, val_type~val, [val_type~val, rt_type~ptr]),
 
         (rt_runtime_init, void_type~val, [rt_type~ptr, vt_entry_type~ptr]),
         (rt_runtime_alloc_datum, opaque_type~ptr, [rt_type~ptr, i32_type~val]),

@@ -16,93 +16,122 @@ pub enum Val {
     Ref(*mut Datum),
 }
 
+#[no_mangle]
+pub extern fn rt_val_float(val: f32) -> Val {
+    Val::Float(val)
+}
+
+#[no_mangle]
+pub extern fn rt_val_string(string: StringId) -> Val {
+    Val::String(string)
+}
+
+#[no_mangle]
+pub extern fn rt_val_binary_op(rt: &mut Runtime, op: op::BinaryOp, lhs: Val, rhs: Val) -> Val {
+    let mut lhs = lhs;
+    if let Val::Null = lhs {
+        lhs = rhs.zero_value();
+    }
+
+    match lhs {
+        Val::Null => Val::Null,
+        Val::Float(lval) => Val::Float(Val::binary_arithm(op, lval, rhs.cast_float())),
+        Val::String(lval) => {
+            if op!= op::BinaryOp::Add {
+                unimplemented!("RTE badop")
+            }
+            // TODO reconsider this, DM doesn't allow "e" + 2
+            let rval = rhs.cast_string(rt);
+            Val::String(rt.string_table.concat(lval, rval))
+        },
+        Val::Ref(_) => unimplemented!("overloads"),
+    }
+}
+
+// bad, needed for now
+#[no_mangle]
+pub extern fn rt_val_cast_string_val(val: Val, rt: &mut Runtime) -> Val {
+    Val::String(val.cast_string(rt))
+}
+
+#[no_mangle]
+pub extern fn rt_val_to_switch_disc(val: Val) -> u32 {
+    match val {
+        Val::Float(val) => (val != 0.0) as u32,
+        Val::Null => 0,
+        Val::String(s) => s.is_empty() as u32,
+        Val::Ref(_) => 1,
+    }
+}
+
+#[no_mangle]
+pub extern fn rt_val_print(val: Val, rt: &mut Runtime) {
+    match val {
+        Val::Null => println!("null"),
+        Val::Float(n) => println!("{}", n),
+        Val::String(s) => println!("{:?}", rt.string_table.get(s)),
+        // disgusting
+        _ => {
+            let sid = val.cast_string(rt);
+            println!("{}", rt.string_table.get(sid));
+        },
+    }
+}
+
+#[no_mangle]
+pub extern fn rt_val_cloned(val: Val) {
+    if let Val::Ref(_) = val {
+        //unimplemented!("update refcounts")
+    }
+}
+
+// this is not Drop and shouldn't be treated as such.
+#[no_mangle]
+pub extern fn rt_val_drop(val: Val) {
+    if let Val::Ref(_) = val {
+        //unimplemented!("update refcounts")
+    }
+    //mem::forget(mem::replace(self, Val::Null));
+}
+
 #[expose_c_stubs(rt_val)]
 impl Val {
-    fn float(&mut self, val: f32) {
-        mem::forget(mem::replace(self, Val::Float(val)));
-    }
+    /*fn binary_op(&mut self, rt: &mut Runtime, op: u32, lhs: &Val, rhs: &Val) {
+      let op_enum = unsafe {
+      std::mem::transmute::<u32, op::BinaryOp>(op)
+      };
 
-    fn string(&mut self, string: StringId) {
-        mem::forget(mem::replace(self, Val::String(string)));
-    }
+      let mut lhs = *lhs;
 
-    fn binary_op(&mut self, rt: &mut Runtime, op: u32, lhs: &Val, rhs: &Val) {
-        let op_enum = unsafe {
-            std::mem::transmute::<u32, op::BinaryOp>(op)
-        };
+      if let Val::Null = lhs {
+      lhs = rhs.zero_value();
+      }
 
-        let mut lhs = *lhs;
+      let res = match lhs {
+      Val::Null => Val::Null,
+      Val::Float(lval) => Val::Float(Val::binary_arithm(op_enum, lval, rhs.cast_float())),
+      Val::String(lval) => {
+      if op_enum != op::BinaryOp::Add {
+      unimplemented!("RTE badop")
+      }
+    // TODO reconsider this, DM doesn't allow "e" + 2
+    let rval = rhs.cast_string(rt);
+    Val::String(rt.string_table.concat(lval, rval))
+    },
+    Val::Ref(_) => unimplemented!("overloads"),
+    };
 
-        if let Val::Null = lhs {
-            lhs = rhs.zero_value();
-        }
+    /*let res = match op_enum {
+    op::BinaryOp::Add => Val::add(lhs, rhs),
+    op::BinaryOp::Sub => Val::sub(lhs, rhs),
+    op::BinaryOp::Mul => Val::mul(lhs, rhs),
+    op::BinaryOp::Div => Val::div(lhs, rhs),
+    _ => unimplemented!("{:?}", op_enum),
+    };*/
 
-        let res = match lhs {
-            Val::Null => Val::Null,
-            Val::Float(lval) => Val::Float(Val::binary_arithm(op_enum, lval, rhs.cast_float())),
-            Val::String(lval) => {
-                if op_enum != op::BinaryOp::Add {
-                    unimplemented!("RTE badop")
-                }
-                // TODO reconsider this, DM doesn't allow "e" + 2
-                let rval = rhs.cast_string(rt);
-                Val::String(rt.string_table.concat(lval, rval))
-            },
-            Val::Ref(_) => unimplemented!("overloads"),
-        };
+    mem::forget(mem::replace(self, res));
+}*/
 
-        /*let res = match op_enum {
-            op::BinaryOp::Add => Val::add(lhs, rhs),
-            op::BinaryOp::Sub => Val::sub(lhs, rhs),
-            op::BinaryOp::Mul => Val::mul(lhs, rhs),
-            op::BinaryOp::Div => Val::div(lhs, rhs),
-            _ => unimplemented!("{:?}", op_enum),
-        };*/
-
-        mem::forget(mem::replace(self, res));
-    }
-
-    fn to_switch_disc(&self) -> u32 {
-        match self {
-            Val::Float(val) => (*val != 0.0) as u32,
-            Val::Null => 0,
-            Val::String(s) => s.is_empty() as u32,
-            Val::Ref(_) => 1,
-        }
-    }
-
-    fn print(&self, rt: &mut Runtime) {
-        match self {
-            Val::Null => println!("null"),
-            Val::Float(n) => println!("{}", n),
-            Val::String(s) => println!("{:?}", rt.string_table.get(*s)),
-            // disgusting
-            _ => {
-                let sid = self.cast_string(rt);
-                println!("{}", rt.string_table.get(sid));
-            },
-        }
-    }
-
-    fn cloned(&mut self) {
-        if let Val::Ref(_) = self {
-            //unimplemented!("update refcounts")
-        }
-    }
-
-    // this is not Drop and shouldn't be treated as such.
-    fn drop(&mut self) {
-        if let Val::Ref(_) = self {
-            //unimplemented!("update refcounts")
-        }
-        mem::forget(mem::replace(self, Val::Null));
-    }
-
-    // bad, needed for now
-    // TODO better macro support for primitive returns?
-    fn cast_string_val(&mut self, val: &Val, rt: &mut Runtime) {
-        self.string(val.cast_string(rt));
-    }
 }
 
 //this whole block is an awful mess, TODO: fix at some point
@@ -142,113 +171,13 @@ impl Val {
         };
         f(l, r)
     }
-    /*fn add(lhs: &Val, rhs: &Val) -> Val {
-        match &lhs {
-            Val::Float(lval) => {
-                match rhs {
-                    Val::Float(rval) => Val::Float(lval + rval),
-                    Val::Null => lhs.clone(),
-                    _ => panic!(),
-                }
-            },
-
-            Val::Ref(_) => {
-                unimplemented!("overload +")
-            }
-
-            Val::Null => rhs.clone(),
-        }
-    }
-
-    fn sub(lhs: &Val, rhs: &Val) -> Val {
-        match &lhs {
-            Val::Float(lval) => {
-                match rhs {
-                    Val::Float(rval) => Val::Float(lval - rval),
-                    Val::Int(rval) => Val::Float(lval - *rval as f32),
-                    Val::Null => lhs.clone(),
-                    _ => panic!(),
-                }
-            },
-
-            Val::Int(lval) => {
-                match rhs {
-                    Val::Float(rval) => Val::Float(*lval as f32 - rval),
-                    Val::Int(rval) => Val::Int(lval - rval),
-                    Val::Null => lhs.clone(),
-                    _ => panic!(),
-                }
-            },
-
-            Val::Null => Val::Null,
-        }
-    }
-
-    fn mul(lhs: &Val, rhs: &Val) -> Val {
-        match &lhs {
-            Val::Float(lval) => {
-                match rhs {
-                    Val::Float(rval) => Val::Float(lval * rval),
-                    Val::Int(rval) => Val::Float(lval * *rval as f32),
-                    Val::Null => lhs.clone(),
-                    _ => panic!(),
-                }
-            },
-
-            Val::Int(lval) => {
-                match rhs {
-                    Val::Float(rval) => Val::Float(*lval as f32 * rval),
-                    Val::Int(rval) => Val::Int(lval * rval),
-                    Val::Null => lhs.clone(),
-                    _ => panic!(),
-                }
-            },
-
-            Val::Null => Val::Null,
-        }
-    }
-
-    fn div(lhs: &Val, rhs: &Val) -> Val {
-        match &lhs {
-            Val::Float(lval) => {
-                match rhs {
-                    Val::Float(rval) => Val::Float(lval / rval),
-                    Val::Int(rval) => Val::Float(*lval as f32 / *rval as f32),
-                    Val::Null => lhs.clone(),
-                    _ => panic!(),
-                }
-            },
-
-            Val::Int(lval) => {
-                match rhs {
-                    Val::Float(rval) => Val::Float(*lval as f32 / *rval as f32),
-                    Val::Int(rval) => Val::Float(*lval as f32 / *rval as f32),
-                    Val::Null => lhs.clone(),
-                    _ => panic!(),
-                }
-            },
-
-            Val::Null => Val::Null,
-        }
-    }*/
-
-    /*fn cast_int(&self) -> Val {
-        let n = match self {
-            Val::Null => 0,
-            Val::Int(i) => *i,
-            Val::Float(f) => *f as i32,
-            _ => unimplemented!("RTE badcast"),
-        };
-
-        Val::Int(n)
-    }*/
 
     fn cast_float(&self) -> f32 {
         match self {
             Val::Null => 0f32,
             //Val::Int(i) => *i as f32,
             Val::Float(f) => *f,
-            _ => unimplemented!("RTE badcast"),
+            _ => unimplemented!("RTE badcast: {:?}", self),
         }
     }
 

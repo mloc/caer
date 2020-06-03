@@ -22,8 +22,8 @@ impl<T> FFIArray<T> {
 
 #[repr(C)]
 pub struct ArgPack {
-    unnamed: FFIArray<*mut Val>,
-    named: FFIArray<(StringId, *mut Val)>,
+    unnamed: FFIArray<Val>,
+    named: FFIArray<(StringId, Val)>,
 }
 
 #[expose_c_stubs(rt_arg_pack)]
@@ -42,7 +42,7 @@ impl ArgPack {
             if i >= n {
                 break // too many unnamed args
             }
-            unsafe { *target_ptrs[i] = **arg }
+            unsafe { *target_ptrs[i] = *arg }
         }
 
         let named_args = self.named.as_slice();
@@ -56,7 +56,7 @@ impl ArgPack {
             } else if named_args[i_arg].0 > spec.names[i_param].0 {
                 i_arg += 1
             } else {
-                unsafe { *target_ptrs[spec.names[i_param].1 as usize] = *named_args[i_arg].1 };
+                unsafe { *target_ptrs[spec.names[i_param].1 as usize] = named_args[i_arg].1 };
                 i_param += 1;
                 i_arg += 1;
             }
