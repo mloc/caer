@@ -28,7 +28,7 @@ pub struct Var {
     pub name: StringId,
     pub scope: ScopeId,
     pub ty: ty::Complex,
-    // DM-style "compile-time" typepath
+    // DM-style "compile-time" typepath, only used for error checking safe deref ops
     // TODO: maybe fold into ty?
     pub assoc_dty: Option<caer_runtime::type_tree::TypeId>,
 }
@@ -193,6 +193,8 @@ impl<'a> Proc {
         for block in self.blocks.iter() {
             for op in block.ops.iter() {
                 match op {
+                    Op::Noop => {},
+
                     Op::Literal(_, _) => {
                         // hmmm
                     },
@@ -432,6 +434,8 @@ impl Scope {
 
 #[derive(Debug, Clone)]
 pub enum Op {
+    Noop,
+
     Literal(LocalId, Literal),
 
     MkVar(VarId),
@@ -459,6 +463,7 @@ pub enum Op {
 impl Op {
     pub fn dest_local(&self) -> Option<LocalId> {
         match self {
+            Op::Noop => None,
             Op::Literal(dst, _) => Some(*dst),
             Op::MkVar(_) => None,
             Op::Load(dst, _) => Some(*dst),
@@ -477,6 +482,7 @@ impl Op {
     // vec is meh, oh well
     pub fn source_locals(&self) -> Vec<LocalId> {
         match self {
+            Op::Noop => vec![],
             Op::Literal(_, _) => vec![],
             Op::MkVar(_) => vec![],
             Op::Load(_, _) => vec![],
@@ -487,12 +493,79 @@ impl Op {
             Op::Cast(_, src, _) => vec![*src],
             Op::AllocDatum(_, _) => vec![],
             Op::DatumLoadVar(_, src, _) => vec![*src],
-            Op::DatumStoreVar(_, _, src) => vec![*src], // unsure about other local here
+            Op::DatumStoreVar(dsrc, _, src) => vec![*dsrc, *src], // unsure about other local here
             Op::DatumCallProc(_, src, _, args) => {
                 let mut v = args.clone();
                 v.push(*src);
                 v
             },
+        }
+    }
+
+    // mightn't be the best place for these
+    pub fn subst_dest(&mut self, old: LocalId, new: LocalId) {
+        let replace = |dest: &mut LocalId| {
+            if *dest == old {
+                *dest = new
+            }
+        };
+
+        match self {
+            Op::Literal(dst, _) => replace(dst),
+            Op::Load(dst, _) => replace(dst),
+            Op::Binary(dst, _, _, _) => replace(dst),
+            Op::Call(dst, _, _) => replace(dst),
+            Op::Cast(dst, _, _) => replace(dst),
+            Op::AllocDatum(dst, _) => replace(dst),
+            Op::DatumLoadVar(dst, _, _) => replace(dst),
+            Op::DatumCallProc(dst, _, _, _) => replace(dst),
+            Op::Noop => {},
+            Op::MkVar(_) => {},
+            Op::Store(_, _) => {},
+            Op::Put(_) => {},
+            Op::DatumStoreVar(_, _, _) => {},
+        }
+    }
+
+    pub fn subst_source(&mut self, old: LocalId, new: LocalId) {
+        let replace = |source: &mut LocalId| {
+            if *source == old {
+                *source = new
+            }
+        };
+
+        match self {
+            Op::Store(_, src) => replace(src),
+            Op::Put(src) => replace(src),
+            Op::Binary(_, _, lhs, rhs) => {replace(lhs); replace(rhs)},
+            Op::Call(_, _, args) => args.iter_mut().for_each(replace),
+            Op::Cast(_, src, _) => replace(src),
+            Op::DatumLoadVar(_, src, _) => replace(src),
+            Op::DatumStoreVar(dsrc, _, src) => {replace(dsrc); replace(src)},
+            Op::DatumCallProc(_, src, _, args) => {
+                replace(src);
+                args.iter_mut().for_each(replace);
+            },
+            Op::Noop => {},
+            Op::Literal(_, _) => {},
+            Op::MkVar(_) => {},
+            Op::Load(_, _) => {},
+            Op::AllocDatum(_, _) => {},
+        }
+    }
+
+    pub fn subst_var(&mut self, old: VarId, new: VarId) {
+        let replace = |var: &mut VarId| {
+            if *var == old {
+                *var = new
+            }
+        };
+
+        match self {
+            Op::MkVar(var) => replace(var),
+            Op::Load(_, var) => replace(var),
+            Op::Store(var, _) => replace(var),
+            _ => {},
         }
     }
 }
@@ -525,4 +598,17 @@ pub enum Terminator {
         branches: Vec<(u32, BlockId)>,
         default: BlockId,
     },
+}
+
+impl Terminator {
+    pub fn subst_local(&mut self, old: LocalId, new: LocalId) {
+        match self {
+            Terminator::Switch { discriminant: disc, branches: _, default: _ } => {
+                if *disc == old {
+                    *disc = new
+                }
+            },
+            _ => {},
+        }
+    }
 }

@@ -228,6 +228,8 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
     fn emit_block(&mut self, block: &Block, emit: &ProgEmit<'_, 'ctx>) {
         for op in block.ops.iter() {
             match op {
+                Op::Noop => {},
+
                 Op::Literal(id, literal) => {
                     self.assign_literal(literal, *id);
                 },
@@ -462,6 +464,10 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
     fn finalize_block(&self, block: &Block) {
         if block.scope_end {
             for local_id in self.proc.scopes[block.scope].destruct_locals.iter() {
+                // TODO: remove. needed for opts right now, but opts should clean up unused locals
+                if self.locals[*local_id].is_none() {
+                    continue
+                }
                 let local = &self.proc.locals[*local_id];
                 if local.ty.needs_destructor() {
                     self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[self.get_local_any(*local_id)], "");

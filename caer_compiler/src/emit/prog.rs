@@ -69,6 +69,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         let main_block = self.emit_main();
 
         for (proc, func) in self.procs.drain(..).collect::<Vec<_>>() { // TODO no
+            println!("EMITTING {:?}", proc.id);
             let mut proc_emit = ProcEmit::new(self.ctx, self, proc, func);
             proc_emit.emit_proc(self);
         }

@@ -30,6 +30,7 @@ impl<'a, 'ot> CfgBuilder<'a, 'ot> {
         for proc_id_n in 0..self.procs.len() {
             let proc_id = ProcId::new(proc_id_n);
             crate::ir::analysis::ProcAnalysis::analyse_proc(self.env, proc_id);
+            self.env.procs[proc_id].dot(&format!("proc_opt_{}", proc_id.index()));
         }
     }
 

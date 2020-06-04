@@ -65,7 +65,9 @@ impl<'a, 'cb, 'ot> ProcBuilder<'a, 'cb, 'ot> {
         }
 
         self.proc.analyze();
-        self.proc.dot(self.builder.env.string_table.get(self.proc.name));
+
+        //self.proc.dot(self.builder.env.string_table.get(self.proc.name));
+        self.proc.dot(&format!("proc_{}", self.proc.id.index()));
 
         self.proc
     }

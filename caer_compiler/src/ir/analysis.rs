@@ -12,21 +12,28 @@ pub struct ProcAnalysis<'a> {
     env: &'a mut Env,
     proc: cfg::Proc,
     local_info: IndexVec<LocalId, LocalInfo>,
+    var_info: IndexVec<VarId, VarInfo>,
 }
 
 impl<'a> ProcAnalysis<'a> {
     pub fn analyse_proc(env: &'a mut Env, proc_id: ProcId) -> IndexVec<LocalId, LocalInfo> {
         let proc = env.procs[proc_id].clone();
-        let initial_info = proc
+        let initial_local_info = proc
             .locals
-            .iter_enumerated()
-            .map(|(id, _)| LocalInfo::new(id))
+            .indices()
+            .map(|id| LocalInfo::new(id))
+            .collect();
+        let initial_var_info = proc
+            .vars
+            .indices()
+            .map(|id| VarInfo::new(id))
             .collect();
 
         let mut pa = ProcAnalysis {
             env: env,
             proc: proc,
-            local_info: initial_info,
+            local_info: initial_local_info,
+            var_info: initial_var_info,
         };
 
         pa.do_analyse();
@@ -40,14 +47,15 @@ impl<'a> ProcAnalysis<'a> {
     fn do_analyse(&mut self) {
         let mut visited = self.proc.blocks.iter().map(|_| false).collect();
         let mut postorder = Vec::new();
-        self.build_postorder(&self.proc.blocks.first().unwrap(), &mut visited, &mut postorder);
+        self.build_orders(&self.proc.blocks.first().unwrap(), &mut visited, &mut postorder);
         assert!(visited.iter().all(|b| *b));
+        assert_eq!(visited.len(), postorder.len());
 
         for block_id in postorder.iter() {
             let block = &self.proc.blocks[*block_id];
             for (i, op) in block.ops.iter().enumerate() {
                 let dest = op.dest_local();
-                let idx = OpIndex::Op(block.id, i, dest);
+                let idx = OpIndex::new(block.id, i, dest);
 
                 if let Some(dest) = dest {
                     let dest_info = &mut self.local_info[dest];
@@ -59,28 +67,135 @@ impl<'a> ProcAnalysis<'a> {
                 }
 
                 for src in op.source_locals() {
-                    self.local_info[src].dependent_ops.push(idx);
+                    self.local_info[src].dependent_ops.push(RefIndex::Op(idx));
+                }
+
+                match op {
+                    Op::MkVar(var) => {
+                        let var_info = &mut self.var_info[*var];
+                        assert!(var_info.decl_op.is_none());
+                        var_info.decl_op = Some(idx);
+                    },
+                    Op::Load(_, var) => {
+                        self.var_info[*var].loads.push(idx);
+                    },
+                    Op::Store(var, _) => {
+                        self.var_info[*var].stores.push(idx);
+                    },
+                    _ => {}
                 }
             }
 
             match &block.terminator {
                 cfg::Terminator::Switch { discriminant, branches: _, default: _ } => {
-                    self.local_info[*discriminant].dependent_ops.push(OpIndex::Terminator(block.id));
+                    self.local_info[*discriminant].dependent_ops.push(RefIndex::Terminator(block.id));
                 },
                 _ => {},
             }
         }
+
+        println!("{:#?}", self.var_info);
+
+        self.demote_vars();
     }
 
-    fn build_postorder(&self, block: &cfg::Block, visited: &mut IndexVec<BlockId, bool>, postorder: &mut Vec<BlockId>) {
+    // nasty but handy
+    fn get_op(&self, index: impl Into<RefIndex>) -> &cfg::Op {
+        match index.into() {
+            RefIndex::Op(idx) => &self.proc.blocks[idx.block].ops[idx.op_offset],
+            RefIndex::Terminator(_) => panic!(),
+        }
+    }
+
+    fn get_op_mut(&mut self, index: impl Into<RefIndex>) -> &mut cfg::Op {
+        match index.into() {
+            RefIndex::Op(idx) => &mut self.proc.blocks[idx.block].ops[idx.op_offset],
+            RefIndex::Terminator(_) => panic!(),
+        }
+    }
+
+    fn build_orders(&self, block: &cfg::Block, visited: &mut IndexVec<BlockId, bool>, postorder: &mut Vec<BlockId>) {
         if visited[block.id] {
             return
         }
         visited[block.id] = true;
-        postorder.push(block.id);
 
         for id in block.iter_successors() {
-            self.build_postorder(&self.proc.blocks[id], visited, postorder);
+            self.build_orders(&self.proc.blocks[id], visited, postorder);
+        }
+        postorder.push(block.id);
+    }
+
+    // very basic pass
+    // if a var is only stored once, and that store is in the same scope as its decl, we can demote
+    // it to an ssa local
+    // this works on the assumption that a mkvar is fused to a pure store
+    fn demote_vars(&mut self) {
+        let mut to_demote = Vec::new();
+        for var_info in self.var_info.iter() {
+            if var_info.stores.len() == 1 {
+                let decl_scope = if let Some(opidx) = var_info.decl_op {
+                    self.proc.blocks[opidx.block].scope
+                } else {
+                    assert!(var_info.id.index() == 0);
+                    continue
+                };
+                // safety net for return var and params
+                // not needed?
+                if decl_scope == self.proc.global_scope {
+                    continue
+                }
+                let store_scope = self.proc.blocks[var_info.stores[0].block].scope;
+                if decl_scope == store_scope {
+                    to_demote.push(var_info.id);
+                }
+            }
+        }
+
+        let mut ops_to_remove = Vec::new();
+
+        for var_id in to_demote {
+            println!("DEMOTING {:?}", var_id);
+            ops_to_remove.push(self.var_info[var_id].decl_op.unwrap());
+
+            let equiv_local = {
+                let opidx = self.var_info[var_id].stores[0];
+                ops_to_remove.push(opidx);
+                let op = self.get_op(opidx);
+                if let Op::Store(v, l) = op {
+                    assert_eq!(*v, var_id);
+                    assert_eq!(self.proc.locals[*l].construct_scope, self.proc.vars[*v].scope);
+                    *l
+                } else {
+                    panic!("store opidx isn't a store op? {:?}", op);
+                }
+            };
+
+            for load_idx in self.var_info[var_id].loads.iter() {
+                ops_to_remove.push(*load_idx);
+                let dest_l = if let Op::Load(l, v) = self.get_op(*load_idx) {
+                    assert_eq!(*v, var_id);
+                    *l
+                } else {
+                    panic!("load opidx isn't a load op?");
+                };
+
+                for dep_ref in self.local_info[dest_l].dependent_ops.iter() {
+                    match dep_ref {
+                        RefIndex::Op(opidx) => {
+                            let op = &mut self.proc.blocks[opidx.block].ops[opidx.op_offset];
+                            op.subst_source(dest_l, equiv_local);
+                        },
+                        RefIndex::Terminator(block_id) => {
+                            self.proc.blocks[*block_id].terminator.subst_local(dest_l, equiv_local);
+                        },
+                    }
+                }
+            }
+        }
+
+        for opidx in ops_to_remove {
+            *self.get_op_mut(opidx) = Op::Noop;
         }
     }
 
@@ -128,16 +243,39 @@ impl<'a> ProcAnalysis<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OpIndex {
-    // op block, op index in block, "output" from op
-    Op(BlockId, usize, Option<LocalId>),
+pub enum RefIndex {
+    Op(OpIndex),
     Terminator(BlockId),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct OpIndex {
+    pub block: BlockId,
+    pub op_offset: usize,
+    pub result_local: Option<LocalId>,
+}
+
+impl OpIndex {
+    fn new(block: BlockId, op_offset: usize, result_local: Option<LocalId>) -> Self {
+        Self {
+            block,
+            op_offset,
+            result_local,
+        }
+    }
+}
+
+impl Into<RefIndex> for OpIndex {
+    fn into(self) -> RefIndex {
+        RefIndex::Op(self)
+    }
+}
+
+#[derive(Debug)]
 pub struct LocalInfo {
     id: LocalId,
 
-    dependent_ops: Vec<OpIndex>,
+    dependent_ops: Vec<RefIndex>,
 
     decl_op: Option<OpIndex>, // block index, op index
     const_val: Option<caer_runtime::val::Val>,
@@ -163,5 +301,26 @@ impl LocalInfo {
             cfg::Literal::String(id) => Val::String(*id),
             _ => unimplemented!("{:?}", lit),
         });
+    }
+}
+
+#[derive(Debug)]
+pub struct VarInfo {
+    id: VarId,
+    decl_op: Option<OpIndex>, // MkVar op
+
+    loads: Vec<OpIndex>,
+    stores: Vec<OpIndex>,
+}
+
+impl VarInfo {
+    fn new(id: VarId) -> Self {
+        Self {
+            id: id,
+            decl_op: None,
+
+            loads: Vec::new(),
+            stores: Vec::new(),
+        }
     }
 }
