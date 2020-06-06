@@ -1,5 +1,7 @@
 use inkwell;
 use std::mem::size_of;
+use inkwell::types::BasicType;
+use caer_runtime::datum;
 
 #[derive(Debug)]
 pub struct Context<'a, 'ctx> {
@@ -19,6 +21,38 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
             llvm_ctx: llctx,
             rt: rt,
         }
+    }
+
+    // wrong spot for this
+    pub fn make_vtable_lookup(&self, vt_global: inkwell::values::GlobalValue<'ctx>) -> Vec<inkwell::values::FunctionValue<'ctx>> {
+        let mut vt_lookup = Vec::new();
+        for (i, ty) in self.rt.ty.vt_entry_type.get_field_types().iter().enumerate() {
+            let func_ty = ty.fn_type(&[self.rt.ty.datum_common_type_ptr.into()], false);
+            let func = self.module.add_function(&format!("vtable_lookup_field_{}", i), func_ty, None);
+
+            let entry_block = self.llvm_ctx.append_basic_block(func, "entry");
+            self.builder.position_at_end(entry_block);
+
+            let datum_ptr = func.get_first_param().unwrap().into_pointer_value();
+            let ty_id_ptr = unsafe { self.builder.build_in_bounds_gep(datum_ptr, &[
+                self.llvm_ctx.i32_type().const_zero(),
+                self.llvm_ctx.i32_type().const_int(datum::DATUM_TY_FIELD_OFFSET, false),
+            ], "ty_id_ptr") };
+            let ty_id = self.builder.build_load(ty_id_ptr, "ty_id").into_int_value();
+
+            let field_ptr = unsafe { self.builder.build_in_bounds_gep(vt_global.as_pointer_value(), &[
+                self.llvm_ctx.i32_type().const_zero(),
+                ty_id,
+                self.llvm_ctx.i32_type().const_int(i as u64, false),
+            ], &format!("vtable_field_{}_ptr", i)) };
+            let field = self.builder.build_load(field_ptr, &format!("vtable_field_{}", i));
+
+            self.builder.build_return(Some(&field));
+
+            vt_lookup.push(func);
+        }
+
+        vt_lookup
     }
 }
 

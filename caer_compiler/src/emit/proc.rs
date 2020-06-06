@@ -315,8 +315,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 Op::DatumLoadVar(dst, src, var_id) => {
                     let val = self.get_local_any(*src).into_struct_value();
                     let ref_ptr = self.build_extract_ref_ptr(val);
-                    let ty_id = self.build_extract_ty_id(ref_ptr);
-                    let var_get_ptr = self.build_vtable_lookup(ty_id, vtable::VTABLE_VAR_GET_FIELD_OFFSET).into_pointer_value();
+                    let var_get_ptr = self.build_vtable_lookup(ref_ptr, vtable::VTABLE_VAR_GET_FIELD_OFFSET).into_pointer_value();
 
                     // TODO: drop/cloned
 
@@ -330,8 +329,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 Op::DatumStoreVar(dst, var_id, src) => {
                     let dst_val = self.get_local_any(*dst).into_struct_value();
                     let ref_ptr = self.build_extract_ref_ptr(dst_val);
-                    let ty_id = self.build_extract_ty_id(ref_ptr);
-                    let var_set_ptr = self.build_vtable_lookup(ty_id, vtable::VTABLE_VAR_SET_FIELD_OFFSET).into_pointer_value();
+                    let var_set_ptr = self.build_vtable_lookup(ref_ptr, vtable::VTABLE_VAR_SET_FIELD_OFFSET).into_pointer_value();
 
                     let src_val = self.get_local_any(*src);
                     self.ctx.builder.build_call(var_set_ptr, &[
@@ -346,8 +344,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 
                     let src_val = self.get_local_any(*src).into_struct_value();
                     let ref_ptr = self.build_extract_ref_ptr(src_val);
-                    let ty_id = self.build_extract_ty_id(ref_ptr);
-                    let proc_lookup_ptr = self.build_vtable_lookup(ty_id, vtable::VTABLE_PROC_LOOKUP_FIELD_OFFSET).into_pointer_value();
+                    let proc_lookup_ptr = self.build_vtable_lookup(ref_ptr, vtable::VTABLE_PROC_LOOKUP_FIELD_OFFSET).into_pointer_value();
 
                     let proc_ptr = self.ctx.builder.build_call(proc_lookup_ptr, &[
                         self.ctx.llvm_ctx.i32_type().const_int(proc_name.id(), false).into(),
@@ -451,7 +448,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         ty_id
     }
 
-    fn build_vtable_lookup(&self, ty_id: inkwell::values::IntValue<'ctx>, offset: u64) -> inkwell::values::BasicValueEnum<'ctx> {
+    fn build_vtable_lookup_inline(&self, ty_id: inkwell::values::IntValue<'ctx>, offset: u64) -> inkwell::values::BasicValueEnum<'ctx> {
         let field_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(self.emit.vt_global.as_pointer_value(), &[
             self.ctx.llvm_ctx.i32_type().const_zero(),
             ty_id,
@@ -461,11 +458,18 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         field
     }
 
+    fn build_vtable_lookup(&self, datum_ptr: inkwell::values::PointerValue<'ctx>, offset: u64) -> inkwell::values::BasicValueEnum<'ctx> {
+        let lookup_fn = self.emit.vt_lookup[offset as usize];
+        let field = self.ctx.builder.build_call(lookup_fn, &[datum_ptr.into()], &format!("vtable_field_{}", offset)).try_as_basic_value().left().unwrap();
+        field
+    }
+
     fn finalize_block(&self, block: &Block) {
         if block.scope_end {
             for local_id in self.proc.scopes[block.scope].destruct_locals.iter() {
                 // TODO: remove. needed for opts right now, but opts should clean up unused locals
                 if self.locals[*local_id].is_none() {
+                    // panic!("local {:?} is never set", local_id);
                     continue
                 }
                 let local = &self.proc.locals[*local_id];

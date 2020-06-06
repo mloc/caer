@@ -17,6 +17,7 @@ pub struct ProgEmit<'a, 'ctx> {
     pub procs: Vec<(&'a Proc, inkwell::values::FunctionValue<'ctx>)>,
     pub rt_global: inkwell::values::GlobalValue<'ctx>,
     pub vt_global: inkwell::values::GlobalValue<'ctx>,
+    pub vt_lookup: Vec<inkwell::values::FunctionValue<'ctx>>,
     pub datum_types: IndexVec<TypeId, inkwell::types::StructType<'ctx>>,
     pub sym: IndexVec<ProcId, inkwell::values::FunctionValue<'ctx>>,
 }
@@ -36,6 +37,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             procs: Vec::new(),
             rt_global: rt_global,
             vt_global: vt_global,
+            vt_lookup: ctx.make_vtable_lookup(vt_global),
             datum_types: IndexVec::new(),
             sym: IndexVec::new(),
         }

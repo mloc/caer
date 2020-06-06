@@ -19,6 +19,8 @@
     var/msg = c.foo()
     world << msg
 
+    world << loopy()
+
 
     //world << 1 + 1
 	/*world << simple()
@@ -43,14 +45,14 @@
 		x = 39
 	world.log << 78
 	return x
-
+*/
 /proc/loopy()
 	var/x = 0
 	while(x + 8)
 		x = x - 1
 		world << x
 	return x
-
+/*
 /proc/simple()
 	var/x
 	if(1)
