@@ -133,6 +133,8 @@ impl<'a> ProcAnalysis<'a> {
     // it to an ssa local
     // this works on the assumption that a mkvar is fused to a pure store
     fn demote_vars(&mut self) {
+        let mut patch = ProcPatch::new(self.proc.id, self.proc.blocks.len());
+
         let mut to_demote = Vec::new();
         for var_info in self.var_info.iter() {
             if var_info.stores.len() == 1 {
@@ -154,15 +156,13 @@ impl<'a> ProcAnalysis<'a> {
             }
         }
 
-        let mut ops_to_remove = Vec::new();
-
         for var_id in to_demote {
             println!("DEMOTING {:?}", var_id);
-            ops_to_remove.push(self.var_info[var_id].decl_op.unwrap());
+            patch.remove_op(self.var_info[var_id].decl_op.unwrap());
 
             let equiv_local = {
                 let opidx = self.var_info[var_id].stores[0];
-                ops_to_remove.push(opidx);
+                patch.remove_op(opidx);
                 let op = self.get_op(opidx);
                 if let Op::Store(v, l) = op {
                     assert_eq!(*v, var_id);
@@ -174,31 +174,20 @@ impl<'a> ProcAnalysis<'a> {
             };
 
             for load_idx in self.var_info[var_id].loads.iter() {
-                ops_to_remove.push(*load_idx);
+                patch.remove_op(*load_idx);
                 let dest_l = if let Op::Load(l, v) = self.get_op(*load_idx) {
                     assert_eq!(*v, var_id);
                     *l
                 } else {
                     panic!("load opidx isn't a load op?");
                 };
-
-                for dep_ref in self.local_info[dest_l].dependent_ops.iter() {
-                    match dep_ref {
-                        RefIndex::Op(opidx) => {
-                            let op = &mut self.proc.blocks[opidx.block].ops[opidx.op_offset];
-                            //op.subst_source(dest_l, equiv_local);
-                        },
-                        RefIndex::Terminator(block_id) => {
-                            //self.proc.blocks[*block_id].terminator.subst_local(dest_l, equiv_local);
-                        },
-                    }
-                }
+                patch.subst_local(dest_l, equiv_local);
             }
         }
 
-        for opidx in ops_to_remove {
-            *self.get_op_mut(opidx) = Op::Noop;
-        }
+        patch.normalize();
+        patch.resolve_ops(&mut self.proc);
+        patch.repack_locals(&mut self.proc);
     }
 
     fn fold_consts(&mut self, order: &[BlockId]) -> bool {
@@ -334,8 +323,9 @@ struct ProcPatch {
 
     remove_ops: IndexVec<BlockId, Vec<usize>>,
     add_ops: IndexVec<BlockId, Vec<(usize, cfg::Op)>>,
+
     remove_locals: Vec<LocalId>,
-    add_locals: Vec<LocalId>,
+    subst_locals: HashMap<LocalId, LocalId>,
 }
 
 impl ProcPatch {
@@ -345,7 +335,7 @@ impl ProcPatch {
             remove_ops: (0..n_blocks).map(|_| Vec::new()).collect(),
             add_ops: (0..n_blocks).map(|_| Vec::new()).collect(),
             remove_locals: Vec::new(),
-            add_locals: Vec::new(),
+            subst_locals: HashMap::new(),
         }
     }
 
@@ -353,6 +343,19 @@ impl ProcPatch {
         self.remove_ops.iter_mut().for_each(|v| v.sort_unstable());
         self.add_ops.iter_mut().for_each(|v| v.sort_by_key(|(i, _)| *i));
         self.remove_locals.sort_unstable();
+    }
+
+    fn remove_op(&mut self, idx: OpIndex) {
+        self.remove_ops[idx.block].push(idx.op_offset);
+    }
+
+    fn remove_local(&mut self, id: LocalId) {
+        self.remove_locals.push(id);
+    }
+
+    fn subst_local(&mut self, old: LocalId, new: LocalId) {
+        self.remove_local(old);
+        self.subst_locals.insert(old, new);
     }
 
     fn resolve_ops(&self, proc: &mut cfg::Proc) {
@@ -397,10 +400,10 @@ impl ProcPatch {
                 match to_remove {
                     [] => break,
                     [rm_id, rest @ ..] => {
-                        to_remove = rest;
                         if *rm_id >= old_id {
                             break
                         }
+                        to_remove = rest;
                     },
                 }
             }
@@ -415,15 +418,39 @@ impl ProcPatch {
             }
         }).collect();
 
+        for (old, new) in self.subst_locals.iter() {
+            idmap[*old] = Some(idmap[*new].unwrap())
+        }
+
         self.remap_locals(proc, idmap);
     }
 
     fn remap_locals(&self, proc: &mut cfg::Proc, idmap: IndexVec<LocalId, Option<LocalId>>) {
+        let mut unused_locals: IndexVec<_, _> = idmap.iter().map(|_| true).collect();
+        for new in idmap.iter() {
+            if let Some(new) = new {
+                unused_locals[*new] = false
+            }
+        }
+
+        if proc.id.index() == 1 {
+            println!("IDMAP: {:?}", idmap);
+            println!("UNLOC: {:?}", unused_locals);
+        }
+
         let replace = |lid: &mut LocalId| {
             *lid = idmap[*lid].unwrap()
         };
         let fm_fn = |lid: &LocalId| {
-            idmap[*lid]
+            if let Some(new) = idmap[*lid] {
+                if unused_locals[new] {
+                    None
+                } else {
+                    Some(new)
+                }
+            } else {
+                None
+            }
         };
 
         for block in proc.blocks.iter_mut() {
@@ -436,6 +463,8 @@ impl ProcPatch {
 
         for scope in proc.scopes.iter_mut() {
             scope.locals = scope.locals.iter().filter_map(fm_fn).collect();
+            scope.locals.sort_unstable();
+            scope.locals.dedup();
             scope.destruct_locals = scope.destruct_locals.iter().filter_map(fm_fn).collect();
         }
     }
