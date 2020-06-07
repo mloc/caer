@@ -503,22 +503,16 @@ impl Op {
     }
 
     // mightn't be the best place for these
-    pub fn subst_dest(&mut self, old: LocalId, new: LocalId) {
-        let replace = |dest: &mut LocalId| {
-            if *dest == old {
-                *dest = new
-            }
-        };
-
+    pub fn visit_dest(&mut self, f: impl Fn(&mut LocalId)) {
         match self {
-            Op::Literal(dst, _) => replace(dst),
-            Op::Load(dst, _) => replace(dst),
-            Op::Binary(dst, _, _, _) => replace(dst),
-            Op::Call(dst, _, _) => replace(dst),
-            Op::Cast(dst, _, _) => replace(dst),
-            Op::AllocDatum(dst, _) => replace(dst),
-            Op::DatumLoadVar(dst, _, _) => replace(dst),
-            Op::DatumCallProc(dst, _, _, _) => replace(dst),
+            Op::Literal(dst, _) => f(dst),
+            Op::Load(dst, _) => f(dst),
+            Op::Binary(dst, _, _, _) => f(dst),
+            Op::Call(dst, _, _) => f(dst),
+            Op::Cast(dst, _, _) => f(dst),
+            Op::AllocDatum(dst, _) => f(dst),
+            Op::DatumLoadVar(dst, _, _) => f(dst),
+            Op::DatumCallProc(dst, _, _, _) => f(dst),
             Op::Noop => {},
             Op::MkVar(_) => {},
             Op::Store(_, _) => {},
@@ -527,24 +521,18 @@ impl Op {
         }
     }
 
-    pub fn subst_source(&mut self, old: LocalId, new: LocalId) {
-        let replace = |source: &mut LocalId| {
-            if *source == old {
-                *source = new
-            }
-        };
-
+    pub fn visit_source(&mut self, f: impl Fn(&mut LocalId)) {
         match self {
-            Op::Store(_, src) => replace(src),
-            Op::Put(src) => replace(src),
-            Op::Binary(_, _, lhs, rhs) => {replace(lhs); replace(rhs)},
-            Op::Call(_, _, args) => args.iter_mut().for_each(replace),
-            Op::Cast(_, src, _) => replace(src),
-            Op::DatumLoadVar(_, src, _) => replace(src),
-            Op::DatumStoreVar(dsrc, _, src) => {replace(dsrc); replace(src)},
+            Op::Store(_, src) => f(src),
+            Op::Put(src) => f(src),
+            Op::Binary(_, _, lhs, rhs) => {f(lhs); f(rhs)},
+            Op::Call(_, _, args) => args.iter_mut().for_each(f),
+            Op::Cast(_, src, _) => f(src),
+            Op::DatumLoadVar(_, src, _) => f(src),
+            Op::DatumStoreVar(dsrc, _, src) => {f(dsrc); f(src)},
             Op::DatumCallProc(_, src, _, args) => {
-                replace(src);
-                args.iter_mut().for_each(replace);
+                f(src);
+                args.iter_mut().for_each(f);
             },
             Op::Noop => {},
             Op::Literal(_, _) => {},
@@ -554,17 +542,11 @@ impl Op {
         }
     }
 
-    pub fn subst_var(&mut self, old: VarId, new: VarId) {
-        let replace = |var: &mut VarId| {
-            if *var == old {
-                *var = new
-            }
-        };
-
+    pub fn visit_var(&mut self, f: impl Fn(&mut VarId)) {
         match self {
-            Op::MkVar(var) => replace(var),
-            Op::Load(_, var) => replace(var),
-            Op::Store(var, _) => replace(var),
+            Op::MkVar(var) => f(var),
+            Op::Load(_, var) => f(var),
+            Op::Store(var, _) => f(var),
             _ => {},
         }
     }
@@ -601,12 +583,10 @@ pub enum Terminator {
 }
 
 impl Terminator {
-    pub fn subst_local(&mut self, old: LocalId, new: LocalId) {
+    pub fn visit_local(&mut self, f: impl Fn(&mut LocalId)) {
         match self {
             Terminator::Switch { discriminant: disc, branches: _, default: _ } => {
-                if *disc == old {
-                    *disc = new
-                }
+                f(disc);
             },
             _ => {},
         }

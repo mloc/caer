@@ -7,6 +7,8 @@ use caer_runtime::environment::ProcId;
 
 use index_vec::IndexVec;
 
+use std::collections::{HashSet, HashMap};
+
 // modifies a clone of the proc, for now. proc-level cfg opts
 pub struct ProcAnalysis<'a> {
     env: &'a mut Env,
@@ -184,10 +186,10 @@ impl<'a> ProcAnalysis<'a> {
                     match dep_ref {
                         RefIndex::Op(opidx) => {
                             let op = &mut self.proc.blocks[opidx.block].ops[opidx.op_offset];
-                            op.subst_source(dest_l, equiv_local);
+                            //op.subst_source(dest_l, equiv_local);
                         },
                         RefIndex::Terminator(block_id) => {
-                            self.proc.blocks[*block_id].terminator.subst_local(dest_l, equiv_local);
+                            //self.proc.blocks[*block_id].terminator.subst_local(dest_l, equiv_local);
                         },
                     }
                 }
@@ -321,6 +323,120 @@ impl VarInfo {
 
             loads: Vec::new(),
             stores: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ProcPatch {
+    // redundant, here for sanity check
+    proc: ProcId,
+
+    remove_ops: IndexVec<BlockId, Vec<usize>>,
+    add_ops: IndexVec<BlockId, Vec<(usize, cfg::Op)>>,
+    remove_locals: Vec<LocalId>,
+    add_locals: Vec<LocalId>,
+}
+
+impl ProcPatch {
+    fn new(id: ProcId, n_blocks: usize) -> Self {
+        Self {
+            proc: id,
+            remove_ops: (0..n_blocks).map(|_| Vec::new()).collect(),
+            add_ops: (0..n_blocks).map(|_| Vec::new()).collect(),
+            remove_locals: Vec::new(),
+            add_locals: Vec::new(),
+        }
+    }
+
+    fn normalize(&mut self) {
+        self.remove_ops.iter_mut().for_each(|v| v.sort_unstable());
+        self.add_ops.iter_mut().for_each(|v| v.sort_by_key(|(i, _)| *i));
+        self.remove_locals.sort_unstable();
+    }
+
+    fn resolve_ops(&self, proc: &mut cfg::Proc) {
+        for block in proc.blocks.iter_mut() {
+            // TODO: can do this efficiently without hashing collections
+            // very inefficent, loads of allocs and clones
+            let remove_ops: HashSet<_> = self.remove_ops[block.id].iter().collect();
+            let mut add_ops: HashMap<usize, Vec<cfg::Op>> = HashMap::new();
+            for (index, op) in self.add_ops[block.id].iter() {
+                let v = add_ops.entry(*index).or_default();
+                v.push(op.clone());
+            }
+
+            block.ops = block.ops.iter().enumerate().flat_map(|(index, op)| {
+                let start: Box<dyn Iterator<Item = cfg::Op>> = if remove_ops.contains(&index) {
+                    Box::new(std::iter::empty())
+                } else {
+                    Box::new(std::iter::once(op.clone()))
+                };
+
+                let rest: Box<dyn Iterator<Item = cfg::Op>> =  if let Some(ops) = add_ops.get(&index) {
+                    Box::new(ops.iter().map(|r| r.clone()))
+                } else {
+                    Box::new(std::iter::empty())
+                };
+
+                start.chain(rest)
+            }).collect();
+        }
+    }
+
+    fn repack_locals(&self, proc: &mut cfg::Proc) {
+        let mut to_remove = self.remove_locals.as_slice();
+
+        let new_n = proc.locals.len() - to_remove.len();
+
+        let mut idmap: IndexVec<LocalId, Option<LocalId>> = (0..proc.locals.len()).map(|_| None).collect();
+
+        let mut new_id_n = 0;
+        proc.locals = proc.locals.iter_enumerated().filter_map(|(old_id, local)| {
+            loop {
+                match to_remove {
+                    [] => break,
+                    [rm_id, rest @ ..] => {
+                        to_remove = rest;
+                        if *rm_id >= old_id {
+                            break
+                        }
+                    },
+                }
+            }
+            if to_remove.first() == Some(&old_id) {
+                None
+            } else {
+                idmap[old_id] = Some(new_id_n.into());
+                let mut new_local = local.clone();
+                new_local.id = new_id_n.into();
+                new_id_n += 1;
+                Some(new_local)
+            }
+        }).collect();
+
+        self.remap_locals(proc, idmap);
+    }
+
+    fn remap_locals(&self, proc: &mut cfg::Proc, idmap: IndexVec<LocalId, Option<LocalId>>) {
+        let replace = |lid: &mut LocalId| {
+            *lid = idmap[*lid].unwrap()
+        };
+        let fm_fn = |lid: &LocalId| {
+            idmap[*lid]
+        };
+
+        for block in proc.blocks.iter_mut() {
+            for op in block.ops.iter_mut() {
+                op.visit_dest(replace);
+                op.visit_source(replace);
+            }
+            block.terminator.visit_local(replace);
+        }
+
+        for scope in proc.scopes.iter_mut() {
+            scope.locals = scope.locals.iter().filter_map(fm_fn).collect();
+            scope.destruct_locals = scope.destruct_locals.iter().filter_map(fm_fn).collect();
         }
     }
 }
