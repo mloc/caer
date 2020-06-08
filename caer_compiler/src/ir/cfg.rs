@@ -409,8 +409,8 @@ pub struct Scope {
     pub depth: i32,
     pub locals: Vec<LocalId>,
     pub destruct_locals: HashSet<LocalId>,
-    pub destruct_vars: HashSet<VarId>,
     pub vars: Vec<VarId>,
+    pub destruct_vars: HashSet<VarId>,
     pub vars_by_name: HashMap<StringId, VarId>,
     pub blocks: Vec<BlockId>,
 }
@@ -503,7 +503,7 @@ impl Op {
     }
 
     // mightn't be the best place for these
-    pub fn visit_dest(&mut self, f: impl Fn(&mut LocalId)) {
+    pub fn visit_dest(&mut self, mut f: impl FnMut(&mut LocalId)) {
         match self {
             Op::Literal(dst, _) => f(dst),
             Op::Load(dst, _) => f(dst),
@@ -521,7 +521,7 @@ impl Op {
         }
     }
 
-    pub fn visit_source(&mut self, f: impl Fn(&mut LocalId)) {
+    pub fn visit_source(&mut self, mut f: impl FnMut(&mut LocalId)) {
         match self {
             Op::Store(_, src) => f(src),
             Op::Put(src) => f(src),
@@ -542,7 +542,7 @@ impl Op {
         }
     }
 
-    pub fn visit_var(&mut self, f: impl Fn(&mut VarId)) {
+    pub fn visit_var(&mut self, mut f: impl FnMut(&mut VarId)) {
         match self {
             Op::MkVar(var) => f(var),
             Op::Load(_, var) => f(var),
@@ -583,7 +583,7 @@ pub enum Terminator {
 }
 
 impl Terminator {
-    pub fn visit_local(&mut self, f: impl Fn(&mut LocalId)) {
+    pub fn visit_local(&mut self, mut f: impl FnMut(&mut LocalId)) {
         match self {
             Terminator::Switch { discriminant: disc, branches: _, default: _ } => {
                 f(disc);

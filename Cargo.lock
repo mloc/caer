@@ -43,6 +43,7 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "caer_runtime",
+ "caer_util",
  "dot",
  "dreammaker",
  "index_vec",
@@ -59,6 +60,13 @@ dependencies = [
  "dreammaker",
  "index_vec",
  "serde",
+]
+
+[[package]]
+name = "caer_util"
+version = "0.1.0"
+dependencies = [
+ "index_vec",
 ]
 
 [[package]]

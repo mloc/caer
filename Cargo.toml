@@ -2,5 +2,6 @@
 members = [
     "caer_compiler",
     "caer_runtime",
+    "caer_util",
     "cstub_bindgen_macro",
 ]

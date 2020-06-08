@@ -187,7 +187,9 @@ impl<'a> ProcAnalysis<'a> {
 
         patch.normalize();
         patch.resolve_ops(&mut self.proc);
-        patch.repack_locals(&mut self.proc);
+        patch.rewrite_locals(&mut self.proc, &patch.subst_locals);
+        patch.gc_locals(&mut self.proc);
+        patch.gc_vars(&mut self.proc);
     }
 
     fn fold_consts(&mut self, order: &[BlockId]) -> bool {
@@ -387,85 +389,116 @@ impl ProcPatch {
         }
     }
 
-    fn repack_locals(&self, proc: &mut cfg::Proc) {
-        let mut to_remove = self.remove_locals.as_slice();
-
-        let new_n = proc.locals.len() - to_remove.len();
-
-        let mut idmap: IndexVec<LocalId, Option<LocalId>> = (0..proc.locals.len()).map(|_| None).collect();
-
-        let mut new_id_n = 0;
-        proc.locals = proc.locals.iter_enumerated().filter_map(|(old_id, local)| {
-            loop {
-                match to_remove {
-                    [] => break,
-                    [rm_id, rest @ ..] => {
-                        if *rm_id >= old_id {
-                            break
-                        }
-                        to_remove = rest;
-                    },
-                }
-            }
-            if to_remove.first() == Some(&old_id) {
-                None
-            } else {
-                idmap[old_id] = Some(new_id_n.into());
-                let mut new_local = local.clone();
-                new_local.id = new_id_n.into();
-                new_id_n += 1;
-                Some(new_local)
-            }
-        }).collect();
-
-        for (old, new) in self.subst_locals.iter() {
-            idmap[*old] = Some(idmap[*new].unwrap())
-        }
-
-        self.remap_locals(proc, idmap);
-    }
-
-    fn remap_locals(&self, proc: &mut cfg::Proc, idmap: IndexVec<LocalId, Option<LocalId>>) {
-        let mut unused_locals: IndexVec<_, _> = idmap.iter().map(|_| true).collect();
-        for new in idmap.iter() {
-            if let Some(new) = new {
-                unused_locals[*new] = false
-            }
-        }
-
-        if proc.id.index() == 1 {
-            println!("IDMAP: {:?}", idmap);
-            println!("UNLOC: {:?}", unused_locals);
-        }
-
-        let replace = |lid: &mut LocalId| {
-            *lid = idmap[*lid].unwrap()
-        };
-        let fm_fn = |lid: &LocalId| {
-            if let Some(new) = idmap[*lid] {
-                if unused_locals[new] {
-                    None
-                } else {
-                    Some(new)
-                }
-            } else {
-                None
-            }
+    fn gc_locals(&self, proc: &mut cfg::Proc) {
+        let mut unused_locals: IndexVec<_, _> = proc.locals.iter().map(|_| true).collect();
+        let mut visit_fn = |id: &mut _| {
+            unused_locals[*id] = false;
         };
 
         for block in proc.blocks.iter_mut() {
             for op in block.ops.iter_mut() {
-                op.visit_dest(replace);
-                op.visit_source(replace);
+                op.visit_dest(&mut visit_fn);
+                op.visit_source(&mut visit_fn);
             }
-            block.terminator.visit_local(replace);
+            block.terminator.visit_local(&mut visit_fn);
+        }
+
+        let mut remap = HashMap::new();
+        proc.locals.retain(|l| !unused_locals[l.id]);
+        proc.locals.iter_mut_enumerated().for_each(|(id, l)| {
+            remap.insert(l.id, id);
+            l.id = id;
+        });
+
+        self.rewrite_locals(proc, &remap);
+    }
+
+    fn gc_vars(&self, proc: &mut cfg::Proc) {
+        let mut unused_vars: IndexVec<_, _> = proc.vars.iter().map(|_| true).collect();
+        // TODO: better handling for ret var
+        unused_vars[0] = false;
+        let mut visit_fn = |id: &mut _| {
+            unused_vars[*id] = false;
+        };
+
+        for block in proc.blocks.iter_mut() {
+            for op in block.ops.iter_mut() {
+                op.visit_var(&mut visit_fn);
+            }
+        }
+        proc.params.iter_mut().for_each(visit_fn);
+
+        let mut remap = HashMap::new();
+        proc.vars.retain(|l| !unused_vars[l.id]);
+        proc.vars.iter_mut_enumerated().for_each(|(id, v)| {
+            remap.insert(v.id, id);
+            v.id = id;
+        });
+
+        self.rewrite_vars(proc, &remap);
+    }
+
+    fn rewrite_locals(&self, proc: &mut cfg::Proc, map: impl caer_util::traits::Map<LocalId, LocalId>) {
+        let map_fn = |old: &_| {
+            if let Some(new) = map.map_get(old) {
+                *new
+            } else {
+                *old
+            }
+        };
+
+        let visit_fn = |old: &mut _| {
+            *old = map_fn(old);
+        };
+
+        for block in proc.blocks.iter_mut() {
+            for op in block.ops.iter_mut() {
+                op.visit_dest(visit_fn);
+                op.visit_source(visit_fn);
+            }
+            block.terminator.visit_local(visit_fn);
         }
 
         for scope in proc.scopes.iter_mut() {
-            scope.locals = scope.locals.iter().filter_map(fm_fn).collect();
+            scope.locals.iter_mut().for_each(visit_fn);
             scope.locals.sort_unstable();
             scope.locals.dedup();
-            scope.destruct_locals = scope.destruct_locals.iter().filter_map(fm_fn).collect();
+            scope.destruct_locals = scope.destruct_locals.iter().map(map_fn).collect();
         }
+    }
+
+    // bad copypaste, TODO: nicer visitor
+    fn rewrite_vars(&self, proc: &mut cfg::Proc, map: impl caer_util::traits::Map<VarId, VarId>) {
+        let map_fn = |old: &_| {
+            if let Some(new) = map.map_get(old) {
+                *new
+            } else {
+                *old
+            }
+        };
+
+        let visit_fn = |old: &mut _| {
+            *old = map_fn(old);
+        };
+
+        for block in proc.blocks.iter_mut() {
+            for op in block.ops.iter_mut() {
+                op.visit_var(visit_fn);
+            }
+        }
+
+        for scope in proc.scopes.iter_mut() {
+            scope.vars.iter_mut().for_each(visit_fn);
+            scope.vars.sort_unstable();
+            scope.vars.dedup();
+            scope.destruct_vars = scope.destruct_vars.iter().map(map_fn).collect();
+            scope.vars_by_name.iter_mut().map(|(_, v)| v).for_each(visit_fn);
+        }
+
+        proc.vars_by_name.iter_mut().map(|(_, v)| v).for_each(visit_fn);
+        proc.params.iter_mut().for_each(visit_fn);
+        proc.params.sort_unstable();
+        // do a check instead, dups are bad
+        //scope.vars.dedup();
     }
 }

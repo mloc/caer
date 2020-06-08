@@ -467,10 +467,8 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
     fn finalize_block(&self, block: &Block) {
         if block.scope_end {
             for local_id in self.proc.scopes[block.scope].destruct_locals.iter() {
-                // TODO: remove. needed for opts right now, but opts should clean up unused locals
                 if self.locals[*local_id].is_none() {
-                    // panic!("local {:?} is never set", local_id);
-                    continue
+                    panic!("local {:?} is never set", local_id);
                 }
                 let local = &self.proc.locals[*local_id];
                 if local.ty.needs_destructor() {
