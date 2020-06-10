@@ -16,8 +16,6 @@ pub enum BinaryOp {
     Le,
     Shl,
     Shr,
-    LogAnd,
-    LogOr,
     BitAnd,
     BitOr,
     BitXor,

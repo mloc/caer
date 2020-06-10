@@ -378,6 +378,10 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
             },
 
             ast::Expression::BinaryOp { op, lhs, rhs } => {
+                if *op == ast::BinaryOp::And || *op == ast::BinaryOp::Or {
+                    return self.build_logical_binop(lhs, rhs, op);
+                }
+
                 let lhs_expr = self.build_expr(lhs);
                 let rhs_expr = self.build_expr(rhs);
                 let res_local = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
@@ -397,6 +401,44 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
 
             _ => unimplemented!("{:?}", expr),
         }
+    }
+
+    // build a binop with short-circuiting
+    fn build_logical_binop(&mut self, lhs: &ast::Expression, rhs: &ast::Expression, op: &ast::BinaryOp) -> LocalId {
+        // TODO: nameless vars
+        let res_var_name = self.pb.builder.add_string("__logical_binop_res");
+        let res_var = self.pb.add_var(self.block.scope, res_var_name);
+        let lhs_expr = self.build_expr(lhs);
+        self.push_op(cfg::Op::Store(res_var, lhs_expr));
+
+        let end_block = self.pb.proc.new_block(self.block.scope);
+        let mut alt_block = self.pb.proc.new_block(self.block.scope);
+
+        self.on_block(&mut alt_block, |bb| {
+            let rhs_expr = bb.build_expr(rhs);
+            bb.push_op(cfg::Op::Store(res_var, rhs_expr));
+            bb.block.terminator = cfg::Terminator::Jump(end_block.id);
+        });
+
+        let (true_path, false_path) = match *op {
+            ast::BinaryOp::And => (end_block.id, alt_block.id),
+            ast::BinaryOp::Or => (alt_block.id, end_block.id),
+            _ => panic!("build_logical_binop called with non-logical op {:?}", op),
+        };
+
+        self.block.terminator = cfg::Terminator::Switch {
+            discriminant: lhs_expr,
+            branches: vec![(0, false_path)],
+            default: true_path
+        };
+
+        self.pb.finalize_block(alt_block);
+        self.cur_block_done(end_block);
+
+        // oneof ty?
+        let res = self.pb.proc.add_local(self.block.scope, ty::Complex::Any);
+        self.push_op(cfg::Op::Load(res, res_var));
+        res
     }
 
     fn build_literal(&mut self, lit: cfg::Literal) -> LocalId {

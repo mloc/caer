@@ -21,6 +21,9 @@
 
     world << loopy()
 
+    var/v = 0 || 80
+    world << v
+
 
     //world << 1 + 1
 	/*world << simple()

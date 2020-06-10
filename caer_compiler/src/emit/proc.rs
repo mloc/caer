@@ -468,7 +468,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         if block.scope_end {
             for local_id in self.proc.scopes[block.scope].destruct_locals.iter() {
                 if self.locals[*local_id].is_none() {
-                    panic!("local {:?} is never set", local_id);
+                    //panic!("local {:?} is never set", local_id);
                 }
                 let local = &self.proc.locals[*local_id];
                 if local.ty.needs_destructor() {
