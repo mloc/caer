@@ -123,7 +123,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 Value::new(Some(lit_val), ty::Primitive::String.into())
             },
             Literal::Null => {
-                Value::new(None, ty::Primitive::Null.into())
+                Value::new(Some(self.ctx.llvm_ctx.i64_type().const_zero().into()), ty::Primitive::Null.into())
             },
             _ => unimplemented!("{:?}", lit),
         };

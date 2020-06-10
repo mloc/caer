@@ -7,7 +7,7 @@ pub struct Value<'ctx> {
 
 impl<'ctx> Value<'ctx> {
     pub fn new(val: Option<inkwell::values::BasicValueEnum<'ctx>>, ty: ty::Complex) -> Self {
-        if val == None && ty == ty::Primitive::Null.into() {
+        if val == None && ty != ty::Primitive::Null.into() {
             panic!("values with non-null ty must have a val")
         }
         Self {
