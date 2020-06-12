@@ -59,7 +59,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                         _ => unimplemented!("unhandled prim: {:?}", prim),
                     }
                 },
-                ty::Complex::Any => {
+                ty::Complex::Any | ty::Complex::OneOf(_) => {
                     let alloc = self.ctx.builder.build_alloca(self.ctx.rt.ty.val_type, name);
                     self.ctx.builder.build_store(alloc, null_val);
                     alloc
@@ -173,11 +173,11 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
     fn conv_val(&self, val: &Value<'ctx>, ty: &ty::Complex) -> inkwell::values::BasicValueEnum<'ctx> {
         // TODO revisit this as types expand, some assumptions are shaky
         // the panics here indicate an error in type unification, not a user error
-        if *ty == val.ty {
+        if *ty == val.ty || (ty.is_any() && val.ty.is_any()) {
             val.val.unwrap()
             //if let Some(ll_val) = val.val {
-        } else if val.ty == ty::Complex::Any {
-            panic!("attempted to store Any val in non-Any local with ty {:?}", ty)
+        } else if val.ty.is_any() {
+            panic!("attempted to store Any val with ty {:?} in non-Any local with ty {:?}", val.ty, ty)
         } else if let Some(val_prim) = val.ty.as_primitive() {
             if let Some(local_prim) = ty.as_primitive() {
                 // autocast?

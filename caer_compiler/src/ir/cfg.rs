@@ -275,6 +275,16 @@ impl<'a> Proc {
 
         f.seek(SeekFrom::End(-2)).unwrap();
         //write!(f, "newrank=true;\n").unwrap();
+
+        let finagle = |s: String| {
+            s[1..s.len()-1].to_string().replace("{", "\\{").replace("}", "\\}")
+        };
+
+        let locals = self.locals.iter_enumerated().map(|(id, l)| finagle(dot::LabelText::escaped(format!("{}: {:?}", id.index(), l.ty)).to_dot_string())).collect::<Vec<_>>().join("\\l");
+        let vars = self.vars.iter_enumerated().map(|(id, v)| finagle(dot::LabelText::escaped(format!("{}: {:?}", id.index(), v.ty)).to_dot_string())).collect::<Vec<_>>().join("\\l");
+        write!(f, "llegend[label=\"{{Locals\\l|{{{}\\l}}}}\"][shape=\"record\"];\n", locals).unwrap();
+        write!(f, "vlegend[label=\"{{Vars\\l|{{{}\\l}}}}\"][shape=\"record\"];\n", vars).unwrap();
+
         self.dot_scope_cluster(&mut f, self.global_scope);
         write!(&mut f, "}}\n").unwrap();
     }
@@ -479,7 +489,7 @@ impl Op {
         }
     }
 
-    // vec is meh, oh well
+    // vec is meh, oh well. could do hacky iter?
     pub fn source_locals(&self) -> Vec<LocalId> {
         match self {
             Op::Noop => vec![],

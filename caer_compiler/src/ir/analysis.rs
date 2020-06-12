@@ -1,6 +1,7 @@
 use super::cfg::{self, Op};
 use super::id::*;
 use super::env::Env;
+use crate::ty;
 
 use caer_runtime::val::Val;
 use caer_runtime::environment::ProcId;
@@ -137,6 +138,16 @@ impl<'a> ProcAnalysis<'a> {
 
         let mut to_demote = Vec::new();
         for var_info in self.var_info.iter() {
+            if var_info.stores.len() > 0 {
+                // shouldn't be here
+                // TODO: move into own pass or something
+                if self.proc.vars[var_info.id].ty == ty::Complex::Any {
+                    let tys = var_info.stores.iter().flat_map(|idx| self.get_op(*idx).source_locals().into_iter().map(|id| self.proc.locals[id].ty.clone()));
+                    let new_ty = ty::Complex::oneof_from(tys);
+                    self.proc.vars[var_info.id].ty = new_ty;
+                }
+            }
+
             if var_info.stores.len() == 1 {
                 let decl_scope = if let Some(opidx) = var_info.decl_op {
                     self.proc.blocks[opidx.block].scope

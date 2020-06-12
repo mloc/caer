@@ -1,5 +1,6 @@
 use index_vec::{define_index_type};
 use caer_runtime::type_tree;
+use std::collections::BTreeSet;
 
 define_index_type!{pub struct TyId = u32;}
 
@@ -9,7 +10,7 @@ pub trait Ty {
     fn is_primitive(&self, prim: Primitive) -> bool;
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum Primitive {
     Null,
     Float,
@@ -19,16 +20,44 @@ pub enum Primitive {
     Ref(Option<type_tree::TypeId>),
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub enum Complex {
     Any,
     List(Box<Complex>),
     Primitive(Primitive),
-    OneOf(Vec<Complex>),
+    // btreeset is bad.
+    OneOf(BTreeSet<Complex>),
     Proc { args: Vec<Complex>, var_args: Option<Box<Complex>>, ret: Box<Complex> },
 }
 
 impl Complex {
+    pub fn oneof_from(iter: impl Iterator<Item = Complex>) -> Self {
+        let mut set = BTreeSet::new();
+
+        for ty in iter {
+            set.insert(ty);
+        }
+
+        if set.contains(&Complex::Any) {
+            return Complex::Any;
+        }
+
+        match set.len() {
+            0 => panic!("oneof with no types?"),
+            1 => set.into_iter().next().unwrap(),
+            _ => Complex::OneOf(set),
+        }
+    }
+
+    // term any is overloaded.
+    // in this case it means any ty that needs RTTI
+    pub fn is_any(&self) -> bool {
+        match self {
+            Complex::Any | Complex::OneOf(_) => true,
+            _ => false,
+        }
+    }
+
     pub fn contains(&self, prim: Primitive) -> bool {
         match self {
             Complex::Any => true,

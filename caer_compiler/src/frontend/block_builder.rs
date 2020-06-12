@@ -93,7 +93,10 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
                             ast::BinaryOp::LShift => {
                                 self.push_op(cfg::Op::Put(res));
                             },
-                            _ => unimplemented!(),
+                            _ => {
+                                println!("uh oh {:#?}", expr);
+                                unimplemented!();
+                            },
                         };
                     },
 
