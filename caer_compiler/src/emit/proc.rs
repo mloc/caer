@@ -365,7 +365,8 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
             Terminator::Return => {
                 self.finalize_block(block);
                 let ret = self.load_var(VarId::new(0));
-                self.ctx.builder.build_return(Some(&ret.val.unwrap()));
+                let ret_any = self.conv_val(&ret, &ty::Complex::Any);
+                self.ctx.builder.build_return(Some(&ret_any));
             },
 
             Terminator::Jump(id) => {
