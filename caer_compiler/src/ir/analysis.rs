@@ -1,14 +1,15 @@
 use super::cfg::{self, Op};
-use super::id::*;
 use super::env::Env;
+use super::id::*;
 use crate::ty;
 
-use caer_runtime::val::Val;
 use caer_runtime::environment::ProcId;
+use caer_runtime::op::BinaryOp;
+use caer_runtime::val::Val;
 
 use index_vec::IndexVec;
 
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 
 // modifies a clone of the proc, for now. proc-level cfg opts
 pub struct ProcAnalysis<'a> {
@@ -21,16 +22,8 @@ pub struct ProcAnalysis<'a> {
 impl<'a> ProcAnalysis<'a> {
     pub fn analyse_proc(env: &'a mut Env, proc_id: ProcId) -> IndexVec<LocalId, LocalInfo> {
         let proc = env.procs[proc_id].clone();
-        let initial_local_info = proc
-            .locals
-            .indices()
-            .map(|id| LocalInfo::new(id))
-            .collect();
-        let initial_var_info = proc
-            .vars
-            .indices()
-            .map(|id| VarInfo::new(id))
-            .collect();
+        let initial_local_info = proc.locals.indices().map(|id| LocalInfo::new(id)).collect();
+        let initial_var_info = proc.vars.indices().map(|id| VarInfo::new(id)).collect();
 
         let mut pa = ProcAnalysis {
             env: env,
@@ -50,7 +43,11 @@ impl<'a> ProcAnalysis<'a> {
     fn do_analyse(&mut self) {
         let mut visited = self.proc.blocks.iter().map(|_| false).collect();
         let mut postorder = Vec::new();
-        self.build_orders(&self.proc.blocks.first().unwrap(), &mut visited, &mut postorder);
+        self.build_orders(
+            &self.proc.blocks.first().unwrap(),
+            &mut visited,
+            &mut postorder,
+        );
         assert!(visited.iter().all(|b| *b));
         assert_eq!(visited.len(), postorder.len());
 
@@ -78,27 +75,34 @@ impl<'a> ProcAnalysis<'a> {
                         let var_info = &mut self.var_info[*var];
                         assert!(var_info.decl_op.is_none());
                         var_info.decl_op = Some(idx);
-                    },
+                    }
                     Op::Load(_, var) => {
                         self.var_info[*var].loads.push(idx);
-                    },
+                    }
                     Op::Store(var, _) => {
                         self.var_info[*var].stores.push(idx);
-                    },
+                    }
                     _ => {}
                 }
             }
 
             match &block.terminator {
-                cfg::Terminator::Switch { discriminant, branches: _, default: _ } => {
-                    self.local_info[*discriminant].dependent_ops.push(RefIndex::Terminator(block.id));
-                },
-                _ => {},
+                cfg::Terminator::Switch {
+                    discriminant,
+                    branches: _,
+                    default: _,
+                } => {
+                    self.local_info[*discriminant]
+                        .dependent_ops
+                        .push(RefIndex::Terminator(block.id));
+                }
+                _ => {}
             }
         }
 
         println!("{:#?}", self.var_info);
 
+        //self.binop_prop();
         self.demote_vars();
     }
 
@@ -117,9 +121,14 @@ impl<'a> ProcAnalysis<'a> {
         }
     }
 
-    fn build_orders(&self, block: &cfg::Block, visited: &mut IndexVec<BlockId, bool>, postorder: &mut Vec<BlockId>) {
+    fn build_orders(
+        &self,
+        block: &cfg::Block,
+        visited: &mut IndexVec<BlockId, bool>,
+        postorder: &mut Vec<BlockId>,
+    ) {
         if visited[block.id] {
-            return
+            return;
         }
         visited[block.id] = true;
 
@@ -127,6 +136,34 @@ impl<'a> ProcAnalysis<'a> {
             self.build_orders(&self.proc.blocks[id], visited, postorder);
         }
         postorder.push(block.id);
+    }
+
+    // forward only
+    fn binop_prop(&mut self) {
+        for local_info in self.local_info.iter() {
+            if local_info.decl_op.is_none() {
+                continue;
+            }
+            let op = self.get_op(local_info.decl_op.unwrap()).clone();
+            if let cfg::Op::Binary(dst, op, lhs, rhs) = op {
+                let lhs_ty = &self.proc.locals[lhs].ty;
+                let rhs_ty = &self.proc.locals[rhs].ty;
+
+                let mut infer_type = None;
+                if lhs_ty == rhs_ty && lhs_ty == &ty::Primitive::Float.into() {
+                    match op {
+                        BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
+                            infer_type = Some(lhs_ty.clone());
+                        },
+                        _ => {}
+                    }
+                }
+
+                if let Some(newty) = infer_type {
+                    self.proc.locals[dst].ty = newty;
+                }
+            }
+        }
     }
 
     // very basic pass
@@ -142,7 +179,12 @@ impl<'a> ProcAnalysis<'a> {
                 // shouldn't be here
                 // TODO: move into own pass or something
                 if self.proc.vars[var_info.id].ty == ty::Complex::Any {
-                    let tys = var_info.stores.iter().flat_map(|idx| self.get_op(*idx).source_locals().into_iter().map(|id| self.proc.locals[id].ty.clone()));
+                    let tys = var_info.stores.iter().flat_map(|idx| {
+                        self.get_op(*idx)
+                            .source_locals()
+                            .into_iter()
+                            .map(|id| self.proc.locals[id].ty.clone())
+                    });
                     let new_ty = ty::Complex::oneof_from(tys);
                     self.proc.vars[var_info.id].ty = new_ty;
                 }
@@ -153,12 +195,12 @@ impl<'a> ProcAnalysis<'a> {
                     self.proc.blocks[opidx.block].scope
                 } else {
                     assert!(var_info.id.index() == 0);
-                    continue
+                    continue;
                 };
                 // safety net for return var and params
                 // not needed?
                 if decl_scope == self.proc.global_scope {
-                    continue
+                    continue;
                 }
                 let store_scope = self.proc.blocks[var_info.stores[0].block].scope;
                 if decl_scope == store_scope {
@@ -177,7 +219,10 @@ impl<'a> ProcAnalysis<'a> {
                 let op = self.get_op(opidx);
                 if let Op::Store(v, l) = op {
                     assert_eq!(*v, var_id);
-                    assert_eq!(self.proc.locals[*l].construct_scope, self.proc.vars[*v].scope);
+                    assert_eq!(
+                        self.proc.locals[*l].construct_scope,
+                        self.proc.vars[*v].scope
+                    );
                     *l
                 } else {
                     panic!("store opidx isn't a store op? {:?}", op);
@@ -354,7 +399,9 @@ impl ProcPatch {
 
     fn normalize(&mut self) {
         self.remove_ops.iter_mut().for_each(|v| v.sort_unstable());
-        self.add_ops.iter_mut().for_each(|v| v.sort_by_key(|(i, _)| *i));
+        self.add_ops
+            .iter_mut()
+            .for_each(|v| v.sort_by_key(|(i, _)| *i));
         self.remove_locals.sort_unstable();
     }
 
@@ -382,21 +429,27 @@ impl ProcPatch {
                 v.push(op.clone());
             }
 
-            block.ops = block.ops.iter().enumerate().flat_map(|(index, op)| {
-                let start: Box<dyn Iterator<Item = cfg::Op>> = if remove_ops.contains(&index) {
-                    Box::new(std::iter::empty())
-                } else {
-                    Box::new(std::iter::once(op.clone()))
-                };
+            block.ops = block
+                .ops
+                .iter()
+                .enumerate()
+                .flat_map(|(index, op)| {
+                    let start: Box<dyn Iterator<Item = cfg::Op>> = if remove_ops.contains(&index) {
+                        Box::new(std::iter::empty())
+                    } else {
+                        Box::new(std::iter::once(op.clone()))
+                    };
 
-                let rest: Box<dyn Iterator<Item = cfg::Op>> =  if let Some(ops) = add_ops.get(&index) {
-                    Box::new(ops.iter().map(|r| r.clone()))
-                } else {
-                    Box::new(std::iter::empty())
-                };
+                    let rest: Box<dyn Iterator<Item = cfg::Op>> =
+                        if let Some(ops) = add_ops.get(&index) {
+                            Box::new(ops.iter().map(|r| r.clone()))
+                        } else {
+                            Box::new(std::iter::empty())
+                        };
 
-                start.chain(rest)
-            }).collect();
+                    start.chain(rest)
+                })
+                .collect();
         }
     }
 
@@ -449,7 +502,11 @@ impl ProcPatch {
         self.rewrite_vars(proc, &remap);
     }
 
-    fn rewrite_locals(&self, proc: &mut cfg::Proc, map: impl caer_util::traits::Map<LocalId, LocalId>) {
+    fn rewrite_locals(
+        &self,
+        proc: &mut cfg::Proc,
+        map: impl caer_util::traits::Map<LocalId, LocalId>,
+    ) {
         let map_fn = |old: &_| {
             if let Some(new) = map.map_get(old) {
                 *new
@@ -503,10 +560,17 @@ impl ProcPatch {
             scope.vars.sort_unstable();
             scope.vars.dedup();
             scope.destruct_vars = scope.destruct_vars.iter().map(map_fn).collect();
-            scope.vars_by_name.iter_mut().map(|(_, v)| v).for_each(visit_fn);
+            scope
+                .vars_by_name
+                .iter_mut()
+                .map(|(_, v)| v)
+                .for_each(visit_fn);
         }
 
-        proc.vars_by_name.iter_mut().map(|(_, v)| v).for_each(visit_fn);
+        proc.vars_by_name
+            .iter_mut()
+            .map(|(_, v)| v)
+            .for_each(visit_fn);
         proc.params.iter_mut().for_each(visit_fn);
         proc.params.sort_unstable();
         // do a check instead, dups are bad

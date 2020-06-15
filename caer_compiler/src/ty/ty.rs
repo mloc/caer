@@ -15,7 +15,7 @@ pub enum Primitive {
     Null,
     Float,
     String,
-    Int,
+    //Int,
     // None => any ref. maybe replace with id 0
     Ref(Option<type_tree::TypeId>),
 }
@@ -35,11 +35,14 @@ impl Complex {
         let mut set = BTreeSet::new();
 
         for ty in iter {
-            set.insert(ty);
-        }
-
-        if set.contains(&Complex::Any) {
-            return Complex::Any;
+            /*if ty == Complex::Any {
+                return Complex::Any;
+            }*/
+            if let Complex::OneOf(oset) = ty {
+                set.extend(oset.iter().cloned());
+            } else {
+                set.insert(ty);
+            }
         }
 
         match set.len() {
