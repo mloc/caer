@@ -183,9 +183,9 @@ impl<'a> ProcAnalysis<'a> {
                         self.get_op(*idx)
                             .source_locals()
                             .into_iter()
-                            .map(|id| self.proc.locals[id].ty.clone())
+                            .map(|id| &self.proc.locals[id].ty)
                     });
-                    let new_ty = ty::Complex::oneof_from(tys);
+                    let new_ty = ty::Complex::unify(tys);
                     self.proc.vars[var_info.id].ty = new_ty;
                 }
             }
@@ -246,6 +246,39 @@ impl<'a> ProcAnalysis<'a> {
         patch.rewrite_locals(&mut self.proc, &patch.subst_locals);
         patch.gc_locals(&mut self.proc);
         patch.gc_vars(&mut self.proc);
+    }
+
+    // huge, meh
+    // TODO: move out of here, break up
+    fn infer_types(&mut self, order: &[BlockId]) {
+        let mut infer = ty::infer::InferEngine::new();
+
+        let local_ikey: IndexVec<LocalId, ty::infer::InferKey> = self.proc.locals.indices().map(|_| infer.add_var()).collect();
+        let var_ikey: IndexVec<VarId, ty::infer::InferKey> = self.proc.vars.indices().map(|_| infer.add_var()).collect();
+
+        let mut infer_steps = Vec::new();
+
+        for block_id in order {
+            for op in &self.proc.blocks[*block_id].ops {
+                match op {
+                    Op::Noop => {},
+                    Op::Literal(local, lit) => {
+                        infer_steps.push(ty::infer::Rule::Const(local_ikey[*local], lit.get_ty()));
+                    },
+                    Op::MkVar(_) => {}, // TODO: consider better types for vars
+                    Op::Load(local, var) => {
+                        infer_steps.push(ty::infer::Rule::Equals(local_ikey[*local], var_ikey[*var]));
+                    },
+                    Op::Store(var, local) => {
+                        infer_steps.push(ty::infer::Rule::Equals(local_ikey[*local], var_ikey[*var]));
+                    },
+                    Op::Put(_) => {},
+                    Op::Binary(out_l, op, lhs_l, rhs_l) => {
+                    },
+                    Op::Call(_, _, _) => {},
+                }
+            }
+        }
     }
 
     fn fold_consts(&mut self, order: &[BlockId]) -> bool {

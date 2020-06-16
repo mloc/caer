@@ -31,7 +31,7 @@ pub enum Complex {
 }
 
 impl Complex {
-    pub fn oneof_from(iter: impl Iterator<Item = Complex>) -> Self {
+    pub fn unify<'a>(iter: impl Iterator<Item = &'a Complex>) -> Self {
         let mut set = BTreeSet::new();
 
         for ty in iter {
@@ -41,7 +41,7 @@ impl Complex {
             if let Complex::OneOf(oset) = ty {
                 set.extend(oset.iter().cloned());
             } else {
-                set.insert(ty);
+                set.insert(ty.clone());
             }
         }
 
