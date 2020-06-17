@@ -210,6 +210,7 @@ rt_funcs!{
 
         (rt_runtime_init, void_type~val, [rt_type~ptr, vt_entry_type~ptr]),
         (rt_runtime_alloc_datum, opaque_type~ptr, [rt_type~ptr, i32_type~val]),
+        (rt_runtime_concat_strings, i64_type~val, [rt_type~ptr, i64_type~val, i64_type~val]),
 
         (rt_arg_pack_unpack_into, void_type~val, [arg_pack_type~ptr, val_type_ptr~ptr, i64_type~val, rt_type~ptr]),
     ]

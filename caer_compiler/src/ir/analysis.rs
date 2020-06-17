@@ -104,6 +104,7 @@ impl<'a> ProcAnalysis<'a> {
 
         //self.binop_prop();
         self.demote_vars();
+        self.infer_types(&postorder);
     }
 
     // nasty but handy
@@ -154,7 +155,7 @@ impl<'a> ProcAnalysis<'a> {
                     match op {
                         BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
                             infer_type = Some(lhs_ty.clone());
-                        },
+                        }
                         _ => {}
                     }
                 }
@@ -251,31 +252,151 @@ impl<'a> ProcAnalysis<'a> {
     // huge, meh
     // TODO: move out of here, break up
     fn infer_types(&mut self, order: &[BlockId]) {
+        #[derive(Debug, Clone, Copy, PartialEq)]
+        enum InferRef {
+            Local(LocalId),
+            Var(VarId),
+        }
+
         let mut infer = ty::infer::InferEngine::new();
 
-        let local_ikey: IndexVec<LocalId, ty::infer::InferKey> = self.proc.locals.indices().map(|_| infer.add_var()).collect();
-        let var_ikey: IndexVec<VarId, ty::infer::InferKey> = self.proc.vars.indices().map(|_| infer.add_var()).collect();
+        let local_ikey: IndexVec<LocalId, ty::infer::InferKey> = self
+            .proc
+            .locals
+            .indices()
+            .map(|_| infer.add_var())
+            .collect();
+        let var_ikey: IndexVec<VarId, ty::infer::InferKey> =
+            self.proc.vars.indices().map(|_| infer.add_var()).collect();
 
-        let mut infer_steps = Vec::new();
+        let key_to_ref: IndexVec<ty::infer::InferKey, InferRef> = local_ikey.indices().map(|id| InferRef::Local(id)).chain(var_ikey.indices().map(|id| InferRef::Var(id))).collect();
+
+        for (lid, k) in local_ikey.iter_enumerated() {
+            assert_eq!(key_to_ref[*k], InferRef::Local(lid))
+        }
+        for (vid, k) in var_ikey.iter_enumerated() {
+            assert_eq!(key_to_ref[*k], InferRef::Var(vid))
+        }
+
+        let mut infer_rules = Vec::new();
+        let mut sub_rules = Vec::new();
 
         for block_id in order {
             for op in &self.proc.blocks[*block_id].ops {
                 match op {
-                    Op::Noop => {},
+                    Op::Noop => {}
                     Op::Literal(local, lit) => {
-                        infer_steps.push(ty::infer::Rule::Const(local_ikey[*local], lit.get_ty()));
-                    },
-                    Op::MkVar(_) => {}, // TODO: consider better types for vars
+                        infer_rules.push(ty::infer::Rule::Const(local_ikey[*local], lit.get_ty()));
+                    }
+                    Op::MkVar(_) => {} // TODO: consider better types for vars
                     Op::Load(local, var) => {
-                        infer_steps.push(ty::infer::Rule::Equals(local_ikey[*local], var_ikey[*var]));
-                    },
+                        infer_rules
+                            .push(ty::infer::Rule::Equals(local_ikey[*local], var_ikey[*var]));
+                    }
                     Op::Store(var, local) => {
-                        infer_steps.push(ty::infer::Rule::Equals(local_ikey[*local], var_ikey[*var]));
-                    },
-                    Op::Put(_) => {},
+                        sub_rules.push((local_ikey[*local], var_ikey[*var]));
+                    }
+                    Op::Put(_) => {}
                     Op::Binary(out_l, op, lhs_l, rhs_l) => {
-                    },
-                    Op::Call(_, _, _) => {},
+                        // binop out left unbound on purpose, we try unify later
+                    }
+                    Op::Call(out_l, _, _) => {
+                        infer_rules
+                            .push(ty::infer::Rule::Const(local_ikey[*out_l], ty::Complex::Any));
+                    }
+                    Op::Cast(out_l, _, ty) => {
+                        infer_rules.push(ty::infer::Rule::Const(local_ikey[*out_l], (*ty).into()));
+                    }
+                    Op::AllocDatum(out_l, _) => {
+                        // TODO: handle datum types
+                        infer_rules.push(ty::infer::Rule::Const(
+                            local_ikey[*out_l],
+                            ty::Primitive::Ref(None).into(),
+                        ));
+                    }
+                    Op::DatumLoadVar(out_l, datum_l, _) => {
+                        // TODO: in future, with hard datums, we can set out_l's ty
+                        infer_rules
+                            .push(ty::infer::Rule::Const(local_ikey[*out_l], ty::Complex::Any));
+                        infer_rules.push(ty::infer::Rule::Const(
+                            local_ikey[*datum_l],
+                            ty::Primitive::Ref(None).into(),
+                        ));
+                    }
+                    Op::DatumStoreVar(datum_l, _, _) => {
+                        infer_rules.push(ty::infer::Rule::Const(
+                            local_ikey[*datum_l],
+                            ty::Primitive::Ref(None).into(),
+                        ));
+                    }
+                    Op::DatumCallProc(out_l, datum_l, _, _) => {
+                        infer_rules
+                            .push(ty::infer::Rule::Const(local_ikey[*out_l], ty::Complex::Any));
+                        infer_rules.push(ty::infer::Rule::Const(
+                            local_ikey[*datum_l],
+                            ty::Primitive::Ref(None).into(),
+                        ));
+                    }
+                    _ => unimplemented!(),
+                }
+            }
+        }
+
+        infer.process_rules(&infer_rules).unwrap();
+        infer.process_sub(&sub_rules).unwrap();
+
+        // should maybe store ops of interest instead of iterating over everything again
+        for block_id in order {
+            for op in &mut self.proc.blocks[*block_id].ops {
+                match op {
+                    Op::Binary(out_l, binop, lhs_l, rhs_l) => {
+                        let lhs_ty = match infer.probe_assignment(local_ikey[*lhs_l]).as_primitive()
+                        {
+                            Some(ty) => ty,
+                            None => continue,
+                        };
+                        let rhs_ty = match infer.probe_assignment(local_ikey[*rhs_l]).as_primitive()
+                        {
+                            Some(ty) => ty,
+                            None => continue,
+                        };
+                        if let Some(hard_op) = ty::op::HardBinary::from_in_ty(*binop, (lhs_ty, rhs_ty)) {
+                            if infer.process_rule(&ty::infer::Rule::Const(local_ikey[*out_l], hard_op.out_ty())).is_ok() {
+                                *op = Op::HardBinary(*out_l, hard_op, *lhs_l, *rhs_l);
+                                continue
+                            }
+                        }
+                        // didn't work out, force out to Any
+                        infer.process_rule(&ty::infer::Rule::Const(local_ikey[*out_l], ty::Complex::Any)).unwrap();
+                    }
+                    // uninteresting ops
+                    _ => {}
+                }
+            }
+        }
+
+        // rerun sub constraints, may have new work after op resolution
+        infer.process_sub(&sub_rules).unwrap();
+        infer.process_sub(&sub_rules).unwrap();
+        infer.process_sub(&sub_rules).unwrap();
+        infer.process_sub(&sub_rules).unwrap();
+        infer.process_sub(&sub_rules).unwrap();
+        infer.process_sub(&sub_rules).unwrap();
+
+        println!(
+            "TY INFER FOR {:?}, {} rules : {} subs",
+            self.proc.id,
+            infer_rules.len(),
+            sub_rules.len()
+        );
+        println!("{:#?}", infer.get_assignments());
+        for (k, assign) in infer.get_assignments().into_iter_enumerated() {
+            match key_to_ref[k] {
+                InferRef::Local(lid) => {
+                    self.proc.locals[lid].ty = assign.as_ty()
+                }
+                InferRef::Var(vid) => {
+                    self.proc.vars[vid].ty = assign.as_ty()
                 }
             }
         }

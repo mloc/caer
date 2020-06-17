@@ -278,6 +278,22 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     self.set_local(*id, &Value::new(Some(res), ty::Complex::Any));
                 },
 
+                Op::HardBinary(id, op, lhs, rhs) => {
+                    let lhs_val = self.get_local(*lhs, false);
+                    let rhs_val = self.get_local(*rhs, false);
+                    let res = match op {
+                        ty::op::HardBinary::StringConcat => {
+                            let res = self.ctx.builder.build_call(self.ctx.rt.rt_runtime_concat_strings, &[self.emit.rt_global.as_pointer_value().into(), lhs_val.val.unwrap(), rhs_val.val.unwrap()], "").try_as_basic_value().left().unwrap();
+                            Value::new(Some(res), ty::Primitive::String.into())
+                        }
+                        ty::op::HardBinary::FloatAdd => {
+                            let res = self.ctx.builder.build_float_add(lhs_val.val.unwrap().into_float_value(), rhs_val.val.unwrap().into_float_value(), "").into();
+                            Value::new(Some(res), ty::Primitive::Float.into())
+                        }
+                    };
+                    self.set_local(*id, &res);
+                },
+
                 Op::Call(id, name, args) => {
                     let argpack_ptr = self.build_argpack(&args);
 
@@ -303,12 +319,13 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 
                 Op::AllocDatum(dst, ty_id) => {
                     // TODO: impl eq for prim<->complex
-                    assert!(self.proc.locals[*dst].ty == ty::Primitive::Ref(Some(*ty_id)).into());
+                    // TODO: assert actual type once inference pops it
+                    assert!(self.proc.locals[*dst].ty == ty::Primitive::Ref(None).into());
                     let datum_ptr = self.ctx.builder.build_call(self.ctx.rt.rt_runtime_alloc_datum, &[
                         self.emit.rt_global.as_pointer_value().into(),
                         self.ctx.llvm_ctx.i32_type().const_int(ty_id.index() as u64, false).into(),
                     ], "datum_ptr").try_as_basic_value().left().unwrap();
-                    let ref_val = Value::new(Some(datum_ptr), ty::Primitive::Ref(Some(*ty_id)).into());
+                    let ref_val = Value::new(Some(datum_ptr), ty::Primitive::Ref(None).into());
                     self.set_local(*dst, &ref_val);
                 },
 

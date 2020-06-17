@@ -1,4 +1,4 @@
-use crate::string_table::StringTable;
+use crate::string_table::{StringId, StringTable};
 use crate::environment::Environment;
 use crate::vtable;
 use crate::type_tree::TypeId;
@@ -55,5 +55,12 @@ impl Runtime {
     // TODO: fix lifetimes
     pub fn new_datum(&self, ty: TypeId) -> &mut Datum {
         unsafe {self.alloc_datum(ty.index() as u32).as_mut().unwrap()}
+    }
+}
+
+impl Runtime {
+    #[no_mangle]
+    pub extern fn rt_runtime_concat_strings(&mut self, lhs: StringId, rhs: StringId) -> StringId {
+        self.string_table.concat(lhs, rhs)
     }
 }

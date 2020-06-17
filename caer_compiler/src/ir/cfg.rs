@@ -214,6 +214,11 @@ impl<'a> Proc {
                         flow[*rhs].reads += 1;
                     },
 
+                    Op::HardBinary(_, _, lhs, rhs) => {
+                        flow[*lhs].reads += 1;
+                        flow[*rhs].reads += 1;
+                    },
+
                     Op::Call(_, _, args) => {
                         for arg in args.iter() {
                             flow[*arg].reads += 1;
@@ -453,7 +458,10 @@ pub enum Op {
     Store(VarId, LocalId),
 
     Put(LocalId),
+    // TODO: merge hard and soft, soft is a variant op with (Any, Any) -> Any
     Binary(LocalId, caer_runtime::op::BinaryOp, LocalId, LocalId),
+    HardBinary(LocalId, ty::op::HardBinary, LocalId, LocalId),
+
     // TODO: STRINGID
     // TODO: use + ref a procid
     //Call(LocalId, StringId, Vec<LocalId>, Vec<(StringId, LocalId)>),
@@ -480,6 +488,7 @@ impl Op {
             Op::Store(_, _) => None,
             Op::Put(_) => None,
             Op::Binary(dst, _, _, _) => Some(*dst),
+            Op::HardBinary(dst, _, _, _) => Some(*dst),
             Op::Call(dst, _, _) => Some(*dst),
             Op::Cast(dst, _, _) => Some(*dst),
             Op::AllocDatum(dst, _) => Some(*dst),
@@ -499,6 +508,7 @@ impl Op {
             Op::Store(_, src) => vec![*src],
             Op::Put(src) => vec![*src],
             Op::Binary(_, _, lhs, rhs) => vec![*lhs, *rhs],
+            Op::HardBinary(_, _, lhs, rhs) => vec![*lhs, *rhs],
             Op::Call(_, _, args) => args.clone(),
             Op::Cast(_, src, _) => vec![*src],
             Op::AllocDatum(_, _) => vec![],
@@ -518,6 +528,7 @@ impl Op {
             Op::Literal(dst, _) => f(dst),
             Op::Load(dst, _) => f(dst),
             Op::Binary(dst, _, _, _) => f(dst),
+            Op::HardBinary(dst, _, _, _) => f(dst),
             Op::Call(dst, _, _) => f(dst),
             Op::Cast(dst, _, _) => f(dst),
             Op::AllocDatum(dst, _) => f(dst),
@@ -536,6 +547,7 @@ impl Op {
             Op::Store(_, src) => f(src),
             Op::Put(src) => f(src),
             Op::Binary(_, _, lhs, rhs) => {f(lhs); f(rhs)},
+            Op::HardBinary(_, _, lhs, rhs) => {f(lhs); f(rhs)},
             Op::Call(_, _, args) => args.iter_mut().for_each(f),
             Op::Cast(_, src, _) => f(src),
             Op::DatumLoadVar(_, src, _) => f(src),
