@@ -345,23 +345,27 @@ impl<'a> ProcAnalysis<'a> {
         infer.process_rules(&infer_rules).unwrap();
         infer.process_sub(&sub_rules).unwrap();
 
+        let assignments = infer.resolve_assignments();
+
         // should maybe store ops of interest instead of iterating over everything again
         for block_id in order {
             for op in &mut self.proc.blocks[*block_id].ops {
                 match op {
                     Op::Binary(out_l, binop, lhs_l, rhs_l) => {
-                        let lhs_ty = match infer.probe_assignment(local_ikey[*lhs_l]).as_primitive()
+                        let lhs_ty = match assignments[local_ikey[*lhs_l]].as_primitive()
                         {
                             Some(ty) => ty,
                             None => continue,
                         };
-                        let rhs_ty = match infer.probe_assignment(local_ikey[*rhs_l]).as_primitive()
+                        let rhs_ty = match assignments[local_ikey[*rhs_l]].as_primitive()
                         {
                             Some(ty) => ty,
                             None => continue,
                         };
                         if let Some(hard_op) = ty::op::HardBinary::from_in_ty(*binop, (lhs_ty, rhs_ty)) {
                             if infer.process_rule(&ty::infer::Rule::Const(local_ikey[*out_l], hard_op.out_ty())).is_ok() {
+                                infer.process_rule(&ty::infer::Rule::ConstFreeze(local_ikey[*lhs_l], lhs_ty.into())).unwrap();
+                                infer.process_rule(&ty::infer::Rule::ConstFreeze(local_ikey[*rhs_l], rhs_ty.into())).unwrap();
                                 *op = Op::HardBinary(*out_l, hard_op, *lhs_l, *rhs_l);
                                 continue
                             }
@@ -377,11 +381,7 @@ impl<'a> ProcAnalysis<'a> {
 
         // rerun sub constraints, may have new work after op resolution
         infer.process_sub(&sub_rules).unwrap();
-        infer.process_sub(&sub_rules).unwrap();
-        infer.process_sub(&sub_rules).unwrap();
-        infer.process_sub(&sub_rules).unwrap();
-        infer.process_sub(&sub_rules).unwrap();
-        infer.process_sub(&sub_rules).unwrap();
+        println!("SUBS: {:?}", sub_rules.iter().map(|(k1, k2)| (key_to_ref.get(*k1), key_to_ref.get(*k2))).collect::<Vec<_>>());
 
         println!(
             "TY INFER FOR {:?}, {} rules : {} subs",
@@ -389,8 +389,8 @@ impl<'a> ProcAnalysis<'a> {
             infer_rules.len(),
             sub_rules.len()
         );
-        println!("{:#?}", infer.get_assignments());
-        for (k, assign) in infer.get_assignments().into_iter_enumerated() {
+        println!("{:#?}", infer.resolve_assignments());
+        for (k, assign) in infer.resolve_assignments().into_iter_enumerated() {
             match key_to_ref[k] {
                 InferRef::Local(lid) => {
                     self.proc.locals[lid].ty = assign.as_ty()

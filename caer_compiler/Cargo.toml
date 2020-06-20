@@ -11,6 +11,7 @@ serde = { version = "1.0", features = ["derive"] }
 index_vec = { version = "0.1.1", features = ["serde"] }
 ena = "0.14.0"
 thiserror = "1.0.19"
+petgraph = "0.5.1"
 
 [dependencies.dreammaker]
 git = "https://github.com/SpaceManiac/SpacemanDMM"

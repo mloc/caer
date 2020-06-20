@@ -14,9 +14,9 @@ impl HardBinary {
             (BinaryOp::Add, (Primitive::String, Primitive::String)) => {
                 Some(Self::StringConcat)
             }
-            /*(BinaryOp::Add, (Primitive::Float, Primitive::Float)) => {
+            (BinaryOp::Add, (Primitive::Float, Primitive::Float)) => {
                 Some(Self::FloatAdd)
-            }*/
+            }
             _ => None,
         }
     }
