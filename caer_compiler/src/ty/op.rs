@@ -6,6 +6,7 @@ use super::ty::{Complex, Primitive};
 pub enum HardBinary {
     StringConcat,
     FloatAdd,
+    FloatSub,
 }
 
 impl HardBinary {
@@ -17,6 +18,9 @@ impl HardBinary {
             (BinaryOp::Add, (Primitive::Float, Primitive::Float)) => {
                 Some(Self::FloatAdd)
             }
+            (BinaryOp::Sub, (Primitive::Float, Primitive::Float)) => {
+                Some(Self::FloatSub)
+            }
             _ => None,
         }
     }
@@ -25,6 +29,7 @@ impl HardBinary {
         match self {
             Self::StringConcat => Primitive::String.into(),
             Self::FloatAdd => Primitive::Float.into(),
+            Self::FloatSub => Primitive::Float.into(),
         }
     }
 }

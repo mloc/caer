@@ -2,7 +2,7 @@ use crate::ty;
 
 use caer_runtime;
 
-use ena::unify::{self, InPlace, UnificationTable, UnifyKey, UnifyValue};
+use ena::unify::{self, InPlace, UnificationTable, UnifyKey, UnifyValue, Snapshot};
 use index_vec::{IndexVec, Idx};
 use thiserror::Error;
 use petgraph::graph::DiGraph;
@@ -133,14 +133,16 @@ pub enum Step {
 
 pub struct InferEngine {
     table: UnificationTable<InPlace<InferKey>>,
-    sub_constraints: Vec<(InferKey, InferKey)>,
+    sub_expanded: Option<Vec<(InferKey, InferKey)>>,
+    snapshot_stack: Vec<Snapshot<InPlace<InferKey>>>,
 }
 
 impl InferEngine {
     pub fn new() -> Self {
         Self {
             table: UnificationTable::new(),
-            sub_constraints: Vec::new(),
+            sub_expanded: None,
+            snapshot_stack: Vec::new(),
         }
     }
 
@@ -148,11 +150,43 @@ impl InferEngine {
         self.table.new_key(None)
     }
 
+    pub fn snapshot(&mut self) -> usize {
+        self.snapshot_stack.push(self.table.snapshot());
+        self.snapshot_stack.len() - 1
+    }
+
+    pub fn rollback_snapshot(&mut self, snap_idx: usize) {
+        assert_eq!(snap_idx, self.snapshot_stack.len() - 1);
+        self.table.rollback_to(self.snapshot_stack.pop().unwrap())
+    }
+
+    pub fn commit_snapshot(&mut self, snap_idx: usize) {
+        assert_eq!(snap_idx, self.snapshot_stack.len() - 1);
+        self.table.commit(self.snapshot_stack.pop().unwrap())
+    }
+
+    pub fn register_subs(&mut self, subs: Vec<(InferKey, InferKey)>) -> Result<(), InferUnifyError> {
+        if self.sub_expanded.is_some() {
+            // TODO: allow more sub registers
+            panic!("subs already handled, can only handle one sub register")
+        }
+        self.sub_expanded = Some(SubtypeResolver::expand_subs(&mut self.table, subs)?);
+        Ok(())
+    }
+
+    pub fn propogate_subs(&mut self) -> Result<(), InferUnifyError> {
+        for (sub, sup) in self.sub_expanded.as_ref().unwrap().iter() {
+            let sub_val = self.table.probe_value(*sub);
+            self.table.unify_var_value(*sup, sub_val)?;
+        }
+        Ok(())
+    }
+
     pub fn probe_assignment(&mut self, key: InferKey) -> InferValue {
         self.table.probe_value(key).unwrap_or_default()
     }
 
-    pub fn process_steps(&mut self, steps: &[Step], sub_rules: &[(InferKey, InferKey)]) -> Result<(), InferUnifyError> {
+    /*pub fn process_steps(&mut self, steps: &[Step], sub_rules: &[(InferKey, InferKey)]) -> Result<(), InferUnifyError> {
         match steps.split_first() {
             None => self.process_sub(sub_rules),
             Some((Step::Single(rules), rest)) => {
@@ -177,7 +211,7 @@ impl InferEngine {
                 Err(InferUnifyError::ExhaustedChoices)
             }
         }
-    }
+    }*/
 
     pub fn process_rules(&mut self, rules: &[Rule]) -> Result<(), InferUnifyError> {
         for rule in rules {
@@ -203,62 +237,41 @@ impl InferEngine {
         Ok(())
     }
 
-    pub fn process_subs(&mut self) -> Result<(), InferUnifyError> {
-        let tab = &mut self.table;
-        self.sub_constraints.retain(|(sub, sup)| !tab.unioned(*sub, *sup));
-        // normalize keys to their root, for easier eq
-        self.sub_constraints.iter_mut().for_each(|(sub, sup)| {
-            *sub = tab.find(*sub);
-            *sup = tab.find(*sup);
-        });
-        Ok(())
-    }
-
-    pub fn process_sub(&mut self, sub_rules: &[(InferKey, InferKey)]) -> Result<(), InferUnifyError> {
-        self.sub_constraints = sub_rules.iter().cloned().collect();
-        //for (lesser_key, greater_key) in sub_rules {
-            //let lesser_val = self.table.probe_value(*lesser_key);
-            //self.table.unify_var_value(*greater_key, lesser_val)?;
-        //}
-        Ok(())
-    }
-
     pub fn resolve_assignments(&mut self) -> IndexVec<InferKey, InferValue> {
-        let resolver = InferResolver::new(&mut self.table, self.sub_constraints.clone());
-        resolver.resolve().unwrap()
-    }
-}
-
-struct InferResolver<'i> {
-    table: &'i mut UnificationTable<InPlace<InferKey>>,
-    sub_constraints: Vec<(InferKey, InferKey)>,
-}
-
-impl<'i> InferResolver<'i> {
-    fn new(table: &'i mut UnificationTable<InPlace<InferKey>>, subs: Vec<(InferKey, InferKey)>) -> Self {
-        Self {
-            table: table,
-            sub_constraints: subs,
-        }
+        (0..self.table.len()).map(|i| {
+            let key = InferKey::from_usize(i);
+            self.table.probe_value(key).unwrap_or_default()
+        }).collect()
     }
 
-    fn resolve(mut self) -> Result<IndexVec<InferKey, InferValue>, InferUnifyError> {
-        let snap = self.table.snapshot();
-        let res = self.do_resolve();
-        self.table.rollback_to(snap);
-        res
-    }
-
-    fn do_resolve(&mut self) -> Result<IndexVec<InferKey, InferValue>, InferUnifyError> {
-        self.tidy_constraints();
-        self.eliminate_cycles()?;
-        self.tidy_constraints();
-        self.propogate_subtypes()?;
-
+    pub fn check_resolve_assignments(&mut self) -> Result<IndexVec<InferKey, InferValue>, InferUnifyError> {
+        self.propogate_subs()?;
         Ok((0..self.table.len()).map(|i| {
             let key = InferKey::from_usize(i);
             self.table.probe_value(key).unwrap_or_default()
         }).collect())
+    }
+}
+
+struct SubtypeResolver<'i> {
+    table: &'i mut UnificationTable<InPlace<InferKey>>,
+    sub_constraints: Vec<(InferKey, InferKey)>,
+}
+
+impl<'i> SubtypeResolver<'i> {
+    fn expand_subs(table: &'i mut UnificationTable<InPlace<InferKey>>, subs: Vec<(InferKey, InferKey)>) -> Result<Vec<(InferKey, InferKey)>, InferUnifyError> {
+        let mut resolver = Self {
+            table: table,
+            sub_constraints: subs,
+        };
+        resolver.resolve()
+    }
+
+    fn resolve(mut self) -> Result<Vec<(InferKey, InferKey)>, InferUnifyError> {
+        self.tidy_constraints();
+        self.eliminate_cycles()?;
+        self.tidy_constraints();
+        Ok(self.get_topsort())
     }
 
     fn get_graph(&self) -> DiGraph<InferKey, ()> {
@@ -288,7 +301,6 @@ impl<'i> InferResolver<'i> {
             *sub = c_tab.find(*sub);
             *sup = c_tab.find(*sup);
         });
-        println!("TIDY: {:?}", self.sub_constraints);
     }
 
     fn eliminate_cycles(&mut self) -> Result<(), InferUnifyError> {
@@ -311,19 +323,14 @@ impl<'i> InferResolver<'i> {
         Ok(())
     }
 
-    fn propogate_subtypes(&mut self) -> Result<(), InferUnifyError> {
-        let graph = self.get_graph();
+    fn get_topsort(&mut self) -> Vec<(InferKey, InferKey)> {
+        let graph = &self.get_graph();
 
         let topsort = petgraph::algo::toposort(&graph, None).expect("subtype graph has cycles");
-
-        for node in topsort {
-            let sub_val = self.table.probe_value(graph[node]);
-            for super_node in graph.neighbors_directed(node, petgraph::Direction::Outgoing) {
-                let sub_val = self.table.probe_value(graph[node]);
-                self.table.unify_var_value(graph[super_node], sub_val)?;
-            }
-        }
-
-        Ok(())
+        topsort.into_iter().flat_map(|node| {
+            graph.neighbors_directed(node, petgraph::Direction::Outgoing).map(move |super_node| {
+                (graph[node], graph[super_node])
+            })
+        }).collect()
     }
 }

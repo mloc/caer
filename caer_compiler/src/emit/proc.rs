@@ -290,6 +290,10 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                             let res = self.ctx.builder.build_float_add(lhs_val.val.unwrap().into_float_value(), rhs_val.val.unwrap().into_float_value(), "").into();
                             Value::new(Some(res), ty::Primitive::Float.into())
                         }
+                        ty::op::HardBinary::FloatSub => {
+                            let res = self.ctx.builder.build_float_sub(lhs_val.val.unwrap().into_float_value(), rhs_val.val.unwrap().into_float_value(), "").into();
+                            Value::new(Some(res), ty::Primitive::Float.into())
+                        }
                     };
                     self.set_local(*id, &res);
                 },

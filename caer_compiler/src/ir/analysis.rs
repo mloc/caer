@@ -2,6 +2,7 @@ use super::cfg::{self, Op};
 use super::env::Env;
 use super::id::*;
 use crate::ty;
+use crate::ty::infer;
 
 use caer_runtime::environment::ProcId;
 use caer_runtime::op::BinaryOp;
@@ -104,7 +105,7 @@ impl<'a> ProcAnalysis<'a> {
 
         //self.binop_prop();
         self.demote_vars();
-        self.infer_types(&postorder);
+        self.infer_types(&postorder.iter().cloned().rev().collect::<Vec<_>>());
     }
 
     // nasty but handy
@@ -252,154 +253,9 @@ impl<'a> ProcAnalysis<'a> {
     // huge, meh
     // TODO: move out of here, break up
     fn infer_types(&mut self, order: &[BlockId]) {
-        #[derive(Debug, Clone, Copy, PartialEq)]
-        enum InferRef {
-            Local(LocalId),
-            Var(VarId),
-        }
-
-        let mut infer = ty::infer::InferEngine::new();
-
-        let local_ikey: IndexVec<LocalId, ty::infer::InferKey> = self
-            .proc
-            .locals
-            .indices()
-            .map(|_| infer.add_var())
-            .collect();
-        let var_ikey: IndexVec<VarId, ty::infer::InferKey> =
-            self.proc.vars.indices().map(|_| infer.add_var()).collect();
-
-        let key_to_ref: IndexVec<ty::infer::InferKey, InferRef> = local_ikey.indices().map(|id| InferRef::Local(id)).chain(var_ikey.indices().map(|id| InferRef::Var(id))).collect();
-
-        for (lid, k) in local_ikey.iter_enumerated() {
-            assert_eq!(key_to_ref[*k], InferRef::Local(lid))
-        }
-        for (vid, k) in var_ikey.iter_enumerated() {
-            assert_eq!(key_to_ref[*k], InferRef::Var(vid))
-        }
-
-        let mut infer_rules = Vec::new();
-        let mut sub_rules = Vec::new();
-
-        for block_id in order {
-            for op in &self.proc.blocks[*block_id].ops {
-                match op {
-                    Op::Noop => {}
-                    Op::Literal(local, lit) => {
-                        infer_rules.push(ty::infer::Rule::Const(local_ikey[*local], lit.get_ty()));
-                    }
-                    Op::MkVar(_) => {} // TODO: consider better types for vars
-                    Op::Load(local, var) => {
-                        infer_rules
-                            .push(ty::infer::Rule::Equals(local_ikey[*local], var_ikey[*var]));
-                    }
-                    Op::Store(var, local) => {
-                        sub_rules.push((local_ikey[*local], var_ikey[*var]));
-                    }
-                    Op::Put(_) => {}
-                    Op::Binary(out_l, op, lhs_l, rhs_l) => {
-                        // binop out left unbound on purpose, we try unify later
-                    }
-                    Op::Call(out_l, _, _) => {
-                        infer_rules
-                            .push(ty::infer::Rule::Const(local_ikey[*out_l], ty::Complex::Any));
-                    }
-                    Op::Cast(out_l, _, ty) => {
-                        infer_rules.push(ty::infer::Rule::Const(local_ikey[*out_l], (*ty).into()));
-                    }
-                    Op::AllocDatum(out_l, _) => {
-                        // TODO: handle datum types
-                        infer_rules.push(ty::infer::Rule::Const(
-                            local_ikey[*out_l],
-                            ty::Primitive::Ref(None).into(),
-                        ));
-                    }
-                    Op::DatumLoadVar(out_l, datum_l, _) => {
-                        // TODO: in future, with hard datums, we can set out_l's ty
-                        infer_rules
-                            .push(ty::infer::Rule::Const(local_ikey[*out_l], ty::Complex::Any));
-                        infer_rules.push(ty::infer::Rule::Const(
-                            local_ikey[*datum_l],
-                            ty::Primitive::Ref(None).into(),
-                        ));
-                    }
-                    Op::DatumStoreVar(datum_l, _, _) => {
-                        infer_rules.push(ty::infer::Rule::Const(
-                            local_ikey[*datum_l],
-                            ty::Primitive::Ref(None).into(),
-                        ));
-                    }
-                    Op::DatumCallProc(out_l, datum_l, _, _) => {
-                        infer_rules
-                            .push(ty::infer::Rule::Const(local_ikey[*out_l], ty::Complex::Any));
-                        infer_rules.push(ty::infer::Rule::Const(
-                            local_ikey[*datum_l],
-                            ty::Primitive::Ref(None).into(),
-                        ));
-                    }
-                    _ => unimplemented!(),
-                }
-            }
-        }
-
-        infer.process_rules(&infer_rules).unwrap();
-        infer.process_sub(&sub_rules).unwrap();
-
-        let assignments = infer.resolve_assignments();
-
-        // should maybe store ops of interest instead of iterating over everything again
-        for block_id in order {
-            for op in &mut self.proc.blocks[*block_id].ops {
-                match op {
-                    Op::Binary(out_l, binop, lhs_l, rhs_l) => {
-                        let lhs_ty = match assignments[local_ikey[*lhs_l]].as_primitive()
-                        {
-                            Some(ty) => ty,
-                            None => continue,
-                        };
-                        let rhs_ty = match assignments[local_ikey[*rhs_l]].as_primitive()
-                        {
-                            Some(ty) => ty,
-                            None => continue,
-                        };
-                        if let Some(hard_op) = ty::op::HardBinary::from_in_ty(*binop, (lhs_ty, rhs_ty)) {
-                            if infer.process_rule(&ty::infer::Rule::Const(local_ikey[*out_l], hard_op.out_ty())).is_ok() {
-                                infer.process_rule(&ty::infer::Rule::ConstFreeze(local_ikey[*lhs_l], lhs_ty.into())).unwrap();
-                                infer.process_rule(&ty::infer::Rule::ConstFreeze(local_ikey[*rhs_l], rhs_ty.into())).unwrap();
-                                *op = Op::HardBinary(*out_l, hard_op, *lhs_l, *rhs_l);
-                                continue
-                            }
-                        }
-                        // didn't work out, force out to Any
-                        infer.process_rule(&ty::infer::Rule::Const(local_ikey[*out_l], ty::Complex::Any)).unwrap();
-                    }
-                    // uninteresting ops
-                    _ => {}
-                }
-            }
-        }
-
-        // rerun sub constraints, may have new work after op resolution
-        infer.process_sub(&sub_rules).unwrap();
-        println!("SUBS: {:?}", sub_rules.iter().map(|(k1, k2)| (key_to_ref.get(*k1), key_to_ref.get(*k2))).collect::<Vec<_>>());
-
-        println!(
-            "TY INFER FOR {:?}, {} rules : {} subs",
-            self.proc.id,
-            infer_rules.len(),
-            sub_rules.len()
-        );
-        println!("{:#?}", infer.resolve_assignments());
-        for (k, assign) in infer.resolve_assignments().into_iter_enumerated() {
-            match key_to_ref[k] {
-                InferRef::Local(lid) => {
-                    self.proc.locals[lid].ty = assign.as_ty()
-                }
-                InferRef::Var(vid) => {
-                    self.proc.vars[vid].ty = assign.as_ty()
-                }
-            }
-        }
+        println!("RUNNING type inference for {:?}", self.proc.id);
+        let mut runner = InferRunner::create(&mut self.proc, order.to_owned());
+        runner.run(&mut self.proc);
     }
 
     fn fold_consts(&mut self, order: &[BlockId]) -> bool {
@@ -525,6 +381,304 @@ impl VarInfo {
             loads: Vec::new(),
             stores: Vec::new(),
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct InferCheckpoint {
+    block: usize,
+    op: usize,
+    snapshot_idx: usize,
+    interest_idx: usize,
+    attempt_idx: usize,
+    on_fail: Vec<ty::infer::Rule>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum InferRef {
+    Local(LocalId),
+    Var(VarId),
+}
+
+struct InferRunner {
+    // reverse postorder of the CFG
+    block_order: Vec<BlockId>,
+
+    engine: infer::InferEngine,
+    local_ikey: IndexVec<LocalId, infer::InferKey>,
+    var_ikey: IndexVec<VarId, infer::InferKey>,
+    key_to_ref: IndexVec<infer::InferKey, InferRef>,
+
+    checkpoints: Vec<InferCheckpoint>,
+    interest: Vec<(usize, usize, cfg::Op)>,
+    overload_attempted: Vec<(usize, usize)>,
+}
+
+impl InferRunner {
+    fn create(proc: &mut cfg::Proc, block_order: Vec<BlockId>) -> Self {
+        let mut engine = infer::InferEngine::new();
+
+        let local_ikey: IndexVec<_, _> = proc.locals.indices().map(|_| engine.add_var()).collect();
+        let var_ikey: IndexVec<_, _> = proc.vars.indices().map(|_| engine.add_var()).collect();
+        let key_to_ref: IndexVec<_, _> = local_ikey
+            .indices()
+            .map(|id| InferRef::Local(id))
+            .chain(var_ikey.indices().map(|id| InferRef::Var(id)))
+            .collect();
+
+        for (lid, k) in local_ikey.iter_enumerated() {
+            assert_eq!(key_to_ref[*k], InferRef::Local(lid))
+        }
+        for (vid, k) in var_ikey.iter_enumerated() {
+            assert_eq!(key_to_ref[*k], InferRef::Var(vid))
+        }
+
+        Self {
+            block_order,
+            engine,
+            local_ikey,
+            var_ikey,
+            key_to_ref,
+            checkpoints: Vec::new(),
+            interest: Vec::new(),
+            overload_attempted: Vec::new(),
+        }
+    }
+
+    fn build_subs(&mut self, proc: &cfg::Proc) {
+        let mut subs = Vec::new();
+
+        // order doesn't matter
+        for block in proc.blocks.iter() {
+            for op in block.ops.iter() {
+                match op {
+                    Op::Store(var, local) => {
+                        subs.push((self.local_ikey[*local], self.var_ikey[*var]));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        self.engine.register_subs(subs).unwrap();
+    }
+
+    fn apply_rule(&mut self, rule: &infer::Rule) -> Result<(), infer::InferUnifyError> {
+        self.engine.process_rule(rule)
+    }
+
+    fn checkpoint(&mut self, block: usize, op: usize, on_fail: Vec<infer::Rule>) {
+        let snapshot_idx = self.engine.snapshot();
+        self.checkpoints.push(InferCheckpoint {
+            block,
+            op,
+            snapshot_idx,
+            interest_idx: self.interest.len(),
+            attempt_idx: self.overload_attempted.len(),
+            on_fail,
+        })
+    }
+
+    fn rollback_to(&mut self, checkpoint: &InferCheckpoint) -> Result<(), infer::InferUnifyError> {
+        self.engine.rollback_snapshot(checkpoint.snapshot_idx);
+        self.interest.truncate(checkpoint.interest_idx);
+        self.overload_attempted.truncate(checkpoint.attempt_idx);
+        for rule in checkpoint.on_fail.iter() {
+            println!("applying {:?} due to rollback", rule);
+            self.apply_rule(rule)?;
+        }
+        Ok(())
+    }
+
+    fn commit_all(&mut self) {
+        for checkpoint in self.checkpoints.drain(..).rev() {
+            self.engine.commit_snapshot(checkpoint.snapshot_idx);
+        }
+    }
+
+    fn run(&mut self, proc: &mut cfg::Proc) {
+        self.build_subs(proc);
+        let mut start_block = 0;
+        let mut start_op = 0;
+        loop {
+            match self.run_types_from(proc, start_block, start_op) {
+                Ok(_) => break,
+                Err(err) => match self.checkpoints.pop() {
+                    Some(checkpoint) => {
+                        println!("backtracking due to {}", err);
+                        self.rollback_to(&checkpoint).unwrap();
+                        start_block = checkpoint.block;
+                        start_op = checkpoint.op;
+                    }
+                    None => {
+                        panic!("out of checkpoints, still erroring");
+                    }
+                },
+            }
+        }
+        self.commit_all();
+        for (block, op, rep_op) in self.interest.drain(..) {
+            proc.blocks[self.block_order[block]].ops[op] = rep_op;
+        }
+        for (k, assign) in self.engine.resolve_assignments().into_iter_enumerated() {
+            match self.key_to_ref[k] {
+                InferRef::Local(lid) => proc.locals[lid].ty = assign.as_ty(),
+                InferRef::Var(vid) => proc.vars[vid].ty = assign.as_ty(),
+            }
+        }
+    }
+
+    fn run_types_from(
+        &mut self,
+        proc: &mut cfg::Proc,
+        start_block: usize,
+        start_op: usize,
+    ) -> Result<(), infer::InferUnifyError> {
+        for block_idx in start_block..self.block_order.len() {
+            let block_id = self.block_order[block_idx];
+            let block = &proc.blocks[block_id];
+            let op_range = if block_idx == start_block {
+                start_op..block.ops.len()
+            } else {
+                0..block.ops.len()
+            };
+            for op_idx in op_range {
+                self.process_op(&block.ops[op_idx], block_idx, op_idx)?;
+            }
+        }
+        self.engine.propogate_subs()?;
+        Ok(())
+    }
+
+    fn process_op(
+        &mut self,
+        op: &cfg::Op,
+        block_idx: usize,
+        op_idx: usize,
+    ) -> Result<(), infer::InferUnifyError> {
+        match op {
+            Op::Noop => {}
+            Op::Literal(local, lit) => {
+                self.apply_rule(&infer::Rule::Const(self.local_ikey[*local], lit.get_ty()))?;
+            }
+            Op::MkVar(_) => {} // TODO: consider better types for vars
+            Op::Load(local, var) => {
+                self.apply_rule(&infer::Rule::Equals(
+                    self.local_ikey[*local],
+                    self.var_ikey[*var],
+                ))?;
+            }
+            Op::Store(_, _) => {
+                // handled by sub rule
+            }
+            Op::Put(_) => {}
+            Op::Call(out_l, _, _) => {
+                self.apply_rule(&infer::Rule::Const(
+                    self.local_ikey[*out_l],
+                    ty::Complex::Any,
+                ))?;
+            }
+            Op::Cast(out_l, _, ty) => {
+                self.apply_rule(&infer::Rule::Const(self.local_ikey[*out_l], (*ty).into()))?;
+            }
+            Op::AllocDatum(out_l, _) => {
+                // TODO: handle datum types
+                self.apply_rule(&infer::Rule::Const(
+                    self.local_ikey[*out_l],
+                    ty::Primitive::Ref(None).into(),
+                ))?;
+            }
+            Op::DatumLoadVar(out_l, datum_l, _) => {
+                // TODO: in future, with hard datums, we can set out_l's ty
+                self.apply_rule(&infer::Rule::Const(
+                    self.local_ikey[*out_l],
+                    ty::Complex::Any,
+                ))?;
+                self.apply_rule(&infer::Rule::Const(
+                    self.local_ikey[*datum_l],
+                    ty::Primitive::Ref(None).into(),
+                ))?;
+            }
+            Op::DatumStoreVar(datum_l, _, _) => {
+                self.apply_rule(&infer::Rule::Const(
+                    self.local_ikey[*datum_l],
+                    ty::Primitive::Ref(None).into(),
+                ))?;
+            }
+            Op::DatumCallProc(out_l, datum_l, _, _) => {
+                self.apply_rule(&infer::Rule::Const(
+                    self.local_ikey[*out_l],
+                    ty::Complex::Any,
+                ))?;
+                self.apply_rule(&infer::Rule::Const(
+                    self.local_ikey[*datum_l],
+                    ty::Primitive::Ref(None).into(),
+                ))?;
+            }
+
+            // flow cases
+            Op::Binary(out_l, binop, lhs_l, rhs_l) => {
+                self.engine.propogate_subs()?;
+                let mut hardened = false;
+                match (
+                    self.engine
+                        .probe_assignment(self.local_ikey[*lhs_l])
+                        .as_primitive(),
+                    self.engine
+                        .probe_assignment(self.local_ikey[*rhs_l])
+                        .as_primitive(),
+                ) {
+                    (Some(lhs_ty), Some(rhs_ty)) => {
+                        if self
+                            .overload_attempted
+                            .last()
+                            .map_or(true, |t| *t != (block_idx, op_idx))
+                        {
+                            if let Some(hard_op) =
+                                ty::op::HardBinary::from_in_ty(*binop, (lhs_ty, rhs_ty))
+                            {
+                                self.overload_attempted.push((block_idx, op_idx));
+                                self.checkpoint(
+                                    block_idx,
+                                    op_idx,
+                                    vec![infer::Rule::Const(
+                                        self.local_ikey[*out_l],
+                                        ty::Complex::Any,
+                                    )],
+                                );
+                                self.interest.push((
+                                    block_idx,
+                                    op_idx,
+                                    cfg::Op::HardBinary(*out_l, hard_op, *lhs_l, *rhs_l),
+                                ));
+                                self.apply_rule(&infer::Rule::Const(
+                                    self.local_ikey[*out_l],
+                                    hard_op.out_ty(),
+                                ))?;
+                                self.apply_rule(&infer::Rule::ConstFreeze(
+                                    self.local_ikey[*lhs_l],
+                                    lhs_ty.into(),
+                                ))?;
+                                self.apply_rule(&infer::Rule::ConstFreeze(
+                                    self.local_ikey[*rhs_l],
+                                    rhs_ty.into(),
+                                ))?;
+                                hardened = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                };
+                if !hardened {
+                    self.apply_rule(&infer::Rule::Const(
+                        self.local_ikey[*out_l],
+                        ty::Complex::Any,
+                    ))?;
+                }
+            }
+            _ => unimplemented!(),
+        };
+        Ok(())
     }
 }
 
