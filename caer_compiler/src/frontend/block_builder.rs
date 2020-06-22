@@ -7,7 +7,7 @@ use caer_runtime::string_table::StringId;
 use caer_runtime::type_tree;
 use crate::ty;
 
-// these lifetimes are probably extraneous, they're a kludge for speed
+// TODO: tidy up the lifetimes dood
 pub struct BlockBuilder<'a, 'pb, 'cb, 'ot> {
     pb: &'a mut ProcBuilder<'pb, 'cb, 'ot>,
     block: cfg::Block,
@@ -394,6 +394,21 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
                     ast::BinaryOp::Sub => BinaryOp::Sub,
                     ast::BinaryOp::Mul => BinaryOp::Mul,
                     ast::BinaryOp::Div => BinaryOp::Div,
+                    ast::BinaryOp::Pow => BinaryOp::Pow,
+                    ast::BinaryOp::Mod => BinaryOp::Mod,
+                    ast::BinaryOp::Eq => BinaryOp::Eq,
+                    ast::BinaryOp::NotEq => BinaryOp::Ne,
+                    ast::BinaryOp::Less => BinaryOp::Lt,
+                    ast::BinaryOp::Greater => BinaryOp::Gt,
+                    ast::BinaryOp::LessEq => BinaryOp::Le,
+                    ast::BinaryOp::GreaterEq => BinaryOp::Ge,
+                    ast::BinaryOp::Equiv => BinaryOp::Equiv,
+                    ast::BinaryOp::NotEquiv => BinaryOp::NotEquiv,
+                    ast::BinaryOp::BitAnd => BinaryOp::BitAnd,
+                    ast::BinaryOp::BitXor => BinaryOp::BitXor,
+                    ast::BinaryOp::BitOr => BinaryOp::BitOr,
+                    ast::BinaryOp::LShift => BinaryOp::Shl,
+                    ast::BinaryOp::RShift => BinaryOp::Shr,
                     _ => unimplemented!("binary op {:?}", op),
                 };
 

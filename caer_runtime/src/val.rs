@@ -28,6 +28,13 @@ pub extern fn rt_val_string(string: StringId) -> Val {
 
 #[no_mangle]
 pub extern fn rt_val_binary_op(rt: &mut Runtime, op: op::BinaryOp, lhs: Val, rhs: Val) -> Val {
+    match op {
+        op::BinaryOp::Eq | op::BinaryOp::Ne | op::BinaryOp::Equiv | op::BinaryOp::NotEquiv => {
+            return Val::handle_equality(rt, op, lhs, rhs);
+        }
+        _ => {}
+    }
+
     let mut lhs = lhs;
     if let Val::Null = lhs {
         lhs = rhs.zero_value();
@@ -94,48 +101,45 @@ pub extern fn rt_val_drop(val: Val) {
     //mem::forget(mem::replace(self, Val::Null));
 }
 
-#[expose_c_stubs(rt_val)]
-impl Val {
-    /*fn binary_op(&mut self, rt: &mut Runtime, op: u32, lhs: &Val, rhs: &Val) {
-      let op_enum = unsafe {
-      std::mem::transmute::<u32, op::BinaryOp>(op)
-      };
-
-      let mut lhs = *lhs;
-
-      if let Val::Null = lhs {
-      lhs = rhs.zero_value();
-      }
-
-      let res = match lhs {
-      Val::Null => Val::Null,
-      Val::Float(lval) => Val::Float(Val::binary_arithm(op_enum, lval, rhs.cast_float())),
-      Val::String(lval) => {
-      if op_enum != op::BinaryOp::Add {
-      unimplemented!("RTE badop")
-      }
-    // TODO reconsider this, DM doesn't allow "e" + 2
-    let rval = rhs.cast_string(rt);
-    Val::String(rt.string_table.concat(lval, rval))
-    },
-    Val::Ref(_) => unimplemented!("overloads"),
-    };
-
-    /*let res = match op_enum {
-    op::BinaryOp::Add => Val::add(lhs, rhs),
-    op::BinaryOp::Sub => Val::sub(lhs, rhs),
-    op::BinaryOp::Mul => Val::mul(lhs, rhs),
-    op::BinaryOp::Div => Val::div(lhs, rhs),
-    _ => unimplemented!("{:?}", op_enum),
-    };*/
-
-    mem::forget(mem::replace(self, res));
-}*/
-
-}
-
 //this whole block is an awful mess, TODO: fix at some point
 impl Val {
+    fn handle_equality(rt: &mut Runtime, op: op::BinaryOp, lhs: Val, rhs: Val) -> Val {
+        if let Val::Ref(_) = lhs {
+            unimplemented!("overload case for lhs datum");
+        }
+
+        let bres = match op {
+            op::BinaryOp::Eq => Val::basic_eq(lhs, rhs),
+            op::BinaryOp::Ne => !Val::basic_eq(lhs, rhs),
+            _ => unimplemented!("{:?}", op),
+        };
+
+        Val::Float(bres as usize as f32)
+    }
+
+    fn basic_eq(lhs: Val, rhs: Val) -> bool {
+        #[derive(PartialEq)]
+        enum Equatable {
+            Null,
+            Float(f32),
+            String(StringId),
+        }
+
+        let to_equatable = |v| {
+            match v {
+                Val::Null => Some(Equatable::Null),
+                Val::Float(n) => Some(Equatable::Float(n)),
+                Val::String(id) => Some(Equatable::String(id)),
+                _ => None,
+            }
+        };
+
+        match (to_equatable(lhs), to_equatable(rhs)) {
+            (Some(lhs_eqt), Some(rhs_eqt)) => lhs_eqt == rhs_eqt,
+            _ => false
+        }
+    }
+
     pub fn binary_op_const(op: op::BinaryOp, lhs: &Val, rhs: &Val, st: &mut StringTable) -> Val {
         let mut lhs = *lhs;
 

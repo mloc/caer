@@ -281,20 +281,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 Op::HardBinary(id, op, lhs, rhs) => {
                     let lhs_val = self.get_local(*lhs, false);
                     let rhs_val = self.get_local(*rhs, false);
-                    let res = match op {
-                        ty::op::HardBinary::StringConcat => {
-                            let res = self.ctx.builder.build_call(self.ctx.rt.rt_runtime_concat_strings, &[self.emit.rt_global.as_pointer_value().into(), lhs_val.val.unwrap(), rhs_val.val.unwrap()], "").try_as_basic_value().left().unwrap();
-                            Value::new(Some(res), ty::Primitive::String.into())
-                        }
-                        ty::op::HardBinary::FloatAdd => {
-                            let res = self.ctx.builder.build_float_add(lhs_val.val.unwrap().into_float_value(), rhs_val.val.unwrap().into_float_value(), "").into();
-                            Value::new(Some(res), ty::Primitive::Float.into())
-                        }
-                        ty::op::HardBinary::FloatSub => {
-                            let res = self.ctx.builder.build_float_sub(lhs_val.val.unwrap().into_float_value(), rhs_val.val.unwrap().into_float_value(), "").into();
-                            Value::new(Some(res), ty::Primitive::Float.into())
-                        }
-                    };
+                    let res = self.emit_binary(*op, &lhs_val, &rhs_val);
                     self.set_local(*id, &res);
                 },
 
@@ -424,6 +411,28 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 
                 self.ctx.builder.build_switch(disc_int, self.blocks[*default], &llvm_branches[..]);
             },
+        }
+    }
+
+    fn emit_binary(&self, op: ty::op::HardBinary, lhs: &Value<'ctx>, rhs: &Value<'ctx>) -> Value<'ctx> {
+        match op {
+            ty::op::HardBinary::StringConcat => {
+                let res = self.ctx.builder.build_call(self.ctx.rt.rt_runtime_concat_strings, &[self.emit.rt_global.as_pointer_value().into(), lhs.val.unwrap(), rhs.val.unwrap()], "").try_as_basic_value().left().unwrap();
+                Value::new(Some(res), ty::Primitive::String.into())
+            }
+            ty::op::HardBinary::FloatAdd => {
+                let res = self.ctx.builder.build_float_add(lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "").into();
+                Value::new(Some(res), ty::Primitive::Float.into())
+            }
+            ty::op::HardBinary::FloatSub => {
+                let res = self.ctx.builder.build_float_sub(lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "").into();
+                Value::new(Some(res), ty::Primitive::Float.into())
+            }
+            ty::op::HardBinary::FloatCmp(pred) => {
+                let bool_res = self.ctx.builder.build_float_compare(pred, lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "");
+                let float_res = self.ctx.builder.build_unsigned_int_to_float(bool_res, self.ctx.llvm_ctx.f32_type(), "");
+                Value::new(Some(float_res.into()), ty::Primitive::Float.into())
+            }
         }
     }
 

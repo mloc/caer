@@ -19,4 +19,6 @@ pub enum BinaryOp {
     BitAnd,
     BitOr,
     BitXor,
+    Equiv,
+    NotEquiv,
 }
