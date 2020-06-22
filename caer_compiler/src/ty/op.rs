@@ -35,6 +35,19 @@ impl HardBinary {
             (BinaryOp::Ne, (Primitive::Float, _)) => {
                 Some(Self::FloatCmp(FloatPredicate::PredicateTrue))
             }
+
+            (BinaryOp::Gt, (Primitive::Float, Primitive::Float)) => {
+                Some(Self::FloatCmp(FloatPredicate::OGT))
+            }
+            (BinaryOp::Ge, (Primitive::Float, Primitive::Float)) => {
+                Some(Self::FloatCmp(FloatPredicate::OGE))
+            }
+            (BinaryOp::Lt, (Primitive::Float, Primitive::Float)) => {
+                Some(Self::FloatCmp(FloatPredicate::OLT))
+            }
+            (BinaryOp::Le, (Primitive::Float, Primitive::Float)) => {
+                Some(Self::FloatCmp(FloatPredicate::OLE))
+            }
             _ => None,
         }
     }

@@ -51,7 +51,7 @@
 */
 /proc/loopy()
 	var/x = 0
-	while(x != 0-8)
+	while(x > 0-8)
 		x = x - 1
 		world << x
 	return x
