@@ -428,6 +428,21 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 let res = self.ctx.builder.build_float_sub(lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "").into();
                 Value::new(Some(res), ty::Primitive::Float.into())
             }
+            ty::op::HardBinary::FloatMul => {
+                let res = self.ctx.builder.build_float_mul(lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "").into();
+                Value::new(Some(res), ty::Primitive::Float.into())
+            }
+            ty::op::HardBinary::FloatDiv => {
+                let res = self.ctx.builder.build_float_div(lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "").into();
+                Value::new(Some(res), ty::Primitive::Float.into())
+            }
+            ty::op::HardBinary::FloatMod => {
+                let res = self.ctx.builder.build_float_rem(lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "").into();
+                Value::new(Some(res), ty::Primitive::Float.into())
+            }
+            ty::op::HardBinary::FloatPow => {
+                unimplemented!();
+            }
             ty::op::HardBinary::FloatCmp(pred) => {
                 let bool_res = self.ctx.builder.build_float_compare(pred, lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "");
                 let float_res = self.ctx.builder.build_unsigned_int_to_float(bool_res, self.ctx.llvm_ctx.f32_type(), "");

@@ -9,6 +9,10 @@ pub enum HardBinary {
     StringConcat,
     FloatAdd,
     FloatSub,
+    FloatMul,
+    FloatDiv,
+    FloatMod,
+    FloatPow,
     FloatCmp(FloatPredicate),
 }
 
@@ -18,6 +22,10 @@ impl HardBinary {
             (BinaryOp::Add, (Primitive::String, Primitive::String)) => Some(Self::StringConcat),
             (BinaryOp::Add, (Primitive::Float, Primitive::Float)) => Some(Self::FloatAdd),
             (BinaryOp::Sub, (Primitive::Float, Primitive::Float)) => Some(Self::FloatSub),
+            (BinaryOp::Mul, (Primitive::Float, Primitive::Float)) => Some(Self::FloatMul),
+            (BinaryOp::Div, (Primitive::Float, Primitive::Float)) => Some(Self::FloatDiv),
+            (BinaryOp::Mod, (Primitive::Float, Primitive::Float)) => Some(Self::FloatMod),
+            //(BinaryOp::Pow, (Primitive::Float, Primitive::Float)) => Some(Self::FloatPow),
 
             (BinaryOp::Eq, (Primitive::Float, Primitive::Float)) => {
                 Some(Self::FloatCmp(FloatPredicate::OEQ))
@@ -55,8 +63,13 @@ impl HardBinary {
     pub fn out_ty(&self) -> Complex {
         match self {
             Self::StringConcat => Primitive::String.into(),
-            Self::FloatAdd => Primitive::Float.into(),
-            Self::FloatSub => Primitive::Float.into(),
+
+            Self::FloatAdd
+            | Self::FloatSub
+            | Self::FloatMul
+            | Self::FloatDiv
+            | Self::FloatMod
+            | Self::FloatPow => Primitive::Float.into(),
             // actually int I guess, or bool
             // TODO: fix when int is a type again
             Self::FloatCmp(_) => Primitive::Float.into(),
