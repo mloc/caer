@@ -23,5 +23,5 @@ path = "../caer_runtime"
 path = "../caer_util"
 
 [dependencies.inkwell]
-branch = "llvm8-0"
+branch = "llvm10-0"
 git = "https://github.com/TheDan64/inkwell"
