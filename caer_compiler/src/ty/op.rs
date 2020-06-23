@@ -25,7 +25,7 @@ impl HardBinary {
             (BinaryOp::Mul, (Primitive::Float, Primitive::Float)) => Some(Self::FloatMul),
             (BinaryOp::Div, (Primitive::Float, Primitive::Float)) => Some(Self::FloatDiv),
             (BinaryOp::Mod, (Primitive::Float, Primitive::Float)) => Some(Self::FloatMod),
-            //(BinaryOp::Pow, (Primitive::Float, Primitive::Float)) => Some(Self::FloatPow),
+            (BinaryOp::Pow, (Primitive::Float, Primitive::Float)) => Some(Self::FloatPow),
 
             (BinaryOp::Eq, (Primitive::Float, Primitive::Float)) => {
                 Some(Self::FloatCmp(FloatPredicate::OEQ))

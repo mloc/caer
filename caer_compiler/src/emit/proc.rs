@@ -441,7 +441,11 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 Value::new(Some(res), ty::Primitive::Float.into())
             }
             ty::op::HardBinary::FloatPow => {
-                unimplemented!();
+                // bad, TODO: cache intrinsic fn vals somewhere
+                let pow_fn_ty = self.ctx.llvm_ctx.f32_type().fn_type(&[self.ctx.llvm_ctx.f32_type().into(), self.ctx.llvm_ctx.f32_type().into()], false);
+                let pow_fn = self.ctx.module.add_function("llvm.pow.f32.f32", pow_fn_ty, None);
+                let res = self.ctx.builder.build_call(pow_fn, &[lhs.val.unwrap(), rhs.val.unwrap()], "").try_as_basic_value().left().unwrap();
+                Value::new(Some(res), ty::Primitive::Float.into())
             }
             ty::op::HardBinary::FloatCmp(pred) => {
                 let bool_res = self.ctx.builder.build_float_compare(pred, lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "");

@@ -24,6 +24,8 @@
     var/v = 0 || 80
     world << v
 
+    world << 2 ** 7
+    world << 2 ** 7
 
     //world << 1 + 1
 	/*world << simple()
