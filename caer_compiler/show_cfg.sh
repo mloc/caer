@@ -13,6 +13,8 @@ cd dbgout/dot
 
 xdot tino_cfg/cfg_${1}.dot &
 sleep 0.5
+xdot tino_cfg/cfg_opt_${1}.dot &
+sleep 0.5
 xdot llvm_unopt/.${1}.dot &
 sleep 0.5
 xdot llvm_opt/.${1}.dot &

@@ -25,7 +25,12 @@
     world << v
 
     world << 2 ** 7
-    world << 2 ** 7
+    var/pflo = 2 ** 7
+    world << pflo
+    var/b = pflo - pflo + (0-1)
+    world << b
+    var/band = b & b
+    world << band
 
     //world << 1 + 1
 	/*world << simple()

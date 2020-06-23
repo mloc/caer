@@ -443,7 +443,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
             ty::op::HardBinary::FloatPow => {
                 // bad, TODO: cache intrinsic fn vals somewhere
                 let pow_fn_ty = self.ctx.llvm_ctx.f32_type().fn_type(&[self.ctx.llvm_ctx.f32_type().into(), self.ctx.llvm_ctx.f32_type().into()], false);
-                let pow_fn = self.ctx.module.add_function("llvm.pow.f32.f32", pow_fn_ty, None);
+                let pow_fn = self.ctx.module.add_function("llvm.pow.f32", pow_fn_ty, None);
                 let res = self.ctx.builder.build_call(pow_fn, &[lhs.val.unwrap(), rhs.val.unwrap()], "").try_as_basic_value().left().unwrap();
                 Value::new(Some(res), ty::Primitive::Float.into())
             }
@@ -452,7 +452,57 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 let float_res = self.ctx.builder.build_unsigned_int_to_float(bool_res, self.ctx.llvm_ctx.f32_type(), "");
                 Value::new(Some(float_res.into()), ty::Primitive::Float.into())
             }
+            ty::op::HardBinary::FloatBitOp(bitop) => {
+                let lhs_i24 = self.float_to_i24(lhs.val.unwrap().into_float_value());
+                let rhs_i24 = self.float_to_i24(rhs.val.unwrap().into_float_value());
+                let res_i24 = match bitop {
+                    ty::op::BitOp::And => self.ctx.builder.build_and(lhs_i24, rhs_i24, ""),
+                    ty::op::BitOp::Or => self.ctx.builder.build_or(lhs_i24, rhs_i24, ""),
+                    ty::op::BitOp::Xor => self.ctx.builder.build_xor(lhs_i24, rhs_i24, ""),
+                    ty::op::BitOp::Shl => self.ctx.builder.build_left_shift(lhs_i24, rhs_i24, ""),
+                    ty::op::BitOp::Shr => self.ctx.builder.build_right_shift(lhs_i24, rhs_i24, false, ""),
+                };
+                Value::new(Some(self.i24_to_float(res_i24).into()), ty::Primitive::Float.into())
+            }
         }
+    }
+
+    // convert an f32 val into a signed i32, saturating at min/max values
+    // conversion taken from https://github.com/rust-lang/rust/blob/master/src/librustc_codegen_ssa/mir/rvalue.rs#L883
+    // TODO: replace once LLVM gets proper saturating conversion intrinsics. this is bad.
+    fn f32_to_i32_sat(&self, f32_val: inkwell::values::FloatValue<'ctx>) -> inkwell::values::IntValue<'ctx> {
+        let i32_type = self.ctx.llvm_ctx.i32_type();
+        let f32_type = self.ctx.llvm_ctx.f32_type();
+
+        // bit pattern for -2^31 encoded to f32, rounded towards 0
+        let f_min_int = 0xcf000000u32;
+        // bit pattern for 2^31-1 encoded to f32, rounded towards 0
+        let f_max_int = 0x4effffffu32;
+
+        let f_min_val = self.ctx.builder.build_bitcast(i32_type.const_int(f_min_int.into(), false), f32_type, "").into_float_value();
+        let f_max_val = self.ctx.builder.build_bitcast(i32_type.const_int(f_max_int.into(), false), f32_type, "").into_float_value();
+        let f_trunc_val = self.ctx.builder.build_float_to_signed_int(f32_val, i32_type, "");
+
+        let i_min_val = i32_type.const_int(i32::MIN as u64, true);
+        let i_max_val = i32_type.const_int(i32::MAX as u64, true);
+
+        let less_or_nan = self.ctx.builder.build_float_compare(inkwell::FloatPredicate::ULT, f32_val, f_min_val, "");
+        let greater = self.ctx.builder.build_float_compare(inkwell::FloatPredicate::OGT, f32_val, f_max_val, "");
+        let is_nan = self.ctx.builder.build_float_compare(inkwell::FloatPredicate::UNO, f32_val, f32_val, "");
+
+        let s0 = self.ctx.builder.build_select(less_or_nan, i_min_val, f_trunc_val, "");
+        let s1 = self.ctx.builder.build_select(greater, i_max_val.into(), s0, "");
+        self.ctx.builder.build_select(is_nan, i32_type.const_zero().into(), s1, "").into_int_value()
+    }
+
+    fn float_to_i24(&self, f32_val: inkwell::values::FloatValue<'ctx>) -> inkwell::values::IntValue<'ctx> {
+        let i24_type = self.ctx.llvm_ctx.custom_width_int_type(24);
+        let i32_val = self.f32_to_i32_sat(f32_val);
+        self.ctx.builder.build_int_truncate(i32_val, i24_type, "")
+    }
+
+    fn i24_to_float(&self, i24_val: inkwell::values::IntValue<'ctx>) -> inkwell::values::FloatValue<'ctx> {
+        self.ctx.builder.build_unsigned_int_to_float(i24_val, self.ctx.llvm_ctx.f32_type(), "")
     }
 
     fn build_argpack(&self, args: &[LocalId]) -> inkwell::values::PointerValue<'ctx> {

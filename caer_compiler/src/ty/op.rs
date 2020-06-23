@@ -5,8 +5,18 @@ use super::ty::{Complex, Primitive};
 use inkwell::FloatPredicate;
 
 #[derive(Debug, Clone, Copy)]
+pub enum BitOp {
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum HardBinary {
     StringConcat,
+
     FloatAdd,
     FloatSub,
     FloatMul,
@@ -14,6 +24,8 @@ pub enum HardBinary {
     FloatMod,
     FloatPow,
     FloatCmp(FloatPredicate),
+
+    FloatBitOp(BitOp),
 }
 
 impl HardBinary {
@@ -56,6 +68,13 @@ impl HardBinary {
             (BinaryOp::Le, (Primitive::Float, Primitive::Float)) => {
                 Some(Self::FloatCmp(FloatPredicate::OLE))
             }
+
+            (BinaryOp::BitAnd, (Primitive::Float, Primitive::Float)) => Some(Self::FloatBitOp(BitOp::And)),
+            (BinaryOp::BitOr, (Primitive::Float, Primitive::Float)) => Some(Self::FloatBitOp(BitOp::Or)),
+            (BinaryOp::BitXor, (Primitive::Float, Primitive::Float)) => Some(Self::FloatBitOp(BitOp::Xor)),
+            (BinaryOp::Shl, (Primitive::Float, Primitive::Float)) => Some(Self::FloatBitOp(BitOp::Shl)),
+            (BinaryOp::Shr, (Primitive::Float, Primitive::Float)) => Some(Self::FloatBitOp(BitOp::Shr)),
+
             _ => None,
         }
     }
@@ -73,6 +92,10 @@ impl HardBinary {
             // actually int I guess, or bool
             // TODO: fix when int is a type again
             Self::FloatCmp(_) => Primitive::Float.into(),
+
+            // these should be int output eventually
+            // TODO: ints for bitops
+            Self::FloatBitOp(_) => Primitive::Float.into(),
         }
     }
 }
