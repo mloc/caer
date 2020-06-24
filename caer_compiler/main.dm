@@ -31,6 +31,7 @@
     world << b
     var/band = b & b
     world << band
+    world << bitmess(band)
 
     //world << 1 + 1
 	/*world << simple()
@@ -62,6 +63,9 @@
 		x = x - 1
 		world << x
 	return x
+
+/proc/bitmess(x)
+    return (x & 3829) | (x ^ 57743)
 /*
 /proc/simple()
 	var/x

@@ -46,6 +46,7 @@ dependencies = [
  "caer_util",
  "dot",
  "dreammaker",
+ "either",
  "ena",
  "index_vec",
  "inkwell",

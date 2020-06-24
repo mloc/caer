@@ -1,5 +1,7 @@
-use std::borrow::Borrow;
 use super::context::Context;
+use inkwell::types::BasicType;
+use inkwell::values::BasicValue;
+use std::collections::HashMap;
 use super::value::Value;
 use super::prog::ProgEmit;
 use index_vec::IndexVec;
@@ -18,6 +20,8 @@ pub struct ProcEmit<'a, 'ctx> {
     pub blocks: IndexVec<BlockId, inkwell::basic_block::BasicBlock<'ctx>>,
     pub func: inkwell::values::FunctionValue<'ctx>,
     pub proc: &'a Proc,
+
+    intrinsics: HashMap<Intrinsic, inkwell::values::FunctionValue<'ctx>>,
 }
 
 impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
@@ -30,6 +34,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
             blocks: IndexVec::new(),
             func: func,
             proc: proc,
+            intrinsics: HashMap::new(),
         }
     }
 
@@ -85,7 +90,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         let param_locals_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(param_locals_alloca, &[cz, cz], "param_locals_ptr") };
         let argpack_local = self.func.get_params()[0];
 
-        self.ctx.builder.build_call(self.ctx.rt.rt_arg_pack_unpack_into, &[argpack_local, param_locals_ptr.into(), self.ctx.llvm_ctx.i64_type().const_int(self.proc.id.index() as u64, false).into(), self.emit.rt_global.as_pointer_value().into()], "");
+        self.build_call(self.ctx.rt.rt_arg_pack_unpack_into, &[argpack_local, param_locals_ptr.into(), self.ctx.llvm_ctx.i64_type().const_int(self.proc.id.index() as u64, false).into(), self.emit.rt_global.as_pointer_value().into()]);
 
         block
     }
@@ -225,6 +230,15 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         }
     }
 
+    fn build_call<F>(&self, func: F, args: &[inkwell::values::BasicValueEnum<'ctx>]) -> Option<inkwell::values::BasicValueEnum<'ctx>>  where F: Into<either::Either<inkwell::values::FunctionValue<'ctx>, inkwell::values::PointerValue<'ctx>>> {
+        self.ctx.builder.build_call(func, args, "").try_as_basic_value().left()
+    }
+
+    fn build_call_intrinsic(&mut self, intrinsic: Intrinsic, args: &[inkwell::values::BasicValueEnum<'ctx>]) -> Option<inkwell::values::BasicValueEnum<'ctx>> {
+        let func = self.get_intrinsic(intrinsic);
+        self.build_call(func, args)
+    }
+
     fn emit_block(&mut self, block: &Block, emit: &ProgEmit<'_, 'ctx>) {
         for op in block.ops.iter() {
             match op {
@@ -243,7 +257,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     self.set_local(*local, &copy);
                     if copy.ty.needs_destructor() {
                         let copy_any = self.conv_val(&copy, &ty::Complex::Any);
-                        self.ctx.builder.build_call(self.ctx.rt.rt_val_cloned, &[copy_any], "");
+                        self.build_call(self.ctx.rt.rt_val_cloned, &[copy_any]);
                     }
                 },
 
@@ -252,13 +266,13 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     if var_ty.needs_destructor() {
                         let val = self.load_var(*var);
                         let val_any = self.conv_val(&val, &ty::Complex::Any);
-                        self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[val_any], "");
+                        self.build_call(self.ctx.rt.rt_val_drop, &[val_any]);
                     }
 
                     let store_val = self.get_local(*local, false);
                     if store_val.ty.needs_destructor() {
                         let store_val_any = self.conv_val(&store_val, &ty::Complex::Any);
-                        self.ctx.builder.build_call(self.ctx.rt.rt_val_cloned, &[store_val_any], "");
+                        self.build_call(self.ctx.rt.rt_val_cloned, &[store_val_any],);
                     }
                     self.store_var(*var, &store_val);
                 },
@@ -266,7 +280,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 Op::Put(id) => {
                     let norm = self.get_local_any(*id);
 
-                    self.ctx.builder.build_call(self.ctx.rt.rt_val_print, &[norm.into(), self.emit.rt_global.as_pointer_value().into()], "put");
+                    self.build_call(self.ctx.rt.rt_val_print, &[norm.into(), self.emit.rt_global.as_pointer_value().into()]);
                 },
 
                 Op::Binary(id, op, lhs, rhs) => {
@@ -274,7 +288,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     let rhs_ref = self.get_local_any(*rhs).into();
                     let op_var = self.ctx.llvm_ctx.i32_type().const_int(*op as u64, false).into();
 
-                    let res = self.ctx.builder.build_call(self.ctx.rt.rt_val_binary_op, &[self.emit.rt_global.as_pointer_value().into(), op_var, lhs_ref, rhs_ref], "").try_as_basic_value().left().unwrap();
+                    let res = self.build_call(self.ctx.rt.rt_val_binary_op, &[self.emit.rt_global.as_pointer_value().into(), op_var, lhs_ref, rhs_ref]).unwrap();
                     self.set_local(*id, &Value::new(Some(res), ty::Complex::Any));
                 },
 
@@ -290,7 +304,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 
                     // TODO: better proc lookup, consider src
                     let func = emit.lookup_global_proc(*name);
-                    let res_val = self.ctx.builder.build_call(func, &[argpack_ptr.into()], "res").try_as_basic_value().left().unwrap();
+                    let res_val = self.build_call(func, &[argpack_ptr.into()]).unwrap();
                     let val = Value::new(Some(res_val), ty::Complex::Any);
                     self.set_local(*id, &val);
                 },
@@ -303,7 +317,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     }
 
                     let src_llval = self.get_local_any(*src);
-                    let res_llval = self.ctx.builder.build_call(self.ctx.rt.rt_val_cast_string_val, &[src_llval, self.emit.rt_global.as_pointer_value().into()], "").try_as_basic_value().left().unwrap();
+                    let res_llval = self.build_call(self.ctx.rt.rt_val_cast_string_val, &[src_llval, self.emit.rt_global.as_pointer_value().into()]).unwrap();
                     let res_val = Value::new(Some(res_llval), (*ty).into());
                     self.set_local(*dst, &res_val);
                 },
@@ -312,10 +326,10 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     // TODO: impl eq for prim<->complex
                     // TODO: assert actual type once inference pops it
                     assert!(self.proc.locals[*dst].ty == ty::Primitive::Ref(None).into());
-                    let datum_ptr = self.ctx.builder.build_call(self.ctx.rt.rt_runtime_alloc_datum, &[
+                    let datum_ptr = self.build_call(self.ctx.rt.rt_runtime_alloc_datum, &[
                         self.emit.rt_global.as_pointer_value().into(),
                         self.ctx.llvm_ctx.i32_type().const_int(ty_id.index() as u64, false).into(),
-                    ], "datum_ptr").try_as_basic_value().left().unwrap();
+                    ]).unwrap();
                     let ref_val = Value::new(Some(datum_ptr), ty::Primitive::Ref(None).into());
                     self.set_local(*dst, &ref_val);
                 },
@@ -327,10 +341,10 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 
                     // TODO: drop/cloned
 
-                    let var_val = self.ctx.builder.build_call(var_get_ptr, &[
+                    let var_val = self.build_call(var_get_ptr, &[
                         ref_ptr.into(),
                         self.ctx.llvm_ctx.i64_type().const_int(var_id.id(), false).into(),
-                    ], "var_val").try_as_basic_value().left().unwrap().into_struct_value();
+                    ]).unwrap().into_struct_value();
                     self.set_local(*dst, &Value::new(Some(var_val.into()), ty::Complex::Any));
                 },
 
@@ -340,11 +354,11 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     let var_set_ptr = self.build_vtable_lookup(ref_ptr, vtable::VTABLE_VAR_SET_FIELD_OFFSET).into_pointer_value();
 
                     let src_val = self.get_local_any(*src);
-                    self.ctx.builder.build_call(var_set_ptr, &[
+                    self.build_call(var_set_ptr, &[
                         ref_ptr.into(),
                         self.ctx.llvm_ctx.i64_type().const_int(var_id.id(), false).into(),
                         src_val,
-                    ], "");
+                    ]);
                 },
 
                 Op::DatumCallProc(dst, src, proc_name, args) => {
@@ -354,13 +368,13 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     let ref_ptr = self.build_extract_ref_ptr(src_val);
                     let proc_lookup_ptr = self.build_vtable_lookup(ref_ptr, vtable::VTABLE_PROC_LOOKUP_FIELD_OFFSET).into_pointer_value();
 
-                    let proc_ptr = self.ctx.builder.build_call(proc_lookup_ptr, &[
+                    let proc_ptr = self.build_call(proc_lookup_ptr, &[
                         self.ctx.llvm_ctx.i32_type().const_int(proc_name.id(), false).into(),
-                    ], "").try_as_basic_value().left().unwrap().into_pointer_value();
+                    ]).unwrap().into_pointer_value();
 
-                    let res_val = self.ctx.builder.build_call(proc_ptr, &[
+                    let res_val = self.build_call(proc_ptr, &[
                         argpack_ptr.into(),
-                    ], "res").try_as_basic_value().left().unwrap();
+                    ]).unwrap();
 
                     self.set_local(*dst, &Value::new(Some(res_val.into()), ty::Complex::Any));
                 },
@@ -398,7 +412,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     }
                 } else {
                     let disc_val = self.get_local_any(*discriminant);
-                    self.ctx.builder.build_call(self.ctx.rt.rt_val_to_switch_disc, &[disc_val], "disc").try_as_basic_value().left().unwrap().into_int_value()
+                    self.build_call(self.ctx.rt.rt_val_to_switch_disc, &[disc_val]).unwrap().into_int_value()
                 };
 
                 self.finalize_block(block);
@@ -414,43 +428,32 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         }
     }
 
-    fn emit_binary(&self, op: ty::op::HardBinary, lhs: &Value<'ctx>, rhs: &Value<'ctx>) -> Value<'ctx> {
-        match op {
+    fn emit_binary(&mut self, op: ty::op::HardBinary, lhs: &Value<'ctx>, rhs: &Value<'ctx>) -> Value<'ctx> {
+        let res = match op {
             ty::op::HardBinary::StringConcat => {
-                let res = self.ctx.builder.build_call(self.ctx.rt.rt_runtime_concat_strings, &[self.emit.rt_global.as_pointer_value().into(), lhs.val.unwrap(), rhs.val.unwrap()], "").try_as_basic_value().left().unwrap();
-                Value::new(Some(res), ty::Primitive::String.into())
+                self.build_call(self.ctx.rt.rt_runtime_concat_strings, &[self.emit.rt_global.as_pointer_value().into(), lhs.val.unwrap(), rhs.val.unwrap()]).unwrap()
             }
             ty::op::HardBinary::FloatAdd => {
-                let res = self.ctx.builder.build_float_add(lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "").into();
-                Value::new(Some(res), ty::Primitive::Float.into())
+                self.ctx.builder.build_float_add(lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "").into()
             }
             ty::op::HardBinary::FloatSub => {
-                let res = self.ctx.builder.build_float_sub(lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "").into();
-                Value::new(Some(res), ty::Primitive::Float.into())
+                self.ctx.builder.build_float_sub(lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "").into()
             }
             ty::op::HardBinary::FloatMul => {
-                let res = self.ctx.builder.build_float_mul(lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "").into();
-                Value::new(Some(res), ty::Primitive::Float.into())
+                self.ctx.builder.build_float_mul(lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "").into()
             }
             ty::op::HardBinary::FloatDiv => {
-                let res = self.ctx.builder.build_float_div(lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "").into();
-                Value::new(Some(res), ty::Primitive::Float.into())
+                self.ctx.builder.build_float_div(lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "").into()
             }
             ty::op::HardBinary::FloatMod => {
-                let res = self.ctx.builder.build_float_rem(lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "").into();
-                Value::new(Some(res), ty::Primitive::Float.into())
+                self.ctx.builder.build_float_rem(lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "").into()
             }
             ty::op::HardBinary::FloatPow => {
-                // bad, TODO: cache intrinsic fn vals somewhere
-                let pow_fn_ty = self.ctx.llvm_ctx.f32_type().fn_type(&[self.ctx.llvm_ctx.f32_type().into(), self.ctx.llvm_ctx.f32_type().into()], false);
-                let pow_fn = self.ctx.module.add_function("llvm.pow.f32", pow_fn_ty, None);
-                let res = self.ctx.builder.build_call(pow_fn, &[lhs.val.unwrap(), rhs.val.unwrap()], "").try_as_basic_value().left().unwrap();
-                Value::new(Some(res), ty::Primitive::Float.into())
+                self.build_call_intrinsic(Intrinsic::FPow, &[lhs.val.unwrap(), rhs.val.unwrap()]).unwrap()
             }
             ty::op::HardBinary::FloatCmp(pred) => {
                 let bool_res = self.ctx.builder.build_float_compare(pred, lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "");
-                let float_res = self.ctx.builder.build_unsigned_int_to_float(bool_res, self.ctx.llvm_ctx.f32_type(), "");
-                Value::new(Some(float_res.into()), ty::Primitive::Float.into())
+                self.ctx.builder.build_unsigned_int_to_float(bool_res, self.ctx.llvm_ctx.f32_type(), "").into()
             }
             ty::op::HardBinary::FloatBitOp(bitop) => {
                 let lhs_i24 = self.float_to_i24(lhs.val.unwrap().into_float_value());
@@ -462,9 +465,10 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     ty::op::BitOp::Shl => self.ctx.builder.build_left_shift(lhs_i24, rhs_i24, ""),
                     ty::op::BitOp::Shr => self.ctx.builder.build_right_shift(lhs_i24, rhs_i24, false, ""),
                 };
-                Value::new(Some(self.i24_to_float(res_i24).into()), ty::Primitive::Float.into())
+                self.i24_to_float(res_i24).into()
             }
-        }
+        };
+        Value::new(Some(res), op.out_ty())
     }
 
     // convert an f32 val into a signed i32, saturating at min/max values
@@ -560,7 +564,8 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
 
     fn build_vtable_lookup(&self, datum_ptr: inkwell::values::PointerValue<'ctx>, offset: u64) -> inkwell::values::BasicValueEnum<'ctx> {
         let lookup_fn = self.emit.vt_lookup[offset as usize];
-        let field = self.ctx.builder.build_call(lookup_fn, &[datum_ptr.into()], &format!("vtable_field_{}", offset)).try_as_basic_value().left().unwrap();
+        let field = self.build_call(lookup_fn, &[datum_ptr.into()]).unwrap();
+        field.set_name(&format!("vtable_field_{}", offset));
         field
     }
 
@@ -572,7 +577,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 }
                 let local = &self.proc.locals[*local_id];
                 if local.ty.needs_destructor() {
-                    self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[self.get_local_any(*local_id)], "");
+                    self.build_call(self.ctx.rt.rt_val_drop, &[self.get_local_any(*local_id)]);
                 }
             }
             for var_id in self.proc.scopes[block.scope].destruct_vars.iter() {
@@ -580,9 +585,37 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                 if var.ty.needs_destructor() {
                     let var_val = self.load_var(*var_id);
                     let var_any = self.conv_val(&var_val, &ty::Complex::Any);
-                    self.ctx.builder.build_call(self.ctx.rt.rt_val_drop, &[var_any], "");
+                    self.build_call(self.ctx.rt.rt_val_drop, &[var_any]);
                 }
             }
         }
     }
+
+    fn get_intrinsic(&mut self, intrinsic: Intrinsic) -> inkwell::values::FunctionValue<'ctx> {
+        if let Some(ifn) = self.intrinsics.get(&intrinsic) {
+            *ifn
+        } else {
+            let ifn = self.create_intrinsic(intrinsic);
+            self.intrinsics.insert(intrinsic, ifn);
+            ifn
+        }
+    }
+
+    fn create_intrinsic(&self, intrinsic: Intrinsic) -> inkwell::values::FunctionValue<'ctx> {
+        let ty_f32: inkwell::types::BasicTypeEnum = self.ctx.llvm_ctx.f32_type().into();
+        let ty_void = self.ctx.llvm_ctx.void_type();
+
+        let (name, ty) = match intrinsic {
+            Intrinsic::FPow => ("llvm.pow.f32", ty_f32.fn_type(&[ty_f32, ty_f32], false)),
+            Intrinsic::Trap => ("llvm.trap", ty_void.fn_type(&[], false)),
+        };
+
+        self.ctx.module.add_function(name, ty, None)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum Intrinsic {
+    FPow,
+    Trap,
 }

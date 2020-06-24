@@ -1,9 +1,7 @@
-use cstub_bindgen_macro::expose_c_stubs;
-use std::mem;
-use crate::op;
-use crate::string_table::{StringId, StringTable};
-use crate::runtime::Runtime;
 use crate::datum::Datum;
+use crate::op;
+use crate::runtime::Runtime;
+use crate::string_table::{StringId, StringTable};
 use std::ops::*;
 
 // null must be first
@@ -17,17 +15,17 @@ pub enum Val {
 }
 
 #[no_mangle]
-pub extern fn rt_val_float(val: f32) -> Val {
+pub extern "C" fn rt_val_float(val: f32) -> Val {
     Val::Float(val)
 }
 
 #[no_mangle]
-pub extern fn rt_val_string(string: StringId) -> Val {
+pub extern "C" fn rt_val_string(string: StringId) -> Val {
     Val::String(string)
 }
 
 #[no_mangle]
-pub extern fn rt_val_binary_op(rt: &mut Runtime, op: op::BinaryOp, lhs: Val, rhs: Val) -> Val {
+pub extern "C" fn rt_val_binary_op(rt: &mut Runtime, op: op::BinaryOp, lhs: Val, rhs: Val) -> Val {
     match op {
         op::BinaryOp::Eq | op::BinaryOp::Ne | op::BinaryOp::Equiv | op::BinaryOp::NotEquiv => {
             return Val::handle_equality(rt, op, lhs, rhs);
@@ -44,25 +42,25 @@ pub extern fn rt_val_binary_op(rt: &mut Runtime, op: op::BinaryOp, lhs: Val, rhs
         Val::Null => Val::Null,
         Val::Float(lval) => Val::Float(Val::binary_arithm(op, lval, rhs.cast_float())),
         Val::String(lval) => {
-            if op!= op::BinaryOp::Add {
+            if op != op::BinaryOp::Add {
                 unimplemented!("RTE badop")
             }
             // TODO reconsider this, DM doesn't allow "e" + 2
             let rval = rhs.cast_string(rt);
             Val::String(rt.string_table.concat(lval, rval))
-        },
+        }
         Val::Ref(_) => unimplemented!("overloads"),
     }
 }
 
 // bad, needed for now
 #[no_mangle]
-pub extern fn rt_val_cast_string_val(val: Val, rt: &mut Runtime) -> StringId {
+pub extern "C" fn rt_val_cast_string_val(val: Val, rt: &mut Runtime) -> StringId {
     val.cast_string(rt)
 }
 
 #[no_mangle]
-pub extern fn rt_val_to_switch_disc(val: Val) -> u32 {
+pub extern "C" fn rt_val_to_switch_disc(val: Val) -> u32 {
     match val {
         Val::Float(val) => (val != 0.0) as u32,
         Val::Null => 0,
@@ -72,7 +70,7 @@ pub extern fn rt_val_to_switch_disc(val: Val) -> u32 {
 }
 
 #[no_mangle]
-pub extern fn rt_val_print(val: Val, rt: &mut Runtime) {
+pub extern "C" fn rt_val_print(val: Val, rt: &mut Runtime) {
     match val {
         Val::Null => println!("null"),
         Val::Float(n) => println!("{}", n),
@@ -81,12 +79,12 @@ pub extern fn rt_val_print(val: Val, rt: &mut Runtime) {
         _ => {
             let sid = val.cast_string(rt);
             println!("{}", rt.string_table.get(sid));
-        },
+        }
     }
 }
 
 #[no_mangle]
-pub extern fn rt_val_cloned(val: Val) {
+pub extern "C" fn rt_val_cloned(val: Val) {
     if let Val::Ref(_) = val {
         //unimplemented!("update refcounts")
     }
@@ -94,7 +92,7 @@ pub extern fn rt_val_cloned(val: Val) {
 
 // this is not Drop and shouldn't be treated as such.
 #[no_mangle]
-pub extern fn rt_val_drop(val: Val) {
+pub extern "C" fn rt_val_drop(val: Val) {
     if let Val::Ref(_) = val {
         //unimplemented!("update refcounts")
     }
@@ -103,7 +101,7 @@ pub extern fn rt_val_drop(val: Val) {
 
 //this whole block is an awful mess, TODO: fix at some point
 impl Val {
-    fn handle_equality(rt: &mut Runtime, op: op::BinaryOp, lhs: Val, rhs: Val) -> Val {
+    fn handle_equality(_rt: &mut Runtime, op: op::BinaryOp, lhs: Val, rhs: Val) -> Val {
         if let Val::Ref(_) = lhs {
             unimplemented!("overload case for lhs datum");
         }
@@ -125,18 +123,16 @@ impl Val {
             String(StringId),
         }
 
-        let to_equatable = |v| {
-            match v {
-                Val::Null => Some(Equatable::Null),
-                Val::Float(n) => Some(Equatable::Float(n)),
-                Val::String(id) => Some(Equatable::String(id)),
-                _ => None,
-            }
+        let to_equatable = |v| match v {
+            Val::Null => Some(Equatable::Null),
+            Val::Float(n) => Some(Equatable::Float(n)),
+            Val::String(id) => Some(Equatable::String(id)),
+            _ => None,
         };
 
         match (to_equatable(lhs), to_equatable(rhs)) {
             (Some(lhs_eqt), Some(rhs_eqt)) => lhs_eqt == rhs_eqt,
-            _ => false
+            _ => false,
         }
     }
 
@@ -157,7 +153,7 @@ impl Val {
                 // TODO reconsider this, DM doesn't allow "e" + 2. compile error?
                 let rval = rhs.cast_string_const(st);
                 Val::String(st.concat(lval, rval))
-            },
+            }
             Val::Ref(_) => unimplemented!(),
         }
     }
@@ -219,7 +215,7 @@ impl Val {
                         rt.env.type_tree.types[(**dp).ty].path_str
                     }
                 }
-            },
+            }
         }
     }
 
@@ -228,7 +224,7 @@ impl Val {
             Val::Null => st.put("null"),
             Val::Float(n) => st.put(n.to_string()),
             Val::String(s) => *s,
-            Val::Ref(dp) => unimplemented!(),
+            Val::Ref(_dp) => unimplemented!(),
         }
     }
 
@@ -244,5 +240,4 @@ impl Val {
 }
 
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
-enum List {
-}
+enum List {}
