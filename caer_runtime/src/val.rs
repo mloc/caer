@@ -162,18 +162,37 @@ impl Val {
         }
     }
 
+    fn wrap_bitop(f: impl FnOnce(u32, u32) -> u32) -> impl FnOnce(f32, f32) -> f32 {
+        |lhs_f, rhs_f| {
+            let lhs_i = lhs_f as i32 as u32 & 0xff_ff_ff;
+            let rhs_i = rhs_f as i32 as u32 & 0xff_ff_ff;
+            let res_i = f(lhs_i, rhs_i) & 0xff_ff_ff;
+            res_i as f32
+        }
+    }
+
     // move somewhere else? not very val specific
     fn binary_arithm(op: op::BinaryOp, l: f32, r: f32) -> f32 {
-        let f = match op {
-            op::BinaryOp::Add => f32::add,
-            op::BinaryOp::Sub => f32::sub,
-            op::BinaryOp::Mul => f32::mul,
-            op::BinaryOp::Div => f32::div,
-            op::BinaryOp::Mod => f32::rem,
-            op::BinaryOp::Pow => f32::powf,
+        match op {
+            op::BinaryOp::Add => f32::add(l, r),
+            op::BinaryOp::Sub => f32::sub(l, r),
+            op::BinaryOp::Mul => f32::mul(l, r),
+            op::BinaryOp::Div => f32::div(l, r),
+            op::BinaryOp::Mod => f32::rem(l, r),
+            op::BinaryOp::Pow => f32::powf(l, r),
+            op::BinaryOp::Eq => (l == r) as u8 as f32,
+            op::BinaryOp::Ne => (l != r) as u8 as f32,
+            op::BinaryOp::Gt => (l > r) as u8 as f32,
+            op::BinaryOp::Ge => (l >= r) as u8 as f32,
+            op::BinaryOp::Lt => (l < r) as u8 as f32,
+            op::BinaryOp::Le => (l <= r) as u8 as f32,
+            op::BinaryOp::Shl => Self::wrap_bitop(u32::shl)(l, r),
+            op::BinaryOp::Shr => Self::wrap_bitop(u32::shr)(l, r),
+            op::BinaryOp::BitAnd => Self::wrap_bitop(u32::bitand)(l, r),
+            op::BinaryOp::BitOr => Self::wrap_bitop(u32::bitor)(l, r),
+            op::BinaryOp::BitXor => Self::wrap_bitop(u32::bitxor)(l, r),
             _ => panic!("unimplemented op {:?}", op),
-        };
-        f(l, r)
+        }
     }
 
     fn cast_float(&self) -> f32 {
