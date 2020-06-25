@@ -1,13 +1,16 @@
-mod ir;
 mod emit;
 mod frontend;
+mod ir;
+mod llvm;
 mod ty;
 
 fn main() {
-    inkwell::targets::Target::initialize_native(&inkwell::targets::InitializationConfig::default()).unwrap();
+    inkwell::targets::Target::initialize_native(&inkwell::targets::InitializationConfig::default())
+        .unwrap();
 
     let dm_context = dreammaker::Context::default();
-    let preproc = dreammaker::preprocessor::Preprocessor::new(&dm_context, "main.dm".into()).unwrap();
+    let preproc =
+        dreammaker::preprocessor::Preprocessor::new(&dm_context, "main.dm".into()).unwrap();
     let indents = dreammaker::indents::IndentProcessor::new(&dm_context, preproc);
     let mut parser = dreammaker::parser::Parser::new(&dm_context, indents);
     parser.enable_procs();

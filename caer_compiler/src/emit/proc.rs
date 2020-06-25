@@ -1,9 +1,7 @@
 use super::context::Context;
-use inkwell::types::BasicType;
 use inkwell::values::BasicValue;
-use std::collections::HashMap;
 use super::value::Value;
-use super::prog::ProgEmit;
+use super::prog::{ProgEmit, Intrinsic};
 use index_vec::IndexVec;
 use crate::ir::cfg::*;
 use crate::ir::id::*;
@@ -12,21 +10,19 @@ use caer_runtime::datum;
 use caer_runtime::vtable;
 
 #[derive(Debug)]
-pub struct ProcEmit<'a, 'ctx> {
+pub struct ProcEmit<'a, 'p, 'ctx> {
     pub ctx: &'a Context<'a, 'ctx>,
-    pub emit: &'a ProgEmit<'a, 'ctx>,
+    pub emit: &'a mut ProgEmit<'p, 'ctx>,
     pub var_allocs: IndexVec<VarId, inkwell::values::PointerValue<'ctx>>,
     pub locals: IndexVec<LocalId, Option<inkwell::values::BasicValueEnum<'ctx>>>,
     pub blocks: IndexVec<BlockId, inkwell::basic_block::BasicBlock<'ctx>>,
     pub func: inkwell::values::FunctionValue<'ctx>,
     pub proc: &'a Proc,
-
-    intrinsics: HashMap<Intrinsic, inkwell::values::FunctionValue<'ctx>>,
 }
 
-impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
-    pub fn new(ctx: &'a Context<'a, 'ctx>, emit: &'a ProgEmit<'a, 'ctx>, proc: &'a Proc, func: inkwell::values::FunctionValue<'ctx>) -> Self {
-        Self {
+impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
+    pub fn emit(ctx: &'a Context<'p, 'ctx>, emit: &'a mut ProgEmit<'p, 'ctx>, proc: &'a Proc, func: inkwell::values::FunctionValue<'ctx>) {
+        let mut pe = Self {
             ctx: ctx,
             emit: emit,
             var_allocs: IndexVec::new(),
@@ -34,8 +30,8 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
             blocks: IndexVec::new(),
             func: func,
             proc: proc,
-            intrinsics: HashMap::new(),
-        }
+        };
+        pe.emit_proc();
     }
 
     fn emit_entry_block(&mut self) -> inkwell::basic_block::BasicBlock<'a> {
@@ -100,7 +96,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         self.ctx.builder.build_unconditional_branch(self.blocks[BlockId::new(0)]);
     }
 
-    pub fn emit_proc(&mut self, emit: &ProgEmit<'_, 'ctx>) {
+    pub fn emit_proc(&mut self) {
         let entry_bb = self.emit_entry_block();
 
         for cfg_block in self.proc.blocks.iter() {
@@ -111,7 +107,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
         for (id, block) in self.proc.blocks.iter_enumerated() {
             let ll_block = self.blocks[id];
             self.ctx.builder.position_at_end(ll_block);
-            self.emit_block(block, emit);
+            self.emit_block(block);
         }
 
         self.finalize_entry_block(entry_bb);
@@ -235,11 +231,11 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
     }
 
     fn build_call_intrinsic(&mut self, intrinsic: Intrinsic, args: &[inkwell::values::BasicValueEnum<'ctx>]) -> Option<inkwell::values::BasicValueEnum<'ctx>> {
-        let func = self.get_intrinsic(intrinsic);
+        let func = self.emit.get_intrinsic(intrinsic);
         self.build_call(func, args)
     }
 
-    fn emit_block(&mut self, block: &Block, emit: &ProgEmit<'_, 'ctx>) {
+    fn emit_block(&mut self, block: &Block) {
         for op in block.ops.iter() {
             match op {
                 Op::Noop => {},
@@ -303,7 +299,7 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
                     let argpack_ptr = self.build_argpack(&args);
 
                     // TODO: better proc lookup, consider src
-                    let func = emit.lookup_global_proc(*name);
+                    let func = self.emit.lookup_global_proc(*name);
                     let res_val = self.build_call(func, &[argpack_ptr.into()]).unwrap();
                     let val = Value::new(Some(res_val), ty::Complex::Any);
                     self.set_local(*id, &val);
@@ -590,32 +586,4 @@ impl<'a, 'ctx> ProcEmit<'a, 'ctx> {
             }
         }
     }
-
-    fn get_intrinsic(&mut self, intrinsic: Intrinsic) -> inkwell::values::FunctionValue<'ctx> {
-        if let Some(ifn) = self.intrinsics.get(&intrinsic) {
-            *ifn
-        } else {
-            let ifn = self.create_intrinsic(intrinsic);
-            self.intrinsics.insert(intrinsic, ifn);
-            ifn
-        }
-    }
-
-    fn create_intrinsic(&self, intrinsic: Intrinsic) -> inkwell::values::FunctionValue<'ctx> {
-        let ty_f32: inkwell::types::BasicTypeEnum = self.ctx.llvm_ctx.f32_type().into();
-        let ty_void = self.ctx.llvm_ctx.void_type();
-
-        let (name, ty) = match intrinsic {
-            Intrinsic::FPow => ("llvm.pow.f32", ty_f32.fn_type(&[ty_f32, ty_f32], false)),
-            Intrinsic::Trap => ("llvm.trap", ty_void.fn_type(&[], false)),
-        };
-
-        self.ctx.module.add_function(name, ty, None)
-    }
-}
-
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub enum Intrinsic {
-    FPow,
-    Trap,
 }
