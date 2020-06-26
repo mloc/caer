@@ -1,7 +1,6 @@
 mod emit;
 mod frontend;
 mod ir;
-mod llvm;
 mod ty;
 
 fn main() {

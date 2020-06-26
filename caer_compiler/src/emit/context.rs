@@ -139,7 +139,7 @@ macro_rules! rt_funcs {
 
         impl<'ctx> $name <'ctx> {
             fn new(ctx: &'ctx inkwell::context::Context, module: &inkwell::module::Module<'ctx>) -> $name<'ctx> {
-                let padding_size = size_of::<caer_runtime::val::Val>() - 4; // u32 discrim
+                assert_eq!(size_of::<caer_runtime::val::Val>(), 16);
 
                 let tyb = RtFuncTyBundle::new(ctx);
 
