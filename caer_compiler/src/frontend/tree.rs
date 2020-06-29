@@ -94,21 +94,18 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
             if name == "parent_type" || name == "vars" || name == "type" {
                 continue;
             }
+
             let var_id = self.env.intern_string(name);
-            if var_lookup.contains_key(&var_id) {
-                // TODO: this is an error, we can't redef a var.
-                // unfortunately, we need to ignore it for now, since spacemandmm gives us some
-                // redefs by default. needs SDMM change
-                continue;
-            }
-            vars.push(var_id);
-
-            let mut var_info = type_tree::VarInfo {
-                name: var_id,
-                assoc_dty: None,
-            };
-
             if let Some(decl) = &tv.declaration {
+                if var_lookup.contains_key(&var_id) {
+                    panic!("ty {:?} redecls var {}", oty, name);
+                }
+
+                let mut var_info = type_tree::VarInfo {
+                    name: var_id,
+                    assoc_dty: None,
+                };
+
                 // TODO: handle static vars
                 if !decl.var_type.type_path.is_empty() {
                     let assoc_dty_id = match &self.objtree.type_by_path(&decl.var_type.type_path) {
@@ -119,9 +116,15 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
                     };
                     var_info.assoc_dty = Some(assoc_dty_id);
                 }
+
+                vars.push(var_id);
+                var_lookup.insert(var_id, var_info);
+            } else {
+                if !var_lookup.contains_key(&var_id) {
+                    panic!("ty {:?} defs var {} before decl", oty, name);
+                }
             }
 
-            var_lookup.insert(var_id, var_info);
         }
 
         let dty = &mut self.env.rt_env.type_tree.types[dty_id];
@@ -161,10 +164,7 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
                 match proc_lookup.get_mut(&name_id) {
                     Some(pi) => {
                         if tp.declaration.is_some() {
-                            // TODO: this is an error, we can't redecl a proc.
-                            // unfortunately, we need to ignore it for now, since spacemandmm gives us some
-                            // redecls by default. needs SDMM change
-                            //panic!("ty {:?} redecls proc {}", oty, name);
+                            panic!("ty {:?} redecls proc {}", oty, name);
                         }
                         pi.top_proc = top;
                     },
