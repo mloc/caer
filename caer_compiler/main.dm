@@ -8,6 +8,7 @@
     world << bar
 
 /proc/entry()
+    world << (3 & 6)
     var/s = "hey"
     world << "[s] there[1/90]"
     argfoo(s)

@@ -1,7 +1,10 @@
 use crate::datum::Datum;
+use crate::list::List;
 use crate::op;
 use crate::runtime::Runtime;
 use crate::string_table::{StringId, StringTable};
+use std::mem::align_of;
+use std::ptr::NonNull;
 use std::ops::*;
 
 // null must be first
@@ -11,7 +14,9 @@ pub enum Val {
     Null,
     Float(f32),
     String(StringId),
-    Ref(*mut Datum),
+    Ref(Option<NonNull<Datum>>),
+    // TODO: someday, treat as specialized datum
+    ListRef(Option<NonNull<List>>),
 }
 
 #[no_mangle]
@@ -50,6 +55,7 @@ pub extern "C" fn rt_val_binary_op(rt: &mut Runtime, op: op::BinaryOp, lhs: Val,
             Val::String(rt.string_table.concat(lval, rval))
         }
         Val::Ref(_) => unimplemented!("overloads"),
+        Val::ListRef(_) => unimplemented!("list softops"),
     }
 }
 
@@ -65,7 +71,8 @@ pub extern "C" fn rt_val_to_switch_disc(val: Val) -> u32 {
         Val::Float(val) => (val != 0.0) as u32,
         Val::Null => 0,
         Val::String(s) => s.is_empty() as u32,
-        Val::Ref(_) => 1,
+        Val::Ref(ptr) => ptr.is_some() as u32,
+        Val::ListRef(ptr) => ptr.is_some() as u32,
     }
 }
 
@@ -155,6 +162,7 @@ impl Val {
                 Val::String(st.concat(lval, rval))
             }
             Val::Ref(_) => unimplemented!(),
+            Val::ListRef(_) => unimplemented!(),
         }
     }
 
@@ -206,16 +214,15 @@ impl Val {
             Val::Float(n) => rt.string_table.put(n.to_string()),
             //Val::Int(n) => n.to_string(),
             Val::String(s) => *s,
-            Val::Ref(dp) => {
-                if dp.is_null() {
-                    StringId::new(0)
-                } else {
-                    unsafe {
-                        // TODO: encapsulate env
-                        rt.env.type_tree.types[(**dp).ty].path_str
-                    }
+            Val::Ref(None) => rt.string_table.put("null"),
+            Val::Ref(Some(dp)) => {
+                unsafe {
+                    // TODO: encapsulate env
+                    rt.env.type_tree.types[dp.as_ref().ty].path_str
                 }
             }
+            Val::ListRef(None) => rt.string_table.put("null"),
+            Val::ListRef(Some(_)) => rt.string_table.put("/list"),
         }
     }
 
@@ -225,6 +232,7 @@ impl Val {
             Val::Float(n) => st.put(n.to_string()),
             Val::String(s) => *s,
             Val::Ref(_dp) => unimplemented!(),
+            Val::ListRef(_lp) => unimplemented!(),
         }
     }
 
@@ -234,10 +242,8 @@ impl Val {
             Val::Float(_) => Val::Float(0.0),
             Val::String(_) => Val::String(StringId::new(0)),
             // TODO: rip and tear, ptr in ref is Bad
-            Val::Ref(_) => Val::Ref(0 as *mut Datum),
+            Val::Ref(_) => Val::Ref(None),
+            Val::ListRef(_) => Val::ListRef(None),
         }
     }
 }
-
-#[derive(Debug, PartialEq, PartialOrd, Clone)]
-enum List {}
