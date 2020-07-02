@@ -3,25 +3,26 @@ use crate::list::List;
 use crate::op;
 use crate::runtime::Runtime;
 use crate::string_table::{StringId, StringTable};
-use std::mem::align_of;
 use std::ptr::NonNull;
 use std::ops::*;
+use ordered_float::OrderedFloat;
 
 // null must be first
-#[derive(Debug, PartialEq, PartialOrd, Copy, Clone)]
+// TODO: not copy?
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Copy, Clone)]
 #[repr(C, u32)]
 pub enum Val {
     Null,
-    Float(f32),
+    Float(OrderedFloat<f32>),
     String(StringId),
     Ref(Option<NonNull<Datum>>),
-    // TODO: someday, treat as specialized datum
+    // TODO: someday, treat as specialized final datum
     ListRef(Option<NonNull<List>>),
 }
 
 #[no_mangle]
 pub extern "C" fn rt_val_float(val: f32) -> Val {
-    Val::Float(val)
+    Val::Float(val.into())
 }
 
 #[no_mangle]
@@ -45,7 +46,7 @@ pub extern "C" fn rt_val_binary_op(rt: &mut Runtime, op: op::BinaryOp, lhs: Val,
 
     match lhs {
         Val::Null => Val::Null,
-        Val::Float(lval) => Val::Float(Val::binary_arithm(op, lval, rhs.cast_float())),
+        Val::Float(lval) => Val::Float(Val::binary_arithm(op, lval.into(), rhs.cast_float().into()).into()),
         Val::String(lval) => {
             if op != op::BinaryOp::Add {
                 unimplemented!("RTE badop")
@@ -68,7 +69,7 @@ pub extern "C" fn rt_val_cast_string_val(val: Val, rt: &mut Runtime) -> StringId
 #[no_mangle]
 pub extern "C" fn rt_val_to_switch_disc(val: Val) -> u32 {
     match val {
-        Val::Float(val) => (val != 0.0) as u32,
+        Val::Float(val) => (val.into_inner() != 0.0) as u32,
         Val::Null => 0,
         Val::String(s) => s.is_empty() as u32,
         Val::Ref(ptr) => ptr.is_some() as u32,
@@ -119,14 +120,14 @@ impl Val {
             _ => unimplemented!("{:?}", op),
         };
 
-        Val::Float(bres as usize as f32)
+        Val::Float((bres as usize as f32).into())
     }
 
     fn basic_eq(lhs: Val, rhs: Val) -> bool {
         #[derive(PartialEq)]
         enum Equatable {
             Null,
-            Float(f32),
+            Float(OrderedFloat<f32>),
             String(StringId),
         }
 
@@ -152,7 +153,7 @@ impl Val {
 
         match lhs {
             Val::Null => Val::Null,
-            Val::Float(lval) => Val::Float(Val::binary_arithm(op, lval, rhs.cast_float())),
+            Val::Float(lval) => Val::Float(Val::binary_arithm(op, lval.into(), rhs.cast_float().into()).into()),
             Val::String(lval) => {
                 if op != op::BinaryOp::Add {
                     unimplemented!("RTE badop")
@@ -199,9 +200,9 @@ impl Val {
         }
     }
 
-    fn cast_float(&self) -> f32 {
+    fn cast_float(&self) -> OrderedFloat<f32> {
         match self {
-            Val::Null => 0f32,
+            Val::Null => 0f32.into(),
             //Val::Int(i) => *i as f32,
             Val::Float(f) => *f,
             _ => unimplemented!("RTE badcast: {:?}", self),
@@ -239,7 +240,7 @@ impl Val {
     fn zero_value(&self) -> Val {
         match self {
             Val::Null => Val::Null,
-            Val::Float(_) => Val::Float(0.0),
+            Val::Float(_) => Val::Float(0f32.into()),
             Val::String(_) => Val::String(StringId::new(0)),
             // TODO: rip and tear, ptr in ref is Bad
             Val::Ref(_) => Val::Ref(None),

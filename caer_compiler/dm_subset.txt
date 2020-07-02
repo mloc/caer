@@ -11,3 +11,5 @@ no icon procs or client << browse_rsc
 
 spacemandmm limitations
     no ..... / ......
+
+lists are limited to 2^24-1 elements

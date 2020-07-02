@@ -294,7 +294,7 @@ impl<'a> ProcAnalysis<'a> {
     fn val_to_lit(val: Val) -> cfg::Literal {
         match val {
             Val::Null => cfg::Literal::Null,
-            Val::Float(n) => cfg::Literal::Num(n),
+            Val::Float(n) => cfg::Literal::Num(n.into()),
             Val::String(id) => cfg::Literal::String(id),
             _ => unimplemented!("other val {:?}", val),
         }
@@ -356,7 +356,7 @@ impl LocalInfo {
     fn const_from_lit(&mut self, lit: &cfg::Literal) {
         self.const_val = Some(match lit {
             cfg::Literal::Null => Val::Null,
-            cfg::Literal::Num(n) => Val::Float(*n),
+            cfg::Literal::Num(n) => Val::Float((*n).into()),
             cfg::Literal::String(id) => Val::String(*id),
             _ => unimplemented!("{:?}", lit),
         });

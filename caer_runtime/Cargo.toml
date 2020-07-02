@@ -12,6 +12,7 @@ crate-type = ["cdylib", "lib"]
 bincode = "1.2.1"
 serde = { version = "1.0", features = ["derive"] }
 index_vec = { version = "0.1.1", features = ["serde"] }
+ordered-float = "1.1.0"
 
 [dependencies.dreammaker]
 git = "https://github.com/SpaceManiac/SpacemanDMM"
