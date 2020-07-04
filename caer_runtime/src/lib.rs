@@ -1,6 +1,7 @@
 pub mod arg_pack;
 pub mod datum;
 pub mod environment;
+pub mod ffi;
 pub mod list;
 pub mod op;
 pub mod proc_spec;

@@ -1,3 +1,5 @@
+// TODO: maybe don't throw exceptions in methods, use result+unwrapper?
+
 use crate::val::{rt_val_drop, Val};
 use std::collections::HashMap;
 
@@ -109,6 +111,19 @@ impl List {
         }
     }
 
+    fn swap(&mut self, idx_a: u32, idx_b: u32) {
+        if (idx_a as usize) > self.vec.len() {
+            panic!("RTE OOB");
+        }
+        if (idx_b as usize) > self.vec.len() {
+            panic!("RTE OOB");
+        }
+
+        if idx_a != idx_b {
+            self.vec.swap((idx_a-1) as usize, (idx_b-1) as usize);
+        }
+    }
+
     // 1-based index
     fn index_int(&self, idx: u32) -> Val {
         match self.vec.get((idx - 1) as usize) {
@@ -163,6 +178,9 @@ impl List {
         self.map.as_mut().unwrap().get_mut(key).unwrap().update_val(new_val);
     }
 }
+
+
+
 
 #[cfg(test)]
 mod tests {

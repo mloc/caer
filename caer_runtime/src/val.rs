@@ -107,6 +107,10 @@ pub extern "C" fn rt_val_drop(val: Val) {
     //mem::forget(mem::replace(self, Val::Null));
 }
 
+#[no_mangle]
+pub extern "C" fn rt_val_call_proc(val: Val) {
+}
+
 //this whole block is an awful mess, TODO: fix at some point
 impl Val {
     fn handle_equality(_rt: &mut Runtime, op: op::BinaryOp, lhs: Val, rhs: Val) -> Val {
