@@ -263,9 +263,8 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     fn make_proc_lookup_func(&mut self, ty: &DType) -> inkwell::values::FunctionValue<'ctx> {
-        let datum_type_ptr = self.datum_types[ty.id].ptr_type(inkwell::AddressSpace::Generic);
         let ret_ty = self.ctx.rt.ty.proc_type.ptr_type(inkwell::AddressSpace::Generic);
-        let func_ty = ret_ty.fn_type(&[self.ctx.llvm_ctx.i32_type().into()], false);
+        let func_ty = ret_ty.fn_type(&[self.ctx.llvm_ctx.i64_type().into()], false);
         let func = self.ctx.module.add_function(&format!("ty_{}_proc_lookup", ty.id.index()), func_ty, None);
 
         let entry_block = self.ctx.llvm_ctx.append_basic_block(func, "entry");
@@ -284,7 +283,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         for (i, proc_name) in ty.procs.iter().enumerate() {
             let case_block = self.ctx.llvm_ctx.append_basic_block(func, &format!("case_{}", proc_name.id()));
             self.ctx.builder.position_at_end(case_block);
-            let disc_val = self.ctx.llvm_ctx.i32_type().const_int(proc_name.id(), false);
+            let disc_val = self.ctx.llvm_ctx.i64_type().const_int(proc_name.id(), false);
             let proc_index_val = self.ctx.llvm_ctx.i32_type().const_int(i as u64, false);
             self.ctx.builder.build_unconditional_branch(conv_block);
             cases.push((disc_val, case_block));

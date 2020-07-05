@@ -2,8 +2,7 @@ use crate::val::Val;
 use crate::datum::Datum;
 use crate::type_tree::TypeId;
 use crate::arg_pack::ArgPack;
-
-use index_vec::Idx;
+use crate::string_table::StringId;
 
 use std::slice::from_raw_parts;
 use std::ops::Index;
@@ -45,5 +44,5 @@ pub struct Entry {
     pub var_index: extern fn(var: u64) -> i32,
     pub var_get: extern fn(datum: *const Datum, var: u64) -> Val,
     pub var_set: extern fn(datum: *const Datum, var: u64, val: Val),
-    pub proc_lookup: extern fn(var: u32) -> extern fn(arg_pack: *const ArgPack) -> Val,
+    pub proc_lookup: extern fn(var: StringId) -> extern fn(arg_pack: *const ArgPack) -> Val,
 }

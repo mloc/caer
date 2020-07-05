@@ -3,6 +3,7 @@ use crate::list::List;
 use crate::op;
 use crate::runtime::Runtime;
 use crate::string_table::{StringId, StringTable};
+use crate::arg_pack::ArgPack;
 use std::ptr::NonNull;
 use std::ops::*;
 use ordered_float::OrderedFloat;
@@ -108,7 +109,8 @@ pub extern "C" fn rt_val_drop(val: Val) {
 }
 
 #[no_mangle]
-pub extern "C" fn rt_val_call_proc(val: Val) {
+pub extern "C" fn rt_val_call_proc(val: Val, proc_name: StringId, args: &ArgPack, rt: &mut Runtime) -> Val {
+    val.call_proc(proc_name, args, rt)
 }
 
 //this whole block is an awful mess, TODO: fix at some point
@@ -145,6 +147,18 @@ impl Val {
         match (to_equatable(lhs), to_equatable(rhs)) {
             (Some(lhs_eqt), Some(rhs_eqt)) => lhs_eqt == rhs_eqt,
             _ => false,
+        }
+    }
+
+    pub fn call_proc(self, proc_name: StringId, args: &ArgPack, rt: &mut Runtime) -> Val {
+        match self {
+            Val::Ref(Some(mut ptr)) => {
+                let datum_ref = unsafe { ptr.as_mut() };
+                let lookup_fn = rt.vtable[datum_ref.ty].proc_lookup;
+                let proc_fn = lookup_fn(proc_name);
+                proc_fn(args)
+            },
+            _ => panic!("can't call proc on val {:?}", self),
         }
     }
 

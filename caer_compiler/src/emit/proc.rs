@@ -359,20 +359,35 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
 
                 Op::DatumCallProc(dst, src, proc_name, args) => {
                     let argpack_ptr = self.build_argpack(&args);
+                    let src_val = self.get_local(*src, false);
+                    let src_val_any = self.conv_val(&src_val, &ty::Complex::Any);
+                    match src_val.ty {
+                        ty::Complex::Primitive(ty::Primitive::Ref(_)) => {
+                            let ref_ptr = self.build_extract_ref_ptr(src_val_any.into_struct_value());
+                            let proc_lookup_ptr = self.build_vtable_lookup(ref_ptr, vtable::VTABLE_PROC_LOOKUP_FIELD_OFFSET).into_pointer_value();
 
-                    let src_val = self.get_local_any(*src).into_struct_value();
-                    let ref_ptr = self.build_extract_ref_ptr(src_val);
-                    let proc_lookup_ptr = self.build_vtable_lookup(ref_ptr, vtable::VTABLE_PROC_LOOKUP_FIELD_OFFSET).into_pointer_value();
+                            let proc_ptr = self.build_call(proc_lookup_ptr, &[
+                                self.ctx.llvm_ctx.i64_type().const_int(proc_name.id(), false).into(),
+                            ]).unwrap().into_pointer_value();
 
-                    let proc_ptr = self.build_call(proc_lookup_ptr, &[
-                        self.ctx.llvm_ctx.i32_type().const_int(proc_name.id(), false).into(),
-                    ]).unwrap().into_pointer_value();
+                            let res_val = self.build_call(proc_ptr, &[
+                                argpack_ptr.into(),
+                            ]).unwrap();
 
-                    let res_val = self.build_call(proc_ptr, &[
-                        argpack_ptr.into(),
-                    ]).unwrap();
+                            self.set_local(*dst, &Value::new(Some(res_val.into()), ty::Complex::Any));
+                        }
+                        _ => {
+                            // soft call
+                            let res_val = self.build_call(self.ctx.rt.rt_val_call_proc, &[
+                                src_val_any,
+                                self.ctx.llvm_ctx.i64_type().const_int(proc_name.id(), false).into(),
+                                argpack_ptr.into(),
+                                self.emit.rt_global.as_pointer_value().into(),
+                            ]).unwrap();
 
-                    self.set_local(*dst, &Value::new(Some(res_val.into()), ty::Complex::Any));
+                            self.set_local(*dst, &Value::new(Some(res_val.into()), ty::Complex::Any));
+                        }
+                    }
                 },
 
                 //_ => unimplemented!("{:?}", op),

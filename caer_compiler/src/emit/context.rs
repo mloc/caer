@@ -109,7 +109,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             // var_set fn ptr
             ctx.void_type().fn_type(&[datum_common_type_ptr.into(), ctx.i64_type().into(), val_type.into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
             // proc_lookup fn ptr
-            proc_type.ptr_type(inkwell::AddressSpace::Generic).fn_type(&[ctx.i32_type().into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
+            proc_type.ptr_type(inkwell::AddressSpace::Generic).fn_type(&[ctx.i64_type().into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
         ], false);
 
         RtFuncTyBundle {
@@ -207,6 +207,7 @@ rt_funcs!{
         (rt_val_cloned, void_type~val, [val_type~val]),
         (rt_val_drop, void_type~val, [val_type~val]),
         (rt_val_cast_string_val, i64_type~val, [val_type~val, rt_type~ptr]),
+        (rt_val_call_proc, val_type~val, [val_type~val, i64_type~val, arg_pack_type~ptr, rt_type~ptr]),
 
         (rt_runtime_init, void_type~val, [rt_type~ptr, vt_entry_type~ptr]),
         (rt_runtime_alloc_datum, opaque_type~ptr, [rt_type~ptr, i32_type~val]),

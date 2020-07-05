@@ -13,7 +13,8 @@
     world << "[s] there[1/90]"
     argfoo(s)
 
-    var/datum/container/c = new /datum/container
+    var/datum/container/c = null
+    c = new /datum/container
     c.obj = new /obj
     c.obj.name = "hello there"
     world << "NAME: [c.obj.name]"
