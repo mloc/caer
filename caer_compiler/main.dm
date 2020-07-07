@@ -35,6 +35,10 @@
     world << band
     world << bitmess(band)
 
+    var/list/l = new /list
+    l:Add(1, 2, "foo")
+    world << l
+
     //world << 1 + 1
 	/*world << simple()
 	var/xx = abc() + 8 + abc()

@@ -28,6 +28,12 @@ impl TypeTree {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Specialization {
+    Datum,
+    List,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DType {
     pub id: TypeId,
@@ -35,6 +41,7 @@ pub struct DType {
     pub path: Vec<StringId>,
     pub type_path: Vec<StringId>,
     pub parent: Option<TypeId>,
+    pub specialization: Specialization,
 
     pub vars: Vec<StringId>,
     pub var_lookup: HashMap<StringId, VarInfo>,

@@ -1,5 +1,5 @@
 use super::cfg_builder::CfgBuilder;
-use caer_runtime::type_tree::{self, TypeId};
+use caer_runtime::type_tree::{self, TypeId, Specialization};
 use caer_runtime::string_table::StringId;
 use caer_runtime::environment::ProcId;
 use dreammaker::objtree;
@@ -56,6 +56,14 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
             type_path.push(*path.last().unwrap());
         }
 
+        let mut specialization = parent_ty.map_or_else(
+            || { Specialization::Datum },
+            |id| { self.env.rt_env.type_tree.types[id].specialization },
+        );
+        if oty.path == "/list" {
+            specialization = Specialization::List;
+        }
+
         let id = TypeId::new(self.env.rt_env.type_tree.types.len());
         let dty = type_tree::DType {
             id: id,
@@ -63,6 +71,7 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
             path: path,
             type_path: type_path,
             parent: parent_ty,
+            specialization,
             vars: Vec::new(),
             var_lookup: HashMap::new(),
             procs: Vec::new(),

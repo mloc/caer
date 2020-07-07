@@ -84,13 +84,14 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
         let val_type_ptr = val_type.ptr_type(inkwell::AddressSpace::Generic);
 
         let opaque_type = ctx.opaque_struct_type("opaque");
+        let rt_type = ctx.i8_type().array_type(size_of::<caer_runtime::runtime::Runtime>() as u32);
 
         let arg_pack_tuple_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.into()], false);
         let arg_pack_tuple_type_ptr = arg_pack_tuple_type.ptr_type(inkwell::AddressSpace::Generic);
 
-        let arg_pack_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.into(), ctx.i64_type().into(), arg_pack_tuple_type_ptr.into()], false);
+        let arg_pack_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.into(), ctx.i64_type().into(), arg_pack_tuple_type_ptr.into(), val_type.into()], false);
 
-        let proc_type = val_type.fn_type(&[arg_pack_type.ptr_type(inkwell::AddressSpace::Generic).into()], false);
+        let proc_type = val_type.fn_type(&[arg_pack_type.ptr_type(inkwell::AddressSpace::Generic).into(), rt_type.ptr_type(inkwell::AddressSpace::Generic).into()], false);
 
         let datum_common_type = ctx.struct_type(&[
             // ref
@@ -98,31 +99,28 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
         ], false);
         let datum_common_type_ptr = datum_common_type.ptr_type(inkwell::AddressSpace::Generic);
 
-        let rt_type = ctx.i8_type().array_type(size_of::<caer_runtime::runtime::Runtime>() as u32);
         let vt_entry_type = ctx.struct_type(&[
             // size
             ctx.i64_type().into(),
-            // var_index fn ptr
-            ctx.i32_type().fn_type(&[ctx.i64_type().into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
             // var_get fn ptr
             val_type.fn_type(&[datum_common_type_ptr.into(), ctx.i64_type().into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
             // var_set fn ptr
             ctx.void_type().fn_type(&[datum_common_type_ptr.into(), ctx.i64_type().into(), val_type.into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
             // proc_lookup fn ptr
-            proc_type.ptr_type(inkwell::AddressSpace::Generic).fn_type(&[ctx.i64_type().into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
+            proc_type.ptr_type(inkwell::AddressSpace::Generic).fn_type(&[ctx.i64_type().into(), rt_type.ptr_type(inkwell::AddressSpace::Generic).into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
         ], false);
 
         RtFuncTyBundle {
-            val_type: val_type,
-            val_type_ptr: val_type_ptr,
-            opaque_type: opaque_type,
-            arg_pack_type: arg_pack_type,
-            arg_pack_tuple_type: arg_pack_tuple_type,
-            proc_type: proc_type,
-            datum_common_type: datum_common_type,
-            datum_common_type_ptr: datum_common_type_ptr,
-            rt_type: rt_type,
-            vt_entry_type: vt_entry_type,
+            val_type,
+            val_type_ptr,
+            opaque_type,
+            arg_pack_type,
+            arg_pack_tuple_type,
+            proc_type,
+            datum_common_type,
+            datum_common_type_ptr,
+            rt_type,
+            vt_entry_type,
         }
     }
 }
@@ -183,6 +181,10 @@ macro_rules! rt_funcs {
         rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
     );
 
+    ( @genty $ctx:ident $spec:ident $tyb:ident proc_type $ty:ident) => (
+        rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
+    );
+
     ( @genty $ctx:ident $spec:ident $tyb:ident $tym:ident $ty:ident) => (
         rt_funcs!(@genty @ptrify $spec , $ctx.$ty())
     );
@@ -214,5 +216,9 @@ rt_funcs!{
         (rt_runtime_concat_strings, i64_type~val, [rt_type~ptr, i64_type~val, i64_type~val]),
 
         (rt_arg_pack_unpack_into, void_type~val, [arg_pack_type~ptr, val_type_ptr~ptr, i64_type~val, rt_type~ptr]),
+
+        (rt_list_var_get, val_type~val, [opaque_type~ptr, i64_type~val]),
+        (rt_list_var_set, void_type~val, [opaque_type~ptr, i64_type~val, val_type~val]),
+        (rt_list_proc_lookup, proc_type~ptr, [opaque_type~ptr, i64_type~val, rt_type~ptr]),
     ]
 }

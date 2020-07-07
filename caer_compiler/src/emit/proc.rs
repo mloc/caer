@@ -23,13 +23,13 @@ pub struct ProcEmit<'a, 'p, 'ctx> {
 impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
     pub fn emit(ctx: &'a Context<'p, 'ctx>, emit: &'a mut ProgEmit<'p, 'ctx>, proc: &'a Proc, func: inkwell::values::FunctionValue<'ctx>) {
         let mut pe = Self {
-            ctx: ctx,
-            emit: emit,
+            ctx,
+            emit,
             var_allocs: IndexVec::new(),
             locals: IndexVec::new(),
             blocks: IndexVec::new(),
-            func: func,
-            proc: proc,
+            func,
+            proc,
         };
         pe.emit_proc();
     }
@@ -296,11 +296,11 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                 },
 
                 Op::Call(id, name, args) => {
-                    let argpack_ptr = self.build_argpack(&args);
+                    let argpack_ptr = self.build_argpack(None, &args);
 
                     // TODO: better proc lookup, consider src
                     let func = self.emit.lookup_global_proc(*name);
-                    let res_val = self.build_call(func, &[argpack_ptr.into()]).unwrap();
+                    let res_val = self.build_call(func, &[argpack_ptr.into(), self.emit.rt_global.as_pointer_value().into()]).unwrap();
                     let val = Value::new(Some(res_val), ty::Complex::Any);
                     self.set_local(*id, &val);
                 },
@@ -358,7 +358,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                 },
 
                 Op::DatumCallProc(dst, src, proc_name, args) => {
-                    let argpack_ptr = self.build_argpack(&args);
+                    let argpack_ptr = self.build_argpack(Some(*src), &args);
                     let src_val = self.get_local(*src, false);
                     let src_val_any = self.conv_val(&src_val, &ty::Complex::Any);
                     match src_val.ty {
@@ -368,10 +368,12 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
 
                             let proc_ptr = self.build_call(proc_lookup_ptr, &[
                                 self.ctx.llvm_ctx.i64_type().const_int(proc_name.id(), false).into(),
+                                self.emit.rt_global.as_pointer_value().into(),
                             ]).unwrap().into_pointer_value();
 
                             let res_val = self.build_call(proc_ptr, &[
                                 argpack_ptr.into(),
+                                self.emit.rt_global.as_pointer_value().into(),
                             ]).unwrap();
 
                             self.set_local(*dst, &Value::new(Some(res_val.into()), ty::Complex::Any));
@@ -520,7 +522,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         self.ctx.builder.build_unsigned_int_to_float(i24_val, self.ctx.llvm_ctx.f32_type(), "")
     }
 
-    fn build_argpack(&self, args: &[LocalId]) -> inkwell::values::PointerValue<'ctx> {
+    fn build_argpack(&self, src: Option<LocalId>, args: &[LocalId]) -> inkwell::values::PointerValue<'ctx> {
         let n_val = self.ctx.llvm_ctx.i64_type().const_int(args.len() as u64, false);
         let array_type = self.ctx.rt.ty.val_type.array_type(args.len() as u32);
         let mut argpack_unnamed = array_type.const_zero();
@@ -535,9 +537,13 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         let argpack_unnamed_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(argpack_unnamed_alloca, &[cz, cz], "argpack_unnamed_ptr") };
 
         let argpack_alloca = self.ctx.builder.build_alloca(self.ctx.rt.ty.arg_pack_type, "argpack_ptr");
-        let argpack = self.ctx.rt.ty.arg_pack_type.const_zero();
-        let argpack = self.ctx.builder.build_insert_value(argpack, n_val, 0, "argpack").unwrap();
-        let argpack = self.ctx.builder.build_insert_value(argpack, argpack_unnamed_ptr, 1, "argpack").unwrap();
+        let mut argpack = self.ctx.rt.ty.arg_pack_type.const_zero().into();
+        argpack = self.ctx.builder.build_insert_value(argpack, n_val, 0, "argpack").unwrap();
+        argpack = self.ctx.builder.build_insert_value(argpack, argpack_unnamed_ptr, 1, "argpack").unwrap();
+        // TODO: named bits
+        if let Some(id) = src {
+            argpack = self.ctx.builder.build_insert_value(argpack, self.get_local_any(id), 4, "argpack").unwrap();
+        }
 
         self.ctx.builder.build_store(argpack_alloca, argpack);
 

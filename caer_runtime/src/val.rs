@@ -2,6 +2,7 @@ use crate::datum::Datum;
 use crate::list::List;
 use crate::op;
 use crate::runtime::Runtime;
+use crate::type_tree::Specialization;
 use crate::string_table::{StringId, StringTable};
 use crate::arg_pack::ArgPack;
 use std::ptr::NonNull;
@@ -17,8 +18,6 @@ pub enum Val {
     Float(OrderedFloat<f32>),
     String(StringId),
     Ref(Option<NonNull<Datum>>),
-    // TODO: someday, treat as specialized final datum
-    ListRef(Option<NonNull<List>>),
 }
 
 #[no_mangle]
@@ -57,7 +56,6 @@ pub extern "C" fn rt_val_binary_op(rt: &mut Runtime, op: op::BinaryOp, lhs: Val,
             Val::String(rt.string_table.concat(lval, rval))
         }
         Val::Ref(_) => unimplemented!("overloads"),
-        Val::ListRef(_) => unimplemented!("list softops"),
     }
 }
 
@@ -74,20 +72,29 @@ pub extern "C" fn rt_val_to_switch_disc(val: Val) -> u32 {
         Val::Null => 0,
         Val::String(s) => s.is_empty() as u32,
         Val::Ref(ptr) => ptr.is_some() as u32,
-        Val::ListRef(ptr) => ptr.is_some() as u32,
     }
 }
 
 #[no_mangle]
 pub extern "C" fn rt_val_print(val: Val, rt: &mut Runtime) {
     match val {
-        Val::Null => println!("null"),
+        Val::Null | Val::Ref(None) => println!("null"),
         Val::Float(n) => println!("{}", n),
         Val::String(s) => println!("{:?}", rt.string_table.get(s)),
-        // disgusting
-        _ => {
-            let sid = val.cast_string(rt);
-            println!("{}", rt.string_table.get(sid));
+        Val::Ref(Some(ptr)) => {
+            let datum = unsafe { ptr.as_ref() };
+            let dty = datum.ty;
+            match rt.env.type_tree.types[dty].specialization {
+                Specialization::List => {
+                    let list_ptr = ptr.cast();
+                    let list: &List = unsafe { list_ptr.as_ref() };
+                    println!("{:?}", list);
+                },
+                Specialization::Datum => {
+                    let sid = val.cast_string(rt);
+                    println!("{}", rt.string_table.get(sid));
+                },
+            }
         }
     }
 }
@@ -154,11 +161,12 @@ impl Val {
         match self {
             Val::Ref(Some(mut ptr)) => {
                 let datum_ref = unsafe { ptr.as_mut() };
+                let rt_ptr = NonNull::new(rt as _).unwrap();
                 let lookup_fn = rt.vtable[datum_ref.ty].proc_lookup;
-                let proc_fn = lookup_fn(proc_name);
-                proc_fn(args)
-            },
-            _ => panic!("can't call proc on val {:?}", self),
+                let proc_fn = lookup_fn(proc_name, rt_ptr);
+                proc_fn(args, rt_ptr)
+            }
+            _ => panic!("RTE can't call proc on val {:?}", self),
         }
     }
 
@@ -181,7 +189,6 @@ impl Val {
                 Val::String(st.concat(lval, rval))
             }
             Val::Ref(_) => unimplemented!(),
-            Val::ListRef(_) => unimplemented!(),
         }
     }
 
@@ -240,8 +247,6 @@ impl Val {
                     rt.env.type_tree.types[dp.as_ref().ty].path_str
                 }
             }
-            Val::ListRef(None) => rt.string_table.put("null"),
-            Val::ListRef(Some(_)) => rt.string_table.put("/list"),
         }
     }
 
@@ -251,7 +256,6 @@ impl Val {
             Val::Float(n) => st.put(n.to_string()),
             Val::String(s) => *s,
             Val::Ref(_dp) => unimplemented!(),
-            Val::ListRef(_lp) => unimplemented!(),
         }
     }
 
@@ -262,7 +266,6 @@ impl Val {
             Val::String(_) => Val::String(StringId::new(0)),
             // TODO: rip and tear, ptr in ref is Bad
             Val::Ref(_) => Val::Ref(None),
-            Val::ListRef(_) => Val::ListRef(None),
         }
     }
 }

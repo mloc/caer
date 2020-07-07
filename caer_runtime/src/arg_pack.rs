@@ -6,8 +6,10 @@ use crate::ffi::FFIArray;
 
 #[repr(C)]
 pub struct ArgPack {
-    unnamed: FFIArray<Val>,
-    named: FFIArray<(StringId, Val)>,
+    pub unnamed: FFIArray<Val>,
+    pub named: FFIArray<(StringId, Val)>,
+
+    pub src: Val,
 }
 
 impl ArgPack {

@@ -4,7 +4,7 @@ use inkwell::types::BasicType;
 use crate::ir::cfg::*;
 use crate::ir::env::Env;
 use caer_runtime::string_table::StringId;
-use caer_runtime::type_tree::{TypeId, DType};
+use caer_runtime::type_tree::{TypeId, DType, Specialization};
 use index_vec::IndexVec;
 use std::fs::{self, File};
 use inkwell::values::AnyValueEnum;
@@ -36,11 +36,11 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         let vt_global = ctx.module.add_global(vt_global_ty, Some(inkwell::AddressSpace::Generic), "vtable");
 
         Self {
-            ctx: ctx,
-            env: env,
+            ctx,
+            env,
             procs: Vec::new(),
-            rt_global: rt_global,
-            vt_global: vt_global,
+            rt_global,
+            vt_global,
             vt_lookup: ctx.make_vtable_lookup(vt_global),
             datum_types: IndexVec::new(),
             sym: IndexVec::new(),
@@ -62,8 +62,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 
     fn add_proc(&mut self, proc: &'a Proc) {
         //let mut proc_emit = ProcEmit::new(self.ctx, proc, name);
-        let func_type = self.ctx.rt.ty.val_type.fn_type(&[self.ctx.rt.ty.arg_pack_type.ptr_type(inkwell::AddressSpace::Generic).into()], false);
-        let func = self.ctx.module.add_function(&format!("proc_{}", proc.id.index()), func_type, None);
+        let func = self.ctx.module.add_function(&format!("proc_{}", proc.id.index()), self.ctx.rt.ty.proc_type, None);
 
         assert_eq!(proc.id.index(), self.sym.len());
         self.sym.push(func);
@@ -95,6 +94,8 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         self.env.string_table.serialize(File::create("stringtable.bincode").unwrap());
         bincode::serialize_into(File::create("environment.bincode").unwrap(), &self.env.rt_env).unwrap();
 
+        serde_json::to_writer_pretty(File::create("environment.json").unwrap(), &self.env.rt_env).unwrap();
+
         let vt_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(self.vt_global.as_pointer_value(), &[
             self.ctx.llvm_ctx.i32_type().const_zero(),
             self.ctx.llvm_ctx.i32_type().const_zero(),
@@ -113,7 +114,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         let argpack_alloca = self.ctx.builder.build_alloca(self.ctx.rt.ty.arg_pack_type, "argpack_ptr");
         let argpack = self.ctx.rt.ty.arg_pack_type.const_zero();
         self.ctx.builder.build_store(argpack_alloca, argpack);
-        self.ctx.builder.build_call(entry_func, &[argpack_alloca.into()], "");
+        self.ctx.builder.build_call(entry_func, &[argpack_alloca.into(), self.rt_global.as_pointer_value().into()], "");
         self.ctx.builder.build_return(None);
     }
 
@@ -133,16 +134,27 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         let mut vt_entries = Vec::new();
         // yuck, TODO: encapsulate typetree
         for ty in self.env.rt_env.type_tree.types.iter() {
-            let var_index_fn = self.make_var_index_func(ty);
+            let size_val = self.datum_types[ty.id].size_of().unwrap().const_cast(self.ctx.llvm_ctx.i64_type(), false);
 
-            let entries = &[
-                // size
-                self.datum_types[ty.id].size_of().unwrap().const_cast(self.ctx.llvm_ctx.i64_type(), false).into(),
-                var_index_fn.into(),
-                self.make_get_var_func(ty, var_index_fn).into(),
-                self.make_set_var_func(ty, var_index_fn).into(),
-                self.make_proc_lookup_func(ty).into(),
-            ];
+            let entries = &match ty.specialization {
+                Specialization::Datum => {
+                    let var_index_fn = self.make_var_index_func(ty);
+                    [
+                        size_val.into(),
+                        self.make_get_var_func(ty, var_index_fn).into(),
+                        self.make_set_var_func(ty, var_index_fn).into(),
+                        self.make_proc_lookup_func(ty).into(),
+                    ]
+                }
+                Specialization::List => {
+                    [
+                        size_val.into(),
+                        self.ctx.rt.rt_list_var_get.into(),
+                        self.ctx.rt.rt_list_var_set.into(),
+                        self.ctx.rt.rt_list_proc_lookup.into(),
+                    ]
+                }
+            };
 
             let field_tys = self.ctx.rt.ty.vt_entry_type.get_field_types();
             assert_eq!(entries.len(), field_tys.len());

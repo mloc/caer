@@ -52,6 +52,7 @@ dependencies = [
  "inkwell",
  "petgraph",
  "serde",
+ "serde_json",
  "thiserror",
 ]
 
@@ -212,6 +213,12 @@ dependencies = [
 name = "interval-tree"
 version = "0.8.0"
 source = "git+https://github.com/SpaceManiac/SpacemanDMM#3d915a367baac13615ccb2b44b4d3a0fd92a2446"
+
+[[package]]
+name = "itoa"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc6f3ad7b9d11a0c00842ff8de1b60ee58661048eb8049ed33c73594f359d7e6"
 
 [[package]]
 name = "lazy_static"
@@ -509,6 +516,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6714061b32e0b0527005d5874c28a57d905559fecfacd361462ad0b01e701996"
 
 [[package]]
+name = "ryu"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71d301d4193d031abdd79ff7e3dd721168a9572ef3fe51a1517aba235bd8f86e"
+
+[[package]]
 name = "scopeguard"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -547,6 +560,17 @@ dependencies = [
  "proc-macro2 1.0.18",
  "quote 1.0.7",
  "syn 1.0.33",
+]
+
+[[package]]
+name = "serde_json"
+version = "1.0.56"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3433e879a558dde8b5e8feb2a04899cf34fdde1fafb894687e52105fc1162ac3"
+dependencies = [
+ "itoa",
+ "ryu",
+ "serde",
 ]
 
 [[package]]

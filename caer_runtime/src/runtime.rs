@@ -1,14 +1,15 @@
-use crate::string_table::{StringId, StringTable};
-use crate::environment::Environment;
-use crate::vtable;
-use crate::type_tree::TypeId;
 use crate::datum::Datum;
+use crate::environment::Environment;
+use crate::list::List;
+use crate::string_table::{StringId, StringTable};
+use crate::type_tree::{Specialization, TypeId};
+use crate::vtable;
 
 use cstub_bindgen_macro::expose_c_stubs;
 
+use std::alloc;
 use std::fs::File;
 use std::mem;
-use std::alloc;
 
 #[derive(Debug)]
 pub struct Runtime {
@@ -22,12 +23,13 @@ impl Runtime {
     // TODO: ERRH
     pub fn init(&mut self, vtable_ptr: *const vtable::Entry) {
         let init_st = StringTable::deserialize(File::open("stringtable.bincode").unwrap());
-        let init_env: Environment = bincode::deserialize_from(File::open("environment.bincode").unwrap()).unwrap();
+        let init_env: Environment =
+            bincode::deserialize_from(File::open("environment.bincode").unwrap()).unwrap();
         let vtable = vtable::Vtable::from_static(vtable_ptr, init_env.type_tree.types.len());
 
         let new = Runtime {
             string_table: init_st,
-            vtable: vtable,
+            vtable,
             env: init_env,
         };
 
@@ -39,14 +41,25 @@ impl Runtime {
     pub fn alloc_datum(&self, ty: u32) -> *mut Datum {
         let ty = TypeId::new(ty as usize);
         let ventry = &self.vtable[ty];
-        // TODO: revisit alignment
-        let layout = alloc::Layout::from_size_align(ventry.size as usize, 8).unwrap();
-        unsafe {
-            // TODO: init vars instead of zeroing
-            let ptr = alloc::alloc_zeroed(layout) as *mut Datum;
-            (*ptr).ty = ty;
+        // TODO: put spec in ventry?
+        let spec = self.env.type_tree.types[ty].specialization;
 
-            ptr
+        match spec {
+            Specialization::Datum => {
+                // TODO: revisit alignment
+                let layout = alloc::Layout::from_size_align(ventry.size as usize, 8).unwrap();
+                unsafe {
+                    // TODO: init vars instead of zeroing
+                    let ptr = alloc::alloc_zeroed(layout) as *mut Datum;
+                    (*ptr).ty = ty;
+
+                    ptr
+                }
+            }
+            Specialization::List => {
+                let list = Box::new(List::new(ty));
+                Box::into_raw(list) as _
+            }
         }
     }
 }
@@ -54,13 +67,17 @@ impl Runtime {
 impl Runtime {
     // TODO: fix lifetimes
     pub fn new_datum(&self, ty: TypeId) -> &mut Datum {
-        unsafe {self.alloc_datum(ty.index() as u32).as_mut().unwrap()}
+        unsafe { self.alloc_datum(ty.index() as u32).as_mut().unwrap() }
     }
 }
 
 impl Runtime {
     #[no_mangle]
-    pub extern fn rt_runtime_concat_strings(&mut self, lhs: StringId, rhs: StringId) -> StringId {
+    pub extern "C" fn rt_runtime_concat_strings(
+        &mut self,
+        lhs: StringId,
+        rhs: StringId,
+    ) -> StringId {
         self.string_table.concat(lhs, rhs)
     }
 }

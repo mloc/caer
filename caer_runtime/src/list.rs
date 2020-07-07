@@ -1,10 +1,20 @@
 // TODO: maybe don't throw exceptions in methods, use result+unwrapper?
 
+use crate::arg_pack::ArgPack;
+use crate::datum::Datum;
+use crate::runtime::Runtime;
+use crate::string_table::StringId;
+use crate::type_tree::Specialization;
+use crate::type_tree::TypeId;
 use crate::val::{rt_val_drop, Val};
+use crate::vtable::ProcPtr;
 use std::collections::HashMap;
+use std::ptr::NonNull;
 
 #[derive(Debug)]
+#[repr(C)]
 pub struct List {
+    datum: Datum,
     vec: Vec<Val>,
     map: Option<HashMap<Val, AssocValue>>,
 }
@@ -62,11 +72,16 @@ impl Default for AssocValue {
 }
 
 impl List {
-    fn new() -> Self {
+    pub fn new(ty: TypeId) -> Self {
         Self {
+            datum: Datum { ty },
             vec: Vec::new(),
             map: None,
         }
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &Val> {
+        self.vec.iter()
     }
 
     /// Initialize the assoc map and populate with empty assoc values
@@ -120,7 +135,7 @@ impl List {
         }
 
         if idx_a != idx_b {
-            self.vec.swap((idx_a-1) as usize, (idx_b-1) as usize);
+            self.vec.swap((idx_a - 1) as usize, (idx_b - 1) as usize);
         }
     }
 
@@ -175,22 +190,102 @@ impl List {
         if !self.map.as_mut().unwrap().contains_key(key) {
             self.push(*key)
         }
-        self.map.as_mut().unwrap().get_mut(key).unwrap().update_val(new_val);
+        self.map
+            .as_mut()
+            .unwrap()
+            .get_mut(key)
+            .unwrap()
+            .update_val(new_val);
+    }
+
+    pub fn var_get(&mut self, var: StringId) -> Val {
+        unimplemented!("list var get")
+    }
+
+    pub fn var_set(&mut self, var: StringId, val: Val) {
+        unimplemented!("list var set")
+    }
+
+    extern "C" fn proc_add(args: *const ArgPack, mut rt: NonNull<Runtime>) -> Val {
+        let args = unsafe { args.as_ref().unwrap() };
+        let mut list_ptr = unsafe { ensure_list(args.src, rt.as_mut()) };
+        let list = unsafe { list_ptr.as_mut() };
+
+        assert_eq!(args.named.as_slice().len(), 0);
+        for arg in args.unnamed.as_slice().iter() {
+            match arg {
+                Val::Ref(Some(sublist_datum_ptr)) => {
+                    // TODO: clean up. can be a lot simpler+safer
+
+                    // to respect aliasing rules, we need to check if the sublist is this
+                    // list. if so, read from self instead of the pointer
+                    let sublist_ptr = sublist_datum_ptr.cast();
+                    let sublist = if sublist_ptr.as_ptr() == (list as *mut List) {
+                        &list
+                    } else {
+                        unsafe { sublist_ptr.as_ref() }
+                    };
+                    let mut to_append = Vec::new();
+                    for elem in sublist.iter() {
+                        to_append.push(*elem);
+                    }
+
+                    for elem in to_append {
+                        list.push(elem);
+                    }
+                }
+                o @ _ => list.push(*o),
+            }
+        }
+        Val::Null
     }
 }
 
+#[no_mangle]
+pub extern "C" fn rt_list_var_get(list: &mut List, var: StringId) -> Val {
+    list.var_get(var)
+}
 
+#[no_mangle]
+pub extern "C" fn rt_list_var_set(list: &mut List, var: StringId, val: Val) {
+    list.var_set(var, val)
+}
 
+#[no_mangle]
+pub extern "C" fn rt_list_proc_lookup(
+    proc: StringId,
+    rt: &mut Runtime,
+) -> ProcPtr {
+    match rt.string_table.get(proc) {
+        "Add" => List::proc_add,
+        s @ _ => panic!("RTE bad proc for list: {:?}", s),
+    }
+}
+
+// TODO: move into val?
+fn ensure_list(val: Val, rt: &Runtime) -> NonNull<List> {
+    match val {
+        Val::Ref(Some(datum_ptr)) => {
+            let datum = unsafe { datum_ptr.as_ref() };
+            // if specialization is List, we guarantee that ref points to a List instance
+            if rt.env.type_tree.types[datum.ty].specialization != Specialization::List {
+                panic!("RTE ref but not list")
+            }
+            datum_ptr.cast()
+        }
+        _ => panic!("RTE not list"),
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::List;
-    use crate::val::Val;
     use crate::string_table::StringId;
+    use crate::val::Val;
 
     #[test]
     fn basic() {
-        let mut l = List::new();
+        let mut l = List::new(0.into());
         l.push(Val::Float(1f32.into()));
         l.push(Val::Float(2f32.into()));
         l.insert(2, Val::Float(3f32.into()));
@@ -202,16 +297,28 @@ mod tests {
 
     #[test]
     fn assoc() {
-        let mut l = List::new();
+        let mut l = List::new(0.into());
         l.update_index_assoc(&Val::Float(1f32.into()), Val::Float(10f32.into()));
-        assert_eq!(l.index_assoc(&Val::Float(1f32.into())), Val::Float(10f32.into()));
+        assert_eq!(
+            l.index_assoc(&Val::Float(1f32.into())),
+            Val::Float(10f32.into())
+        );
 
         l.update_index_assoc(&Val::Float(1f32.into()), Val::Float(12f32.into()));
-        assert_eq!(l.index_assoc(&Val::Float(1f32.into())), Val::Float(12f32.into()));
+        assert_eq!(
+            l.index_assoc(&Val::Float(1f32.into())),
+            Val::Float(12f32.into())
+        );
 
         l.update_index_assoc(&Val::Float(2f32.into()), Val::Float(14f32.into()));
-        assert_eq!(l.index_assoc(&Val::Float(1f32.into())), Val::Float(12f32.into()));
-        assert_eq!(l.index_assoc(&Val::Float(2f32.into())), Val::Float(14f32.into()));
+        assert_eq!(
+            l.index_assoc(&Val::Float(1f32.into())),
+            Val::Float(12f32.into())
+        );
+        assert_eq!(
+            l.index_assoc(&Val::Float(2f32.into())),
+            Val::Float(14f32.into())
+        );
     }
 
     #[test]
@@ -227,7 +334,7 @@ mod tests {
         let a_str = Val::String(StringId::new(1));
         let foo_str = Val::String(StringId::new(2));
 
-        let mut l = List::new();
+        let mut l = List::new(0.into());
         l.push(a_str);
         l.push(a_str);
 
@@ -243,7 +350,7 @@ mod tests {
 
     #[test]
     fn assoc_append() {
-        let mut l = List::new();
+        let mut l = List::new(0.into());
         l.push(Val::Float(1f32.into()));
         assert_eq!(l.len(), 1);
         l.update_index_assoc(&Val::Float(2f32.into()), Val::Float(20f32.into()));
@@ -255,7 +362,7 @@ mod tests {
 
     #[test]
     fn assoc_no_append() {
-        let mut l = List::new();
+        let mut l = List::new(0.into());
         l.push(Val::Float(1f32.into()));
         assert_eq!(l.len(), 1);
         l.push(Val::Float(2f32.into()));
