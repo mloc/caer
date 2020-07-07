@@ -81,20 +81,9 @@ pub extern "C" fn rt_val_print(val: Val, rt: &mut Runtime) {
         Val::Null | Val::Ref(None) => println!("null"),
         Val::Float(n) => println!("{}", n),
         Val::String(s) => println!("{:?}", rt.string_table.get(s)),
-        Val::Ref(Some(ptr)) => {
-            let datum = unsafe { ptr.as_ref() };
-            let dty = datum.ty;
-            match rt.env.type_tree.types[dty].specialization {
-                Specialization::List => {
-                    let list_ptr = ptr.cast();
-                    let list: &List = unsafe { list_ptr.as_ref() };
-                    println!("{:?}", list);
-                },
-                Specialization::Datum => {
-                    let sid = val.cast_string(rt);
-                    println!("{}", rt.string_table.get(sid));
-                },
-            }
+        _ => {
+            let sid = val.cast_string(rt);
+            println!("{}", rt.string_table.get(sid));
         }
     }
 }
@@ -225,13 +214,32 @@ impl Val {
         }
     }
 
-    fn cast_float(&self) -> OrderedFloat<f32> {
+    #[inline]
+    pub fn try_cast_float(&self) -> Option<OrderedFloat<f32>> {
         match self {
-            Val::Null => 0f32.into(),
-            //Val::Int(i) => *i as f32,
-            Val::Float(f) => *f,
-            _ => unimplemented!("RTE badcast: {:?}", self),
+            // null ref is same as null. shrug.
+            Val::Null | Val::Ref(None) => Some(0f32.into()),
+            Val::Float(f) => Some(*f),
+            _ => None,
         }
+    }
+
+    pub fn cast_float(&self) -> OrderedFloat<f32> {
+        self.try_cast_float().unwrap_or_else(|| unimplemented!("RTE badcast: {:?} -> f", self))
+    }
+
+    #[inline]
+    pub fn try_cast_int(&self) -> Option<i64> {
+        match self {
+            // null ref is same as null. shrug.
+            Val::Null | Val::Ref(None) => Some(0),
+            Val::Float(f) => Some(f.into_inner() as _),
+            _ => None,
+        }
+    }
+
+    pub fn cast_int(&self) -> i64 {
+        self.try_cast_int().unwrap_or_else(|| unimplemented!("RTE badcast: {:?} -> i", self))
     }
 
     fn cast_string(&self, rt: &mut Runtime) -> StringId {
@@ -242,9 +250,17 @@ impl Val {
             Val::String(s) => *s,
             Val::Ref(None) => rt.string_table.put("null"),
             Val::Ref(Some(dp)) => {
-                unsafe {
-                    // TODO: encapsulate env
-                    rt.env.type_tree.types[dp.as_ref().ty].path_str
+                let datum = unsafe { dp.as_ref() };
+                let dty = datum.ty;
+                match rt.env.type_tree.types[dty].specialization {
+                    Specialization::List => {
+                        let list_ptr = dp.cast();
+                        let list: &List = unsafe { list_ptr.as_ref() };
+                        rt.string_table.put(format!("{:?}", list))
+                    },
+                    Specialization::Datum => {
+                        rt.env.type_tree.types[dty].path_str
+                    },
                 }
             }
         }

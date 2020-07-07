@@ -34,6 +34,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         // TODO: don't dig so deep into env?
         let vt_global_ty = ctx.rt.ty.vt_entry_type.array_type(env.rt_env.type_tree.types.len() as u32);
         let vt_global = ctx.module.add_global(vt_global_ty, Some(inkwell::AddressSpace::Generic), "vtable");
+        vt_global.set_constant(true);
 
         Self {
             ctx,

@@ -17,7 +17,7 @@ impl ArgPack {
     // unpacking probably shouldn't be done in libcode, probably shouldn't be copying vals
     // TODO: rework unpacking
     // TODO: support passing in proc_id as primitive idx
-    fn unpack_into(&mut self, target_ptrs: *const *mut Val, proc_id: ProcId, rt: &mut Runtime) {
+    fn unpack_into(&self, target_ptrs: *const *mut Val, proc_id: ProcId, rt: &mut Runtime) {
         let spec = &rt.env.proc_specs[proc_id];
         // compiler should ensure that targets is an array with the same sizes as the spec
         let targets_arr = unsafe { FFIArray::with_len(target_ptrs, spec.params.len()) };
@@ -48,6 +48,11 @@ impl ArgPack {
         }
 
         // TODO: handle defaulting args
+    }
+
+    pub fn get(&self, idx: usize) -> Option<Val> {
+        // TODO: something more efficient than building a slice every time
+        self.unnamed.as_slice().get(idx).cloned()
     }
 }
 

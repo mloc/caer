@@ -491,7 +491,7 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
             },
             ast::Term::Ident(var_name) => {
                 let name_id = self.pb.builder.add_string(var_name);
-                let var_id = self.pb.proc.lookup_var(self.block.scope, name_id).unwrap();
+                let var_id = self.pb.proc.lookup_var(self.block.scope, name_id).expect(&format!("can't find var {:?}", name_id));
                 self.build_var_load(var_id)
             },
             ast::Term::Call(name, args) => {

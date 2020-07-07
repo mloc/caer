@@ -35,9 +35,7 @@
     world << band
     world << bitmess(band)
 
-    var/list/l = new /list
-    l:Add(1, 2, "foo")
-    world << l
+    testlists()
 
     //world << 1 + 1
 	/*world << simple()
@@ -72,6 +70,20 @@
 
 /proc/bitmess(x)
     return (x & 3829) | (x ^ 57743)
+
+/proc/testlists()
+    var/list/rec = new /list
+    rec:Add(1, 2, rec, 3, 4, rec, 5)
+    world << "rec l: [rec]"
+
+    var/list/l1 = new /list
+    l1:Add(1, 2, 3, 4)
+    var/list/l2 = l1:Copy()
+    l1:Add(5)
+    world << "l1: [l1]"
+    world << "l2: [l2]"
+    world << "l1.Copy(3): [l1:Copy(3)]"
+    world << "l1.Copy(2, 4): [l1:Copy(2, 4)]"
 /*
 /proc/simple()
 	var/x

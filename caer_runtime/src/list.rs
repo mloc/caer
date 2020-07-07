@@ -11,7 +11,7 @@ use crate::vtable::ProcPtr;
 use std::collections::HashMap;
 use std::ptr::NonNull;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 pub struct List {
     datum: Datum,
@@ -19,7 +19,7 @@ pub struct List {
     map: Option<HashMap<Val, AssocValue>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct AssocValue {
     key_count: usize,
     // TODO: use null as empty val? some other variant?
@@ -207,37 +207,76 @@ impl List {
     }
 
     extern "C" fn proc_add(args: *const ArgPack, mut rt: NonNull<Runtime>) -> Val {
-        let args = unsafe { args.as_ref().unwrap() };
+        let args = unsafe { &*args };
         let mut list_ptr = unsafe { ensure_list(args.src, rt.as_mut()) };
         let list = unsafe { list_ptr.as_mut() };
 
         assert_eq!(args.named.as_slice().len(), 0);
+        // TODO: copy assoc too
         for arg in args.unnamed.as_slice().iter() {
             match arg {
                 Val::Ref(Some(sublist_datum_ptr)) => {
-                    // TODO: clean up. can be a lot simpler+safer
+                    let ty = unsafe { sublist_datum_ptr.as_ref().ty };
+                    // TODO: lookup helper; vtable?
+                    if unsafe { rt.as_ref() }.env.type_tree.types[ty].specialization
+                        != Specialization::List
+                    {
+                        list.push(*arg);
+                        continue;
+                    }
 
-                    // to respect aliasing rules, we need to check if the sublist is this
-                    // list. if so, read from self instead of the pointer
                     let sublist_ptr = sublist_datum_ptr.cast();
-                    let sublist = if sublist_ptr.as_ptr() == (list as *mut List) {
-                        &list
+                    if sublist_ptr.as_ptr() == (list as *mut List) {
+                        // if same list, we need to clone the elems first
+                        for elem in list.iter().cloned().collect::<Vec<_>>() {
+                            list.push(elem);
+                        }
                     } else {
-                        unsafe { sublist_ptr.as_ref() }
+                        // not same list, can just iter
+                        let sublist = unsafe { sublist_ptr.as_ref() };
+                        for elem in sublist.iter() {
+                            list.push(*elem);
+                        }
                     };
-                    let mut to_append = Vec::new();
-                    for elem in sublist.iter() {
-                        to_append.push(*elem);
-                    }
-
-                    for elem in to_append {
-                        list.push(elem);
-                    }
                 }
                 o @ _ => list.push(*o),
             }
         }
         Val::Null
+    }
+
+    extern "C" fn proc_copy(args: *const ArgPack, mut rt: NonNull<Runtime>) -> Val {
+        let args = unsafe { &*args };
+        let mut list_ptr = unsafe { ensure_list(args.src, rt.as_mut()) };
+        let list = unsafe { list_ptr.as_mut() };
+
+        let start = args.get(0).and_then(|v| v.try_cast_int()).unwrap_or(1);
+        let end = args.get(1).and_then(|v| v.try_cast_int()).unwrap_or(0);
+        assert!(start >= 0);
+        assert!(end >= 0);
+
+        if start == 1 && end == 0 {
+            // easy case, clone the entire list
+            let newlist_ptr = Box::into_raw(Box::new(list.clone()));
+            return Val::Ref(NonNull::new(newlist_ptr as _))
+        }
+
+        let mut newlist = List::new(list.datum.ty);
+
+        let range = ((start-1) as usize)..{if end == 0 { list.len() } else { (end-1) as usize } };
+
+        // hack, probably does too much with internal repr..
+        // TODO: optimize, wrt assoc
+        newlist.vec.extend(list.vec[range].iter().cloned());
+        if let Some(list_map) = &list.map {
+            newlist.ensure_map();
+            for (key, av) in newlist.map.as_mut().unwrap().iter_mut() {
+                av.val = list_map[key].val;
+            }
+        }
+
+        let newlist_ptr = Box::into_raw(Box::new(newlist));
+        Val::Ref(NonNull::new(newlist_ptr as _))
     }
 }
 
@@ -252,17 +291,15 @@ pub extern "C" fn rt_list_var_set(list: &mut List, var: StringId, val: Val) {
 }
 
 #[no_mangle]
-pub extern "C" fn rt_list_proc_lookup(
-    proc: StringId,
-    rt: &mut Runtime,
-) -> ProcPtr {
+pub extern "C" fn rt_list_proc_lookup(proc: StringId, rt: &mut Runtime) -> ProcPtr {
     match rt.string_table.get(proc) {
         "Add" => List::proc_add,
+        "Copy" => List::proc_copy,
         s @ _ => panic!("RTE bad proc for list: {:?}", s),
     }
 }
 
-// TODO: move into val?
+// TODO: move into val? could be ensure_datum_spec if that opts ok
 fn ensure_list(val: Val, rt: &Runtime) -> NonNull<List> {
     match val {
         Val::Ref(Some(datum_ptr)) => {
