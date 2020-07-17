@@ -228,6 +228,7 @@ impl List {
                     let sublist_ptr = sublist_datum_ptr.cast();
                     if sublist_ptr.as_ptr() == (list as *mut List) {
                         // if same list, we need to clone the elems first
+                        // no need to handle assoc when copying elf
                         for elem in list.iter().cloned().collect::<Vec<_>>() {
                             list.push(elem);
                         }
@@ -236,6 +237,12 @@ impl List {
                         let sublist = unsafe { sublist_ptr.as_ref() };
                         for elem in sublist.iter() {
                             list.push(*elem);
+                        }
+                        if sublist.map.is_some() {
+                            // could be sped up
+                            for elem in sublist.iter() {
+                                list.update_index_assoc(elem, sublist.index_assoc(elem));
+                            }
                         }
                     };
                 }
@@ -258,12 +265,18 @@ impl List {
         if start == 1 && end == 0 {
             // easy case, clone the entire list
             let newlist_ptr = Box::into_raw(Box::new(list.clone()));
-            return Val::Ref(NonNull::new(newlist_ptr as _))
+            return Val::Ref(NonNull::new(newlist_ptr as _));
         }
 
         let mut newlist = List::new(list.datum.ty);
 
-        let range = ((start-1) as usize)..{if end == 0 { list.len() } else { (end-1) as usize } };
+        let range = ((start - 1) as usize)..{
+            if end == 0 {
+                list.len()
+            } else {
+                (end - 1) as usize
+            }
+        };
 
         // hack, probably does too much with internal repr..
         // TODO: optimize, wrt assoc
@@ -277,6 +290,36 @@ impl List {
 
         let newlist_ptr = Box::into_raw(Box::new(newlist));
         Val::Ref(NonNull::new(newlist_ptr as _))
+    }
+
+    extern "C" fn proc_cut(args: *const ArgPack, mut rt: NonNull<Runtime>) -> Val {
+        let args = unsafe { &*args };
+        let mut list_ptr = unsafe { ensure_list(args.src, rt.as_mut()) };
+        let list = unsafe { list_ptr.as_mut() };
+
+        let start = args.get(0).and_then(|v| v.try_cast_int()).unwrap_or(1);
+        let end = args.get(1).and_then(|v| v.try_cast_int()).unwrap_or(0);
+        assert!(start >= 0);
+        assert!(end >= 0);
+
+        let range = ((start - 1) as usize)..{
+            if end == 0 {
+                list.len()
+            } else {
+                (end - 1) as usize
+            }
+        };
+
+        let drain_iter = list.vec.drain(range);
+        if let Some(list_map) = &mut list.map {
+            for elem in drain_iter {
+                if list_map.get_mut(&elem).unwrap().dec_count() {
+                    list_map.remove(&elem);
+                }
+            }
+        }
+
+        Val::Null
     }
 }
 
@@ -295,6 +338,7 @@ pub extern "C" fn rt_list_proc_lookup(proc: StringId, rt: &mut Runtime) -> ProcP
     match rt.string_table.get(proc) {
         "Add" => List::proc_add,
         "Copy" => List::proc_copy,
+        "Cut" => List::proc_cut,
         s @ _ => panic!("RTE bad proc for list: {:?}", s),
     }
 }
