@@ -13,9 +13,17 @@ bincode = "1.2.1"
 serde = { version = "1.0", features = ["derive"] }
 index_vec = { version = "0.1.1", features = ["serde"] }
 ordered-float = "1.1.0"
+leb128 = "0.2.4"
+libc = "0.2.73"
 
 [dependencies.dreammaker]
 git = "https://github.com/SpaceManiac/SpacemanDMM"
 
 [dependencies.cstub_bindgen_macro]
 path = "../cstub_bindgen_macro"
+
+[dependencies.rustc_dwarf]
+path = "../rustc_dwarf"
+
+[dependencies.rustc_unwind]
+path = "../rustc_unwind"

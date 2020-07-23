@@ -35,6 +35,7 @@
     world << band
     world << bitmess(band)
 
+    world << (c:foo)
     testlists()
 
     //world << 1 + 1

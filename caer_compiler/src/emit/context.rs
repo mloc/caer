@@ -220,5 +220,9 @@ rt_funcs!{
         (rt_list_var_get, val_type~val, [opaque_type~ptr, i64_type~val]),
         (rt_list_var_set, void_type~val, [opaque_type~ptr, i64_type~val, val_type~val]),
         (rt_list_proc_lookup, proc_type~ptr, [opaque_type~ptr, i64_type~val, rt_type~ptr]),
+
+        (rt_throw, void_type~val, [opaque_type~ptr]),
+
+        (dm_eh_personality, i32_type~val, [i32_type~val, i32_type~val, i64_type~val, opaque_type~ptr, opaque_type~ptr]),
     ]
 }

@@ -21,7 +21,7 @@ impl Env {
     pub fn new() -> Self {
         let string_table = StringTable::new();
         Self {
-            string_table: string_table,
+            string_table,
             rt_env: caer_runtime::environment::Environment::new(),
             procs: IndexVec::new(),
         }

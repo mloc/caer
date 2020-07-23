@@ -1,5 +1,8 @@
+#![feature(unwind_attributes)]
+
 pub mod arg_pack;
 pub mod datum;
+mod eh;
 pub mod environment;
 pub mod ffi;
 pub mod list;

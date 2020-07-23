@@ -64,6 +64,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     fn add_proc(&mut self, proc: &'a Proc) {
         //let mut proc_emit = ProcEmit::new(self.ctx, proc, name);
         let func = self.ctx.module.add_function(&format!("proc_{}", proc.id.index()), self.ctx.rt.ty.proc_type, None);
+        func.set_personality_function(self.ctx.rt.dm_eh_personality);
 
         assert_eq!(proc.id.index(), self.sym.len());
         self.sym.push(func);
@@ -187,9 +188,15 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         let conv_block = self.ctx.llvm_ctx.append_basic_block(func, "conv");
 
         self.ctx.builder.position_at_end(dropout_block);
+
+        let exception_path = self.env.intern_string_ro("/exception");
+        let exception_ty = self.env.rt_env.type_tree.type_by_path_str[&exception_path];
+        let datum_ptr = self.ctx.builder.build_call(self.ctx.rt.rt_runtime_alloc_datum, &[
+            self.rt_global.as_pointer_value().into(),
+            self.ctx.llvm_ctx.i32_type().const_int(exception_ty.index() as _, false).into(),
+        ], "").try_as_basic_value().left().unwrap();
         // TODO: RTE no such var
-        let trap_fn = self.get_intrinsic(Intrinsic::Trap);
-        self.ctx.builder.build_call(trap_fn, &[], "");
+        self.ctx.builder.build_call(self.ctx.rt.rt_throw, &[datum_ptr.into()], "");
         self.ctx.builder.build_unreachable();
 
         let mut cases = Vec::new();

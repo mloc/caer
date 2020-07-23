@@ -4,4 +4,6 @@ members = [
     "caer_runtime",
     "caer_util",
     "cstub_bindgen_macro",
+    "rustc_dwarf",
+    "rustc_unwind",
 ]
