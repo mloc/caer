@@ -10,7 +10,7 @@ use crate::ty;
 // TODO: tidy up the lifetimes dood
 pub struct BlockBuilder<'a, 'pb, 'cb, 'ot> {
     pb: &'a mut ProcBuilder<'pb, 'cb, 'ot>,
-    block: cfg::Block,
+    pub block: cfg::Block,
     pub root_block_id: BlockId,
 }
 
@@ -19,9 +19,9 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
         let block = pb.proc.new_block(scope);
 
         Self {
-            pb: pb,
+            pb,
             root_block_id: block.id,
-            block: block,
+            block,
         }
     }
 
@@ -50,32 +50,20 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
         self.pb.finalize_block(swp);
     }
 
+    pub fn build_stmts<'stmt>(&mut self, stmts: impl Iterator<Item = &'stmt ast::Spanned<ast::Statement>>) {
+        for stmt in stmts {
+            self.build_stmt(&stmt.elem);
+        }
+    }
 
     pub fn build_stmt(&mut self, stmt: &ast::Statement) {
         match stmt {
             ast::Statement::Var(v) => {
-                // TODO: care about var flags?
-                let name_id = self.pb.builder.add_string(&v.name);
-                let var = self.pb.add_var(self.block.scope, name_id);
-
-                if !v.var_type.type_path.is_empty() {
-                    // TODO: handle list types
-                    let var_ty = match self.pb.builder.objtree.type_by_path(&v.var_type.type_path) {
-                        Some(ty) => ty,
-                        None => {
-                            // TODO: ERRH(C)
-                            panic!("no such type {:?}", v.var_type.type_path);
-                        },
-                    };
-
-                    // TODO: encapsulate type_tree
-                    let dty_id = self.pb.builder.env.rt_env.type_tree.type_by_node_id[&(var_ty.index().index() as u64)];
-                    self.pb.proc.vars[var].assoc_dty = Some(dty_id);
-                }
-
+                let var = self.add_var(&v.var_type, &v.name);
                 self.push_op(cfg::Op::MkVar(var));
 
                 if let Some(expr) = &v.value {
+                    let name_id = self.pb.builder.add_string(&v.name);
                     self.build_assign(None, name_id, expr);
                 }
             },
@@ -130,7 +118,7 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
                         bb.build_expr(&condition.elem)
                     });
 
-                    let body_block_id = self.pb.build_block(&body[..], self.block.scope, Some(if_end.id));
+                    let (body_block_id, _) = self.pb.build_block(&body[..], self.block.scope, Some(if_end.id));
 
                     let continuation = self.pb.proc.new_block(self.block.scope);
 
@@ -147,7 +135,7 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
 
                 let mut next = if_end.id;
                 if let Some(body) = else_arm {
-                    next = self.pb.build_block(&body[..], self.block.scope, Some(if_end.id));
+                    next = self.pb.build_block(&body[..], self.block.scope, Some(if_end.id)).0;
                 }
 
                 // adds a redundant jump, but simplifies code.
@@ -163,7 +151,7 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
                 cond_block.scope_end = true;
                 let while_end = self.pb.proc.new_block(self.block.scope);
 
-                let body_block_id = self.pb.build_block(&block[..], self.block.scope, Some(cond_block.id));
+                let (body_block_id, _) = self.pb.build_block(&block[..], self.block.scope, Some(cond_block.id));
 
                 let cond_expr = self.on_block(&mut cond_block, |bb| {
                     bb.build_expr(condition)
@@ -195,7 +183,7 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
                     });
                 }
 
-                let body_id = self.pb.build_block(block, loop_scope, Some(inc_block.id));
+                let (body_id, _) = self.pb.build_block(block, loop_scope, Some(inc_block.id));
 
                 if let Some(ref test_expr) = test {
                     let cond_expr = self.on_block(&mut cond_block, |bb| {
@@ -230,8 +218,62 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
                 self.cur_block_done(continuation);
             },
 
+            ast::Statement::TryCatch { try_block, catch_param, catch_block } => {
+                let continuation = self.pb.proc.new_block(self.block.scope);
+                let (try_id, try_scope) = self.pb.build_block(try_block, self.block.scope, Some(continuation.id));
+                let (catch_id, _) = self.pb.build_within_scope(self.block.scope, |bb| {
+                    let catch_var;
+                    if let Some((var_path, var_name)) = catch_param {
+                        let var_id = bb.add_var(var_path, var_name);
+                        catch_var = Some(var_id)
+                    } else {
+                        catch_var = None
+                    }
+                    bb.push_op(cfg::Op::CatchException(catch_var));
+                    bb.build_stmts(catch_block.iter());
+                    bb.block.terminator = cfg::Terminator::Jump(continuation.id);
+                });
+
+                self.pb.proc.set_landingpad(try_scope, catch_id);
+
+                self.block.terminator = cfg::Terminator::TryCatch {
+                    try_block: try_id,
+                    catch_block: catch_id,
+                };
+
+                self.cur_block_done(continuation);
+            },
+
+            ast::Statement::Throw(throw_expr) => {
+                let throw_val = self.build_expr(throw_expr);
+                self.push_op(cfg::Op::Throw(throw_val));
+            },
+
             _ => unimplemented!(),
         }
+    }
+
+    fn add_var(&mut self, var_type: &ast::VarType, var_name: &str) -> VarId {
+        // TODO: care about var flags?
+        let name_id = self.pb.builder.add_string(var_name);
+        let var = self.pb.add_var(self.block.scope, name_id);
+
+        if !var_type.type_path.is_empty() {
+            // TODO: handle list types
+            let var_ty = match self.pb.builder.objtree.type_by_path(&var_type.type_path) {
+                Some(ty) => ty,
+                None => {
+                    // TODO: ERRH(C)
+                    panic!("no such type {:?}", var_type.type_path);
+                },
+            };
+
+            // TODO: encapsulate type_tree
+            let dty_id = self.pb.builder.env.rt_env.type_tree.type_by_node_id[&(var_ty.index().index() as u64)];
+            self.pb.proc.vars[var].assoc_dty = Some(dty_id);
+        }
+
+        var
     }
 
     fn build_expr_base(&mut self, term: &ast::Spanned<ast::Term>, unary_ops: &[ast::UnaryOp], follow: &[ast::Spanned<ast::Follow>]) -> LocalId {

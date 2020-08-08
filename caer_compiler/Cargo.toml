@@ -16,7 +16,8 @@ either = "1.5.3"
 serde_json = "1.0.56"
 
 [dependencies.dreammaker]
-git = "https://github.com/SpaceManiac/SpacemanDMM"
+git = "https://github.com/mloc/SpacemanDMM"
+branch = "catch-param"
 
 [dependencies.caer_runtime]
 path = "../caer_runtime"

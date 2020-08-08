@@ -17,7 +17,8 @@ leb128 = "0.2.4"
 libc = "0.2.73"
 
 [dependencies.dreammaker]
-git = "https://github.com/SpaceManiac/SpacemanDMM"
+git = "https://github.com/mloc/SpacemanDMM"
+branch = "catch-param"
 
 [dependencies.cstub_bindgen_macro]
 path = "../cstub_bindgen_macro"

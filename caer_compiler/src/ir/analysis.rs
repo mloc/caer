@@ -615,6 +615,15 @@ impl InferRunner {
                     ty::Primitive::Ref(None).into(),
                 ))?;
             }
+            Op::Throw(_) => {}
+            Op::CatchException(maybe_except_v) => {
+                if let Some(except_v) = maybe_except_v {
+                    self.apply_rule(&infer::Rule::Const(
+                        self.var_ikey[*except_v],
+                        ty::Complex::Any,
+                    ))?;
+                }
+            }
 
             // flow cases
             Op::Binary(out_l, binop, lhs_l, rhs_l) => {

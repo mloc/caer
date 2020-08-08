@@ -76,6 +76,8 @@ pub struct RtFuncTyBundle<'ctx> {
 
     pub rt_type: inkwell::types::ArrayType<'ctx>,
     pub vt_entry_type: inkwell::types::StructType<'ctx>,
+
+    pub landingpad_type: inkwell::types::StructType<'ctx>,
 }
 
 impl<'ctx> RtFuncTyBundle<'ctx> {
@@ -110,6 +112,11 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             proc_type.ptr_type(inkwell::AddressSpace::Generic).fn_type(&[ctx.i64_type().into(), rt_type.ptr_type(inkwell::AddressSpace::Generic).into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
         ], false);
 
+        let landingpad_type = ctx.struct_type(&[
+            opaque_type.ptr_type(inkwell::AddressSpace::Generic).into(),
+            ctx.i32_type().into(),
+        ], false);
+
         RtFuncTyBundle {
             val_type,
             val_type_ptr,
@@ -121,6 +128,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             datum_common_type_ptr,
             rt_type,
             vt_entry_type,
+            landingpad_type,
         }
     }
 }
@@ -221,7 +229,8 @@ rt_funcs!{
         (rt_list_var_set, void_type~val, [opaque_type~ptr, i64_type~val, val_type~val]),
         (rt_list_proc_lookup, proc_type~ptr, [opaque_type~ptr, i64_type~val, rt_type~ptr]),
 
-        (rt_throw, void_type~val, [opaque_type~ptr]),
+        (rt_throw, void_type~val, [val_type~val]),
+        (rt_exception_get_val, val_type~val, [opaque_type~ptr]),
 
         (dm_eh_personality, i32_type~val, [i32_type~val, i32_type~val, i64_type~val, opaque_type~ptr, opaque_type~ptr]),
     ]

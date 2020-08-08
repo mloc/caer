@@ -1,5 +1,4 @@
-use super::cfg_builder::CfgBuilder;
-use super::block_builder::BlockBuilder;
+use super::cfg_builder::CfgBuilder; use super::block_builder::BlockBuilder;
 use std::collections::HashMap;
 use crate::ir::cfg;
 use crate::ir::id::*;
@@ -72,27 +71,29 @@ impl<'a, 'cb, 'ot> ProcBuilder<'a, 'cb, 'ot> {
         self.proc
     }
 
-    pub fn build_block(&mut self, stmts: &[ast::Spanned<ast::Statement>], parent_scope: ScopeId, next_block: Option<BlockId>) -> BlockId {
+    pub fn build_block(&mut self, stmts: &[ast::Spanned<ast::Statement>], parent_scope: ScopeId, next_block: Option<BlockId>) -> (BlockId, ScopeId) {
+        self.build_within_scope(parent_scope, |bb| {
+            bb.build_stmts(stmts.iter());
+
+            if let Some(next) = next_block {
+                bb.block.terminator = cfg::Terminator::Jump(next);
+            }
+        })
+    }
+
+    pub fn build_within_scope(&mut self, parent_scope: ScopeId, f: impl FnOnce(&mut BlockBuilder)) -> (BlockId, ScopeId) {
         let scope = self.proc.new_scope(parent_scope);
 
         let mut builder = BlockBuilder::new(self, scope);
 
-        for stmt in stmts.iter() {
-            builder.build_stmt(&stmt.elem);
-        }
+        f(&mut builder);
 
-        let block_id = builder.root_block_id;
+        let root_block_id = builder.root_block_id;
         let mut block = builder.done();
-
         block.scope_end = true;
 
-        if let Some(next) = next_block {
-            block.terminator = cfg::Terminator::Jump(next);
-        }
-
         self.finalize_block(block);
-
-        block_id
+        (root_block_id, scope)
     }
 
     // maybe make helper in BlBu which infers scope

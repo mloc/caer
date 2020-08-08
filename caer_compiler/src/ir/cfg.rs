@@ -1,14 +1,14 @@
-use std::collections::{HashMap, HashSet};
-use index_vec::IndexVec;
-use std::fs::{self, File};
-use std::io::{Seek, SeekFrom, Write};
+use super::id::*;
+use crate::ty;
+use caer_runtime;
+use caer_runtime::environment::ProcId;
 use caer_runtime::string_table::StringId;
 use caer_runtime::type_tree::TypeId;
-use caer_runtime::environment::ProcId;
-use caer_runtime;
-use crate::ty;
 use dot;
-use super::id::*;
+use index_vec::IndexVec;
+use std::collections::{HashMap, HashSet};
+use std::fs::{self, File};
+use std::io::{Seek, SeekFrom, Write};
 
 #[derive(Debug, Clone)]
 pub struct Local {
@@ -103,8 +103,8 @@ impl<'a> Proc {
         let id = self.locals.next_idx();
 
         let local = Local {
-            id: id,
-            ty: ty,
+            id,
+            ty,
             movable: false,
             construct_scope: scope,
             destruct_scope: Some(scope),
@@ -131,10 +131,10 @@ impl<'a> Proc {
     pub fn add_var(&mut self, scope: ScopeId, ty: ty::Complex, name: StringId) -> VarId {
         let id = self.vars.next_idx();
         let var_info = Var {
-            id: id,
-            scope: scope,
-            name: name,
-            ty: ty,
+            id,
+            scope,
+            name,
+            ty,
             assoc_dty: None,
         };
 
@@ -167,7 +167,7 @@ impl<'a> Proc {
                 None => match scope.parent {
                     Some(parent) => cur_scope = parent,
                     None => break,
-                }
+                },
             }
         }
 
@@ -182,62 +182,80 @@ impl<'a> Proc {
         id
     }
 
+    pub fn set_landingpad(&mut self, scope_id: ScopeId, landingpad: BlockId) {
+        let scope = self.scopes.get_mut(scope_id).unwrap();
+        if scope.landingpad.is_some() {
+            panic!("landingpad already set");
+        }
+        self.set_landingpad_rec(scope_id, landingpad);
+    }
+
+    fn set_landingpad_rec(&mut self, scope_id: ScopeId, landingpad: BlockId) {
+        let scope = self.scopes.get_mut(scope_id).unwrap();
+        if scope.landingpad.is_some() {
+            return;
+        }
+        scope.landingpad = Some(landingpad);
+        let scope_children = scope.children.clone();
+        for child_scope_id in scope_children {
+            self.set_landingpad_rec(child_scope_id, landingpad);
+        }
+    }
+
     // analysis procs
     // TODO split up, move out of Proc maybe, and track as we build
     // TODO a smarter analysis method; this works but misses a lot
     pub fn analyze(&mut self) {
-        let mut flow: IndexVec<_, _> = self.locals.iter().map(|l| {
-            LocalFlow::new(l)
-        }).collect();
+        let mut flow: IndexVec<_, _> = self.locals.iter().map(|l| LocalFlow::new(l)).collect();
 
         for block in self.blocks.iter() {
             for op in block.ops.iter() {
                 match op {
-                    Op::Noop => {},
+                    Op::Noop => {}
 
                     Op::Literal(_, _) => {
                         // hmmm
-                    },
+                    }
 
-                    Op::MkVar(_) => {},
+                    Op::MkVar(_) => {}
 
-                    Op::Load(_, _) => {},
+                    Op::Load(_, _) => {}
 
-                    Op::Store(_, _) => {},
+                    Op::Store(_, _) => {}
 
                     Op::Put(src) => {
                         flow[*src].reads += 1;
-                    },
+                    }
 
                     Op::Binary(_, _, lhs, rhs) => {
                         flow[*lhs].reads += 1;
                         flow[*rhs].reads += 1;
-                    },
+                    }
 
                     Op::HardBinary(_, _, lhs, rhs) => {
                         flow[*lhs].reads += 1;
                         flow[*rhs].reads += 1;
-                    },
+                    }
 
                     Op::Call(_, _, args) => {
                         for arg in args.iter() {
                             flow[*arg].reads += 1;
                         }
-                    },
+                    }
 
                     Op::Cast(_, src, _) => {
                         flow[*src].reads += 1;
-                    },
+                    }
 
-                    Op::AllocDatum(_, _) => {},
+                    Op::AllocDatum(_, _) => {}
 
                     Op::DatumLoadVar(_, src, _) => {
                         flow[*src].reads += 1;
-                    },
+                    }
 
                     Op::DatumStoreVar(_, _, src) => {
                         flow[*src].reads += 1;
-                    },
+                    }
 
                     Op::DatumCallProc(_, dl, _, args) => {
                         flow[*dl].reads += 1;
@@ -245,14 +263,24 @@ impl<'a> Proc {
                             flow[*arg].reads += 1;
                         }
                     }
+
+                    Op::Throw(src) => {
+                        flow[*src].reads += 1;
+                    }
+
+                    Op::CatchException(_) => {}
                 }
             }
 
             match block.terminator {
-                Terminator::Switch { discriminant, branches: _, default: _ } => {
+                Terminator::Switch {
+                    discriminant,
+                    branches: _,
+                    default: _,
+                } => {
                     flow[discriminant].reads += 1;
-                },
-                _ => {},
+                }
+                Terminator::Return | Terminator::Jump(_) | Terminator::TryCatch { .. } => {}
             }
         }
 
@@ -282,13 +310,44 @@ impl<'a> Proc {
         //write!(f, "newrank=true;\n").unwrap();
 
         let finagle = |s: String| {
-            s[1..s.len()-1].to_string().replace("{", "\\{").replace("}", "\\}")
+            s[1..s.len() - 1]
+                .to_string()
+                .replace("{", "\\{")
+                .replace("}", "\\}")
         };
 
-        let locals = self.locals.iter_enumerated().map(|(id, l)| finagle(dot::LabelText::escaped(format!("{}: {:?}", id.index(), l.ty)).to_dot_string())).collect::<Vec<_>>().join("\\l");
-        let vars = self.vars.iter_enumerated().map(|(id, v)| finagle(dot::LabelText::escaped(format!("{}: {:?}", id.index(), v.ty)).to_dot_string())).collect::<Vec<_>>().join("\\l");
-        write!(f, "llegend[label=\"{{Locals\\l|{{{}\\l}}}}\"][shape=\"record\"];\n", locals).unwrap();
-        write!(f, "vlegend[label=\"{{Vars\\l|{{{}\\l}}}}\"][shape=\"record\"];\n", vars).unwrap();
+        let locals = self
+            .locals
+            .iter_enumerated()
+            .map(|(id, l)| {
+                finagle(
+                    dot::LabelText::escaped(format!("{}: {:?}", id.index(), l.ty)).to_dot_string(),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\\l");
+        let vars = self
+            .vars
+            .iter_enumerated()
+            .map(|(id, v)| {
+                finagle(
+                    dot::LabelText::escaped(format!("{}: {:?}", id.index(), v.ty)).to_dot_string(),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\\l");
+        write!(
+            f,
+            "llegend[label=\"{{Locals\\l|{{{}\\l}}}}\"][shape=\"record\"];\n",
+            locals
+        )
+        .unwrap();
+        write!(
+            f,
+            "vlegend[label=\"{{Vars\\l|{{{}\\l}}}}\"][shape=\"record\"];\n",
+            vars
+        )
+        .unwrap();
 
         self.dot_scope_cluster(&mut f, self.global_scope);
         write!(&mut f, "}}\n").unwrap();
@@ -296,9 +355,21 @@ impl<'a> Proc {
 
     fn dot_scope_cluster(&self, f: &mut File, scope_id: ScopeId) {
         let scope = &self.scopes[scope_id];
-        let locals = scope.locals.iter().map(|l| l.index().to_string()).collect::<Vec<_>>().join(", ");
+        let locals = scope
+            .locals
+            .iter()
+            .map(|l| l.index().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
         write!(f, "subgraph cluster_scope{} {{\n", scope_id.index()).unwrap();
-        write!(f, "label=\"scope {} [{}]\";\n", scope.id.index(), locals).unwrap();
+        write!(
+            f,
+            "label=\"scope {} [{}] LP: {:?}\";\n",
+            scope.id.index(),
+            locals,
+            scope.landingpad
+        )
+        .unwrap();
         for block_id in scope.blocks.iter() {
             write!(f, "block{};\n", block_id.index()).unwrap();
         }
@@ -324,22 +395,27 @@ impl<'a> dot::Labeller<'a, BlockId, (BlockId, BlockId, String)> for Proc {
         let term_str = match &block.terminator {
             Terminator::Return => "return".into(),
             Terminator::Jump(_) => "jump".into(),
-            Terminator::Switch { discriminant, branches: _, default: _ } => format!("switch {:?}", discriminant),
+            Terminator::Switch {
+                discriminant,
+                branches: _,
+                default: _,
+            } => format!("switch {:?}", discriminant),
+            Terminator::TryCatch { .. } => "try/catch".into(),
         };
 
-        let end_str = if block.scope_end {
-            "END SCOPE\\l|"
-        } else {
-            ""
-        };
+        let end_str = if block.scope_end { "END SCOPE\\l|" } else { "" };
 
-        dot::LabelText::escaped(
-            format!("{{{}\\l|{}{{{}}}}}", block.ops.iter()
+        dot::LabelText::escaped(format!(
+            "{{{}\\l|{}{{{}}}}}",
+            block
+                .ops
+                .iter()
                 .map(|op| format!("{:?}", op).replace("\\", "\\\\"))
                 .collect::<Vec<_>>()
                 .join("\\l"),
-                end_str,
-                term_str))
+            end_str,
+            term_str
+        ))
     }
 
     fn edge_label(&'a self, e: &(BlockId, BlockId, String)) -> dot::LabelText<'a> {
@@ -358,11 +434,16 @@ impl<'a> dot::GraphWalk<'a, BlockId, (BlockId, BlockId, String)> for Proc {
     }
 
     fn edges(&self) -> dot::Edges<'a, (BlockId, BlockId, String)> {
-        self.blocks.iter().flat_map(|block| {
-            match &block.terminator {
-                Terminator::Return => {vec![]},
+        self.blocks
+            .iter()
+            .flat_map(|block| match &block.terminator {
+                Terminator::Return => vec![],
                 Terminator::Jump(target) => vec![(block.id, *target, "".into())],
-                Terminator::Switch { discriminant: _, branches, default } => {
+                Terminator::Switch {
+                    discriminant: _,
+                    branches,
+                    default,
+                } => {
                     let mut out = vec![(block.id, *default, "default".into())];
 
                     for (val, target) in branches.iter() {
@@ -370,9 +451,17 @@ impl<'a> dot::GraphWalk<'a, BlockId, (BlockId, BlockId, String)> for Proc {
                     }
 
                     out
-                },
-            }
-        }).collect::<Vec<_>>().into()
+                }
+                Terminator::TryCatch {
+                    try_block,
+                    catch_block,
+                } => vec![
+                    (block.id, *try_block, "try".into()),
+                    (block.id, *catch_block, format!("catch ({})", catch_block.index())),
+                ],
+            })
+            .collect::<Vec<_>>()
+            .into()
     }
 
     fn source(&self, e: &(BlockId, BlockId, String)) -> BlockId {
@@ -396,22 +485,34 @@ pub struct Block {
 impl Block {
     pub fn new(id: BlockId, scope: ScopeId) -> Self {
         Self {
-            id: id,
+            id,
             ops: Vec::new(),
             terminator: Terminator::Return,
-            scope: scope,
+            scope,
             scope_end: false,
         }
     }
 
     // bad
-    pub fn iter_successors(&self) -> Box<dyn Iterator<Item=BlockId>> {
+    pub fn iter_successors(&self) -> Box<dyn Iterator<Item = BlockId>> {
         match &self.terminator {
             Terminator::Return => Box::new(std::iter::empty()),
             Terminator::Jump(id) => Box::new(std::iter::once(*id)),
-            Terminator::Switch { discriminant: _, branches, default } => {
-                Box::new(branches.clone().into_iter().map(|(_, id)| id).chain(std::iter::once(*default)))
-            },
+            Terminator::Switch {
+                discriminant: _,
+                branches,
+                default,
+            } => Box::new(
+                branches
+                    .clone()
+                    .into_iter()
+                    .map(|(_, id)| id)
+                    .chain(std::iter::once(*default)),
+            ),
+            Terminator::TryCatch {
+                try_block,
+                catch_block,
+            } => Box::new(std::iter::once(*try_block).chain(std::iter::once(*catch_block))),
         }
     }
 }
@@ -428,12 +529,13 @@ pub struct Scope {
     pub destruct_vars: HashSet<VarId>,
     pub vars_by_name: HashMap<StringId, VarId>,
     pub blocks: Vec<BlockId>,
+    pub landingpad: Option<BlockId>,
 }
 
 impl Scope {
     fn new(id: ScopeId, parent: Option<(ScopeId, i32)>) -> Self {
         Self {
-            id: id,
+            id,
             parent: parent.map(|(id, _)| id),
             children: Vec::new(),
             depth: parent.map_or(0, |(_, d)| d + 1),
@@ -443,6 +545,7 @@ impl Scope {
             vars: Vec::new(),
             vars_by_name: HashMap::new(),
             blocks: Vec::new(),
+            landingpad: None,
         }
     }
 }
@@ -476,6 +579,13 @@ pub enum Op {
     DatumLoadVar(LocalId, LocalId, StringId), // local1 = local2.var
     DatumStoreVar(LocalId, StringId, LocalId), // local1.var = local2
     DatumCallProc(LocalId, LocalId, StringId, Vec<LocalId>), // local1 = local2.proc(args)
+
+    Throw(LocalId),
+    // analogous to llvm's landingpad instr
+    // must be the first op in a catch block
+    // specifies the var for the caught exception val, if provided
+    // TODO: rework to be less llvm-bound
+    CatchException(Option<VarId>),
 }
 
 impl Op {
@@ -495,6 +605,8 @@ impl Op {
             Op::DatumLoadVar(dst, _, _) => Some(*dst),
             Op::DatumStoreVar(_, _, _) => None,
             Op::DatumCallProc(dst, _, _, _) => Some(*dst),
+            Op::Throw(_) => None,
+            Op::CatchException(_) => None,
         }
     }
 
@@ -518,7 +630,9 @@ impl Op {
                 let mut v = args.clone();
                 v.push(*src);
                 v
-            },
+            }
+            Op::Throw(src) => vec![*src],
+            Op::CatchException(_) => vec![],
         }
     }
 
@@ -534,11 +648,13 @@ impl Op {
             Op::AllocDatum(dst, _) => f(dst),
             Op::DatumLoadVar(dst, _, _) => f(dst),
             Op::DatumCallProc(dst, _, _, _) => f(dst),
-            Op::Noop => {},
-            Op::MkVar(_) => {},
-            Op::Store(_, _) => {},
-            Op::Put(_) => {},
-            Op::DatumStoreVar(_, _, _) => {},
+            Op::Noop => {}
+            Op::MkVar(_) => {}
+            Op::Store(_, _) => {}
+            Op::Put(_) => {}
+            Op::DatumStoreVar(_, _, _) => {}
+            Op::Throw(_) => {}
+            Op::CatchException(_) => {}
         }
     }
 
@@ -546,21 +662,32 @@ impl Op {
         match self {
             Op::Store(_, src) => f(src),
             Op::Put(src) => f(src),
-            Op::Binary(_, _, lhs, rhs) => {f(lhs); f(rhs)},
-            Op::HardBinary(_, _, lhs, rhs) => {f(lhs); f(rhs)},
+            Op::Binary(_, _, lhs, rhs) => {
+                f(lhs);
+                f(rhs)
+            }
+            Op::HardBinary(_, _, lhs, rhs) => {
+                f(lhs);
+                f(rhs)
+            }
             Op::Call(_, _, args) => args.iter_mut().for_each(f),
             Op::Cast(_, src, _) => f(src),
             Op::DatumLoadVar(_, src, _) => f(src),
-            Op::DatumStoreVar(dsrc, _, src) => {f(dsrc); f(src)},
+            Op::DatumStoreVar(dsrc, _, src) => {
+                f(dsrc);
+                f(src)
+            }
             Op::DatumCallProc(_, src, _, args) => {
                 f(src);
                 args.iter_mut().for_each(f);
-            },
-            Op::Noop => {},
-            Op::Literal(_, _) => {},
-            Op::MkVar(_) => {},
-            Op::Load(_, _) => {},
-            Op::AllocDatum(_, _) => {},
+            }
+            Op::Throw(src) => f(src),
+            Op::Noop => {}
+            Op::Literal(_, _) => {}
+            Op::MkVar(_) => {}
+            Op::Load(_, _) => {}
+            Op::AllocDatum(_, _) => {}
+            Op::CatchException(_) => {}
         }
     }
 
@@ -569,7 +696,8 @@ impl Op {
             Op::MkVar(var) => f(var),
             Op::Load(_, var) => f(var),
             Op::Store(var, _) => f(var),
-            _ => {},
+            Op::CatchException(Some(var)) => f(var),
+            _ => {}
         }
     }
 }
@@ -602,15 +730,23 @@ pub enum Terminator {
         branches: Vec<(u32, BlockId)>,
         default: BlockId,
     },
+    TryCatch {
+        try_block: BlockId,
+        catch_block: BlockId,
+    },
 }
 
 impl Terminator {
     pub fn visit_local(&mut self, mut f: impl FnMut(&mut LocalId)) {
         match self {
-            Terminator::Switch { discriminant: disc, branches: _, default: _ } => {
+            Terminator::Switch {
+                discriminant: disc,
+                branches: _,
+                default: _,
+            } => {
                 f(disc);
-            },
-            _ => {},
+            }
+            Terminator::Return | Terminator::Jump(_) | Terminator::TryCatch { .. } => {}
         }
     }
 }

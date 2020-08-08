@@ -154,7 +154,6 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
             let name_id = self.env.intern_string(name);
             assert!(!tp.value.is_empty());
 
-
             let mut top_proc = None;
             for pv in tp.value.iter() {
                 match &pv.code {

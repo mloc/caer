@@ -40,7 +40,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
 
         let null_val = self.ctx.rt.ty.val_type.const_zero();
 
-        for local in self.proc.locals.iter() {
+        for _ in self.proc.locals.iter() {
             self.locals.push(None);
         }
 
@@ -235,8 +235,19 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         self.build_call(func, args)
     }
 
+    fn build_call_catching<F>(&self, block: &Block, func: F, args: &[inkwell::values::BasicValueEnum<'ctx>]) -> Option<inkwell::values::BasicValueEnum<'ctx>>  where F: Into<either::Either<inkwell::values::FunctionValue<'ctx>, inkwell::values::PointerValue<'ctx>>> {
+        if let Some(pad) = self.proc.scopes[block.scope].landingpad {
+            let continuation = self.ctx.llvm_ctx.append_basic_block(self.func, "");
+            let res = self.ctx.builder.build_invoke(func, args, continuation, self.blocks[pad], "").try_as_basic_value().left();
+            self.ctx.builder.position_at_end(continuation);
+            res
+        } else {
+            self.build_call(func, args)
+        }
+    }
+
     fn emit_block(&mut self, block: &Block) {
-        for op in block.ops.iter() {
+        for (i, op) in block.ops.iter().enumerate() {
             match op {
                 Op::Noop => {},
 
@@ -276,7 +287,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                 Op::Put(id) => {
                     let norm = self.get_local_any(*id);
 
-                    self.build_call(self.ctx.rt.rt_val_print, &[norm.into(), self.emit.rt_global.as_pointer_value().into()]);
+                    self.build_call_catching(block, self.ctx.rt.rt_val_print, &[norm.into(), self.emit.rt_global.as_pointer_value().into()]);
                 },
 
                 Op::Binary(id, op, lhs, rhs) => {
@@ -284,14 +295,14 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                     let rhs_ref = self.get_local_any(*rhs).into();
                     let op_var = self.ctx.llvm_ctx.i32_type().const_int(*op as u64, false).into();
 
-                    let res = self.build_call(self.ctx.rt.rt_val_binary_op, &[self.emit.rt_global.as_pointer_value().into(), op_var, lhs_ref, rhs_ref]).unwrap();
+                    let res = self.build_call_catching(block, self.ctx.rt.rt_val_binary_op, &[self.emit.rt_global.as_pointer_value().into(), op_var, lhs_ref, rhs_ref]).unwrap();
                     self.set_local(*id, &Value::new(Some(res), ty::Complex::Any));
                 },
 
                 Op::HardBinary(id, op, lhs, rhs) => {
                     let lhs_val = self.get_local(*lhs, false);
                     let rhs_val = self.get_local(*rhs, false);
-                    let res = self.emit_binary(*op, &lhs_val, &rhs_val);
+                    let res = self.emit_binary(block, *op, &lhs_val, &rhs_val);
                     self.set_local(*id, &res);
                 },
 
@@ -299,8 +310,9 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                     let argpack_ptr = self.build_argpack(None, &args);
 
                     // TODO: better proc lookup, consider src
+                    println!("E: {:?}", self.emit.env.string_table.get(*name));
                     let func = self.emit.lookup_global_proc(*name);
-                    let res_val = self.build_call(func, &[argpack_ptr.into(), self.emit.rt_global.as_pointer_value().into()]).unwrap();
+                    let res_val = self.build_call_catching(block, func, &[argpack_ptr.into(), self.emit.rt_global.as_pointer_value().into()]).unwrap();
                     let val = Value::new(Some(res_val), ty::Complex::Any);
                     self.set_local(*id, &val);
                 },
@@ -313,7 +325,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                     }
 
                     let src_llval = self.get_local_any(*src);
-                    let res_llval = self.build_call(self.ctx.rt.rt_val_cast_string_val, &[src_llval, self.emit.rt_global.as_pointer_value().into()]).unwrap();
+                    let res_llval = self.build_call_catching(block, self.ctx.rt.rt_val_cast_string_val, &[src_llval, self.emit.rt_global.as_pointer_value().into()]).unwrap();
                     let res_val = Value::new(Some(res_llval), (*ty).into());
                     self.set_local(*dst, &res_val);
                 },
@@ -322,7 +334,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                     // TODO: impl eq for prim<->complex
                     // TODO: assert actual type once inference pops it
                     assert!(self.proc.locals[*dst].ty == ty::Primitive::Ref(None).into());
-                    let datum_ptr = self.build_call(self.ctx.rt.rt_runtime_alloc_datum, &[
+                    let datum_ptr = self.build_call_catching(block, self.ctx.rt.rt_runtime_alloc_datum, &[
                         self.emit.rt_global.as_pointer_value().into(),
                         self.ctx.llvm_ctx.i32_type().const_int(ty_id.index() as u64, false).into(),
                     ]).unwrap();
@@ -333,11 +345,11 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                 Op::DatumLoadVar(dst, src, var_id) => {
                     let val = self.get_local_any(*src).into_struct_value();
                     let ref_ptr = self.build_extract_ref_ptr(val);
-                    let var_get_ptr = self.build_vtable_lookup(ref_ptr, vtable::VTABLE_VAR_GET_FIELD_OFFSET).into_pointer_value();
+                    let var_get_ptr = self.build_vtable_lookup(block, ref_ptr, vtable::VTABLE_VAR_GET_FIELD_OFFSET).into_pointer_value();
 
                     // TODO: drop/cloned
 
-                    let var_val = self.build_call(var_get_ptr, &[
+                    let var_val = self.build_call_catching(block, var_get_ptr, &[
                         ref_ptr.into(),
                         self.ctx.llvm_ctx.i64_type().const_int(var_id.id(), false).into(),
                     ]).unwrap().into_struct_value();
@@ -347,10 +359,10 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                 Op::DatumStoreVar(dst, var_id, src) => {
                     let dst_val = self.get_local_any(*dst).into_struct_value();
                     let ref_ptr = self.build_extract_ref_ptr(dst_val);
-                    let var_set_ptr = self.build_vtable_lookup(ref_ptr, vtable::VTABLE_VAR_SET_FIELD_OFFSET).into_pointer_value();
+                    let var_set_ptr = self.build_vtable_lookup(block, ref_ptr, vtable::VTABLE_VAR_SET_FIELD_OFFSET).into_pointer_value();
 
                     let src_val = self.get_local_any(*src);
-                    self.build_call(var_set_ptr, &[
+                    self.build_call_catching(block, var_set_ptr, &[
                         ref_ptr.into(),
                         self.ctx.llvm_ctx.i64_type().const_int(var_id.id(), false).into(),
                         src_val,
@@ -364,14 +376,14 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                     match src_val.ty {
                         ty::Complex::Primitive(ty::Primitive::Ref(_)) => {
                             let ref_ptr = self.build_extract_ref_ptr(src_val_any.into_struct_value());
-                            let proc_lookup_ptr = self.build_vtable_lookup(ref_ptr, vtable::VTABLE_PROC_LOOKUP_FIELD_OFFSET).into_pointer_value();
+                            let proc_lookup_ptr = self.build_vtable_lookup(block, ref_ptr, vtable::VTABLE_PROC_LOOKUP_FIELD_OFFSET).into_pointer_value();
 
-                            let proc_ptr = self.build_call(proc_lookup_ptr, &[
+                            let proc_ptr = self.build_call_catching(block, proc_lookup_ptr, &[
                                 self.ctx.llvm_ctx.i64_type().const_int(proc_name.id(), false).into(),
                                 self.emit.rt_global.as_pointer_value().into(),
                             ]).unwrap().into_pointer_value();
 
-                            let res_val = self.build_call(proc_ptr, &[
+                            let res_val = self.build_call_catching(block, proc_ptr, &[
                                 argpack_ptr.into(),
                                 self.emit.rt_global.as_pointer_value().into(),
                             ]).unwrap();
@@ -380,7 +392,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                         }
                         _ => {
                             // soft call
-                            let res_val = self.build_call(self.ctx.rt.rt_val_call_proc, &[
+                            let res_val = self.build_call_catching(block, self.ctx.rt.rt_val_call_proc, &[
                                 src_val_any,
                                 self.ctx.llvm_ctx.i64_type().const_int(proc_name.id(), false).into(),
                                 argpack_ptr.into(),
@@ -389,6 +401,28 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
 
                             self.set_local(*dst, &Value::new(Some(res_val.into()), ty::Complex::Any));
                         }
+                    }
+                },
+
+                Op::Throw(exception_local) => {
+                    let exception_val = self.get_local_any(*exception_local);
+                    self.build_call_catching(block, self.ctx.rt.rt_throw, &[exception_val.into()]);
+                }
+
+                Op::CatchException(maybe_except_var) => {
+                    if i != 0 {
+                        panic!("CatchException op not at start of block");
+                    }
+
+                    let landingpad = self.ctx.builder.build_landingpad(self.ctx.rt.ty.landingpad_type, "lp");
+                    landingpad.set_cleanup(true);
+
+
+                    if let Some(except_var) = maybe_except_var {
+                        let exception_container = self.ctx.builder.build_extract_value(landingpad.as_basic_value().into_struct_value(), 0, "").unwrap();
+                        let exception = self.build_call(self.ctx.rt.rt_exception_get_val, &[exception_container.into()]).unwrap();
+                        let except_val = Value::new(Some(exception), ty::Complex::Any);
+                        self.store_var(*except_var, &except_val);
                     }
                 },
 
@@ -425,7 +459,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                     }
                 } else {
                     let disc_val = self.get_local_any(*discriminant);
-                    self.build_call(self.ctx.rt.rt_val_to_switch_disc, &[disc_val]).unwrap().into_int_value()
+                    self.build_call_catching(block, self.ctx.rt.rt_val_to_switch_disc, &[disc_val]).unwrap().into_int_value()
                 };
 
                 self.finalize_block(block);
@@ -438,13 +472,18 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
 
                 self.ctx.builder.build_switch(disc_int, self.blocks[*default], &llvm_branches[..]);
             },
+
+            Terminator::TryCatch { try_block, .. } => {
+                self.finalize_block(block);
+                self.ctx.builder.build_unconditional_branch(self.blocks[*try_block]);
+            }
         }
     }
 
-    fn emit_binary(&mut self, op: ty::op::HardBinary, lhs: &Value<'ctx>, rhs: &Value<'ctx>) -> Value<'ctx> {
+    fn emit_binary(&mut self, block: &Block, op: ty::op::HardBinary, lhs: &Value<'ctx>, rhs: &Value<'ctx>) -> Value<'ctx> {
         let res = match op {
             ty::op::HardBinary::StringConcat => {
-                self.build_call(self.ctx.rt.rt_runtime_concat_strings, &[self.emit.rt_global.as_pointer_value().into(), lhs.val.unwrap(), rhs.val.unwrap()]).unwrap()
+                self.build_call_catching(block, self.ctx.rt.rt_runtime_concat_strings, &[self.emit.rt_global.as_pointer_value().into(), lhs.val.unwrap(), rhs.val.unwrap()]).unwrap()
             }
             ty::op::HardBinary::FloatAdd => {
                 self.ctx.builder.build_float_add(lhs.val.unwrap().into_float_value(), rhs.val.unwrap().into_float_value(), "").into()
@@ -579,9 +618,9 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         field
     }
 
-    fn build_vtable_lookup(&self, datum_ptr: inkwell::values::PointerValue<'ctx>, offset: u64) -> inkwell::values::BasicValueEnum<'ctx> {
+    fn build_vtable_lookup(&self, block: &Block, datum_ptr: inkwell::values::PointerValue<'ctx>, offset: u64) -> inkwell::values::BasicValueEnum<'ctx> {
         let lookup_fn = self.emit.vt_lookup[offset as usize];
-        let field = self.build_call(lookup_fn, &[datum_ptr.into()]).unwrap();
+        let field = self.build_call_catching(block, lookup_fn, &[datum_ptr.into()]).unwrap();
         field.set_name(&format!("vtable_field_{}", offset));
         field
     }

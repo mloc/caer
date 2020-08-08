@@ -5,25 +5,30 @@ use rustc_unwind as unwind;
 use libc::{c_int, uintptr_t};
 use rustc_dwarf as dwarf;
 use std::ptr::NonNull;
-use crate::datum::Datum;
+use crate::val::Val;
 
 const dm_exception_class: unwind::_Unwind_Exception_Class = 0x43414552_444d_0000;
 
 struct Exception {
     header: unwind::_Unwind_Exception,
-    datum: NonNull<Datum>,
+    exception_val: Val,
+}
+#[no_mangle]
+#[unwind(allowed)]
+unsafe extern "C" fn rt_exception_get_val(exception: &Exception) -> Val {
+    exception.exception_val
 }
 
 #[no_mangle]
 #[unwind(allowed)]
-unsafe extern "C" fn rt_throw(exception_datum: NonNull<Datum>) -> ! {
+unsafe extern "C" fn rt_throw(exception_val: Val) -> ! {
     let exception = Box::new(Exception {
         header: unwind::_Unwind_Exception {
             exception_class: dm_exception_class,
             exception_cleanup,
             private: [0; unwind::unwinder_private_data_size],
         },
-        datum: exception_datum,
+        exception_val,
     });
     let exception_param = Box::into_raw(exception) as *mut unwind::_Unwind_Exception;
     let ret = unwind::_Unwind_RaiseException(exception_param);
@@ -80,6 +85,7 @@ unsafe extern "C" fn dm_eh_personality(
     }
 }
 
+#[derive(Debug)]
 enum EHAction {
     None,
     Cleanup(usize),
@@ -138,6 +144,7 @@ unsafe fn handle_lsda(lsda: *const u8, context: *mut unwind::_Unwind_Context) ->
             } else {
                 let lpad = lpad_base + cs_lpad;
                 //return Ok(interpret_cs_action(cs_action, lpad, foreign_exception));
+                return Ok(EHAction::Catch(lpad));
             }
         }
     }
