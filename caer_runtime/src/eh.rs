@@ -4,27 +4,25 @@
 use rustc_unwind as unwind;
 use libc::{c_int, uintptr_t};
 use rustc_dwarf as dwarf;
-use std::ptr::NonNull;
 use crate::val::Val;
 
-const dm_exception_class: unwind::_Unwind_Exception_Class = 0x43414552_444d_0000;
+const DM_EXCEPTION_CLASS: unwind::_Unwind_Exception_Class = 0x43414552_444d_0000;
 
 struct Exception {
+    #[allow(dead_code)]
     header: unwind::_Unwind_Exception,
     exception_val: Val,
 }
 #[no_mangle]
-#[unwind(allowed)]
 unsafe extern "C" fn rt_exception_get_val(exception: &Exception) -> Val {
     exception.exception_val
 }
 
 #[no_mangle]
-#[unwind(allowed)]
 unsafe extern "C" fn rt_throw(exception_val: Val) -> ! {
     let exception = Box::new(Exception {
         header: unwind::_Unwind_Exception {
-            exception_class: dm_exception_class,
+            exception_class: DM_EXCEPTION_CLASS,
             exception_cleanup,
             private: [0; unwind::unwinder_private_data_size],
         },
@@ -50,7 +48,7 @@ unsafe extern "C" fn rt_throw(exception_val: Val) -> ! {
 unsafe extern "C" fn dm_eh_personality(
     version: c_int,
     actions: unwind::_Unwind_Action,
-    exception_class: unwind::_Unwind_Exception_Class,
+    _exception_class: unwind::_Unwind_Exception_Class,
     exception_object: *mut unwind::_Unwind_Exception,
     context: *mut unwind::_Unwind_Context,
 ) -> unwind::_Unwind_Reason_Code {
@@ -144,6 +142,7 @@ unsafe fn handle_lsda(lsda: *const u8, context: *mut unwind::_Unwind_Context) ->
             } else {
                 let lpad = lpad_base + cs_lpad;
                 //return Ok(interpret_cs_action(cs_action, lpad, foreign_exception));
+                // currently, all DM cleanup pads are actually catch pads
                 return Ok(EHAction::Catch(lpad));
             }
         }

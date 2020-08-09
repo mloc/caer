@@ -1,5 +1,3 @@
-#![feature(unwind_attributes)]
-
 pub mod arg_pack;
 pub mod datum;
 mod eh;
