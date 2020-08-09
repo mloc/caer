@@ -1,10 +1,10 @@
 // Personality function + LSDA handling mostly cribbed from rust compiler source code,  commit ef92009c1dbe2750f1d24a6619b827721fb49749
 // Copyright the rust project's contributors: https://github.com/rust-lang/rust/blob/master/COPYRIGHT
 
-use rustc_unwind as unwind;
+use crate::val::Val;
 use libc::{c_int, uintptr_t};
 use rustc_dwarf as dwarf;
-use crate::val::Val;
+use rustc_unwind as unwind;
 
 const DM_EXCEPTION_CLASS: unwind::_Unwind_Exception_Class = 0x43414552_444d_0000;
 
@@ -62,22 +62,23 @@ unsafe extern "C" fn dm_eh_personality(
     };
     if actions as i32 & unwind::_UA_SEARCH_PHASE as i32 != 0 {
         match eh_action {
-            EHAction::None |
-                EHAction::Cleanup(_) => unwind::_URC_CONTINUE_UNWIND,
+            EHAction::None | EHAction::Cleanup(_) => unwind::_URC_CONTINUE_UNWIND,
             EHAction::Catch(_) => unwind::_URC_HANDLER_FOUND,
             EHAction::Terminate => unwind::_URC_FATAL_PHASE1_ERROR,
         }
     } else {
         match eh_action {
             EHAction::None => unwind::_URC_CONTINUE_UNWIND,
-            EHAction::Cleanup(lpad) |
-                EHAction::Catch(lpad) => {
-                    unwind::_Unwind_SetGR(context, unwind::UNWIND_DATA_REG.0,
-                        exception_object as uintptr_t);
-                    unwind::_Unwind_SetGR(context, unwind::UNWIND_DATA_REG.1, 0);
-                    unwind::_Unwind_SetIP(context, lpad);
-                    unwind::_URC_INSTALL_CONTEXT
-                }
+            EHAction::Cleanup(lpad) | EHAction::Catch(lpad) => {
+                unwind::_Unwind_SetGR(
+                    context,
+                    unwind::UNWIND_DATA_REG.0,
+                    exception_object as uintptr_t,
+                );
+                unwind::_Unwind_SetGR(context, unwind::UNWIND_DATA_REG.1, 0);
+                unwind::_Unwind_SetIP(context, lpad);
+                unwind::_URC_INSTALL_CONTEXT
+            }
             EHAction::Terminate => unwind::_URC_FATAL_PHASE2_ERROR,
         }
     }
@@ -91,7 +92,10 @@ enum EHAction {
     Terminate,
 }
 
-unsafe fn handle_lsda(lsda: *const u8, context: *mut unwind::_Unwind_Context) -> Result<EHAction, ()> {
+unsafe fn handle_lsda(
+    lsda: *const u8,
+    context: *mut unwind::_Unwind_Context,
+) -> Result<EHAction, ()> {
     if lsda.is_null() {
         return Ok(EHAction::None);
     }

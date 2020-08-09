@@ -65,6 +65,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         //let mut proc_emit = ProcEmit::new(self.ctx, proc, name);
         let func = self.ctx.module.add_function(&format!("proc_{}", proc.id.index()), self.ctx.rt.ty.proc_type, None);
         func.set_personality_function(self.ctx.rt.dm_eh_personality);
+        func.set_gc("statepoint-example");
 
         assert_eq!(proc.id.index(), self.sym.len());
         self.sym.push(func);
@@ -357,7 +358,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         //self.ctx.module.print_to_stderr();
         self.dump_module("unopt");
 
-        let engine = self.ctx.module.create_jit_execution_engine(inkwell::OptimizationLevel::None).unwrap();
+        //let engine = self.ctx.module.create_jit_execution_engine(inkwell::OptimizationLevel::None).unwrap();
 
         if opt {
             let pm_builder = inkwell::passes::PassManagerBuilder::create();
@@ -370,16 +371,20 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             self.dump_module("opt");
         }
 
-        unsafe {
+        /*unsafe {
             let func = engine.get_function::<unsafe extern "C" fn()>("main").unwrap();
             func.call();
-        }
+        }*/
     }
 
     pub fn dump_module(&self, name: &str) {
         let buf = self.ctx.module.print_to_string().to_string();
         fs::create_dir_all("dbgout/llvm/").unwrap();
         fs::write(format!("dbgout/llvm/{}.ll", name), buf).unwrap();
+
+        fs::create_dir_all("out/").unwrap();
+        let success = self.ctx.module.write_bitcode_to_path(std::path::Path::new(&format!("out/{}.bc", name)));
+        assert!(success);
     }
 
     pub fn get_intrinsic(&mut self, intrinsic: Intrinsic) -> inkwell::values::FunctionValue<'ctx> {
