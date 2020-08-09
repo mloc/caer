@@ -68,7 +68,6 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "cstub_bindgen_macro",
- "dreammaker",
  "index_vec",
  "leb128",
  "libc",
