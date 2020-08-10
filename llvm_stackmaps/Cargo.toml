@@ -1,0 +1,9 @@
+[package]
+name = "llvm_stackmaps"
+version = "0.1.0"
+authors = ["Colm Ó hIcí <git@ohici.ie>"]
+edition = "2018"
+
+[dependencies]
+thiserror = "1.0.20"
+byteorder = "1.3.4"

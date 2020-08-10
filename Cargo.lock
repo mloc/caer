@@ -71,6 +71,7 @@ dependencies = [
  "index_vec",
  "leb128",
  "libc",
+ "llvm_stackmaps",
  "ordered-float",
  "rustc_dwarf",
  "rustc_unwind",
@@ -279,6 +280,14 @@ dependencies = [
  "libc",
  "regex",
  "semver",
+]
+
+[[package]]
+name = "llvm_stackmaps"
+version = "0.1.0"
+dependencies = [
+ "byteorder",
+ "thiserror",
 ]
 
 [[package]]

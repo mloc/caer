@@ -41,6 +41,9 @@ impl Runtime {
             std::slice::from_raw_parts(stackmap_start, len as usize)
         };
 
+        let stackmap = llvm_stackmaps::Parser::<llvm_stackmaps::LittleEndian>::parse(stackmaps_raw).unwrap();
+        println!("STACKMAP: {:#?}", stackmap);
+
         // this fn should only be called by init on a zeroed-out Runtime, which we need to ignore
         mem::forget(mem::replace(self, new));
     }
