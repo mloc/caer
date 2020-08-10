@@ -104,8 +104,16 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             self.ctx.llvm_ctx.i32_type().const_zero(),
         ], "vt_ptr") };
 
+        // defined in linker script
+        let stackmap_start = self.ctx.module.add_global(self.ctx.llvm_ctx.i8_type(), None, "__stackmaps_start");
+        stackmap_start.set_linkage(inkwell::module::Linkage::External);
+        let stackmap_end = self.ctx.module.add_global(self.ctx.llvm_ctx.i8_type(), None, "__stackmaps_end");
+        stackmap_end.set_linkage(inkwell::module::Linkage::External);
+
         self.ctx.builder.build_call(self.ctx.rt.rt_runtime_init, &[
             self.rt_global.as_pointer_value().into(),
+            stackmap_start.as_pointer_value().into(),
+            stackmap_end.as_pointer_value().into(),
             vt_ptr.into(),
         ], "");
 
@@ -379,10 +387,9 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 
     pub fn dump_module(&self, name: &str) {
         let buf = self.ctx.module.print_to_string().to_string();
-        fs::create_dir_all("dbgout/llvm/").unwrap();
-        fs::write(format!("dbgout/llvm/{}.ll", name), buf).unwrap();
-
         fs::create_dir_all("out/").unwrap();
+        fs::write(format!("out/{}.ll", name), buf).unwrap();
+
         let success = self.ctx.module.write_bitcode_to_path(std::path::Path::new(&format!("out/{}.bc", name)));
         assert!(success);
     }
@@ -399,11 +406,17 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 
     fn create_intrinsic(&self, intrinsic: Intrinsic) -> inkwell::values::FunctionValue<'ctx> {
         let ty_f32: inkwell::types::BasicTypeEnum = self.ctx.llvm_ctx.f32_type().into();
+        let ty_i32: inkwell::types::BasicTypeEnum = self.ctx.llvm_ctx.i32_type().into();
+        let ty_i64: inkwell::types::BasicTypeEnum = self.ctx.llvm_ctx.i64_type().into();
         let ty_void = self.ctx.llvm_ctx.void_type();
+        let ty_token = self.ctx.llvm_ctx.token_type();
+
+        //(i64, i32, i32 ()*, i32, i32, ...)
 
         let (name, ty) = match intrinsic {
             Intrinsic::FPow => ("llvm.pow.f32", ty_f32.fn_type(&[ty_f32, ty_f32], false)),
             Intrinsic::Trap => ("llvm.trap", ty_void.fn_type(&[], false)),
+            Intrinsic::StatepointVoid => ("llvm.experimental.gc.statepoint.p0f_i32f", ty_token.fn_type(&[ty_i64, ty_i32, ty_i32.fn_type(&[], false).ptr_type(inkwell::AddressSpace::Generic).into(), ty_i32, ty_i32], true)),
         };
 
         self.ctx.module.add_function(name, ty, None)
@@ -415,4 +428,5 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 pub enum Intrinsic {
     FPow,
     Trap,
+    StatepointVoid,
 }

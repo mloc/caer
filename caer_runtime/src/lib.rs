@@ -1,3 +1,5 @@
+#![feature(ptr_offset_from)]
+
 pub mod arg_pack;
 pub mod datum;
 mod eh;

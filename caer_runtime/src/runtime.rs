@@ -21,7 +21,7 @@ pub struct Runtime {
 #[expose_c_stubs(rt_runtime)]
 impl Runtime {
     // TODO: ERRH
-    pub fn init(&mut self, vtable_ptr: *const vtable::Entry) {
+    pub fn init(&mut self, stackmap_start: *const u8, stackmap_end: *const u8, vtable_ptr: *const vtable::Entry) {
         let init_st = StringTable::deserialize(File::open("stringtable.bincode").unwrap());
         let init_env: Environment =
             bincode::deserialize_from(File::open("environment.bincode").unwrap()).unwrap();
@@ -31,6 +31,14 @@ impl Runtime {
             string_table: init_st,
             vtable,
             env: init_env,
+        };
+
+        let stackmaps_raw = unsafe {
+            let len = stackmap_end.offset_from(stackmap_start);
+            if len < 0 {
+                panic!("bad stackmap, len is {}", len);
+            }
+            std::slice::from_raw_parts(stackmap_start, len as usize)
         };
 
         // this fn should only be called by init on a zeroed-out Runtime, which we need to ignore

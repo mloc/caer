@@ -15,6 +15,8 @@ index_vec = { version = "0.1.1", features = ["serde"] }
 ordered-float = "1.1.0"
 leb128 = "0.2.4"
 libc = "0.2.73"
+findshlibs = "0.7.0"
+goblin = "0.2.3"
 
 [dependencies.cstub_bindgen_macro]
 path = "../cstub_bindgen_macro"
