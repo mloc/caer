@@ -21,6 +21,8 @@ pub enum ParseError {
     ConstantTableOverflow(i32),
     #[error("unexpectedly hit end of input data while reading {0} bytes")]
     UnexpectedEof(usize),
+    #[error("found {actual} records, but functions expect {functions_sum}")]
+    BadRecordCount { actual: u64, functions_sum: u64 },
 }
 
 type Result<T> = std::result::Result<T, ParseError>;
@@ -31,7 +33,7 @@ pub struct Parser<'a, BO: ByteOrder> {
     _phantom: PhantomData<BO>,
 }
 
-impl<'a, BO: ByteOrder> Parser<'a, BO> {
+impl<'a, BO: ByteOrder + 'a> Parser<'a, BO> {
     pub fn parse(data: &'a [u8]) -> Result<StackMap> {
         let mut parser = Parser {
             data,
@@ -54,9 +56,20 @@ impl<'a, BO: ByteOrder> Parser<'a, BO> {
         let num_constants = self.read_u32()?;
         let num_records = self.read_u32()?;
 
-        let mut functions = Vec::with_capacity(num_functions as usize);
+        let mut record_count_sum = 0;
+        let mut functions_info = Vec::with_capacity(num_functions as usize);
         for _ in 0..num_functions {
-            functions.push(self.parse_function()?);
+            let addr = self.read_u64()?;
+            let stack_size = self.read_u64()?;
+            let record_count = self.read_u64()?;
+            record_count_sum += record_count;
+            functions_info.push((addr, stack_size, record_count as usize));
+        }
+        if record_count_sum != num_records.into() {
+            return Err(ParseError::BadRecordCount {
+                actual: num_records.into(),
+                functions_sum: record_count_sum,
+            });
         }
 
         let mut constants = Vec::with_capacity(num_constants as usize);
@@ -68,16 +81,21 @@ impl<'a, BO: ByteOrder> Parser<'a, BO> {
         for _ in 0..num_records {
             records.push(self.parse_record(&constants)?);
         }
+        let records = records.into_boxed_slice();
 
-        Ok(StackMap { functions, records })
-    }
+        let mut cur_record = 0;
 
-    fn parse_function(&mut self) -> Result<Function> {
-        Ok(Function {
-            addr: self.read_u64()?,
-            stack_size: self.read_u64()?,
-            record_count: self.read_u64()?,
-        })
+        let mut functions = Vec::with_capacity(num_functions as usize);
+        for (addr, stack_size, num_records) in functions_info {
+            functions.push(Function {
+                addr,
+                stack_size,
+                records: records[cur_record..cur_record + num_records].to_vec(),
+            });
+            cur_record += num_records;
+        }
+
+        Ok(StackMap { functions })
     }
 
     fn parse_record(&mut self, constants: &[u64]) -> Result<Record> {
