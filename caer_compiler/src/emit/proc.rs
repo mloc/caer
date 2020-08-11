@@ -1,5 +1,6 @@
 use super::context::Context;
 use inkwell::values::BasicValue;
+use inkwell::types::BasicType;
 use super::value::Value;
 use super::prog::{ProgEmit, Intrinsic};
 use index_vec::IndexVec;
@@ -227,12 +228,44 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
     }
 
     fn build_call<F>(&self, func: F, args: &[inkwell::values::BasicValueEnum<'ctx>]) -> Option<inkwell::values::BasicValueEnum<'ctx>>  where F: Into<either::Either<inkwell::values::FunctionValue<'ctx>, inkwell::values::PointerValue<'ctx>>> {
-        self.ctx.builder.build_call(func, args, "").try_as_basic_value().left()
+        let fptr = match func.into() {
+            either::Either::Left(func_val) => func_val.as_global_value().as_pointer_value(),
+            either::Either::Right(pointer_val) => pointer_val,
+        };
+        let sp_intrinsic = unsafe {
+            self.ctx.module.get_intrinsic("llvm.experimental.gc.statepoint", &[&fptr.get_type()]).unwrap()
+        };
+
+        let mut sp_args = vec![
+            self.ctx.llvm_ctx.i64_type().const_zero().into(), // id
+            self.ctx.llvm_ctx.i32_type().const_zero().into(), // # patch bytes
+            fptr.into(), // func
+            self.ctx.llvm_ctx.i32_type().const_int(args.len() as u64, false).into(), // # args
+            self.ctx.llvm_ctx.i32_type().const_zero().into(), // flags
+        ];
+        sp_args.extend(args.iter().copied());
+        sp_args.extend([
+            self.ctx.llvm_ctx.i32_type().const_zero().into(), // transition args
+            self.ctx.llvm_ctx.i32_type().const_zero().into(), // deopt args
+        ].iter());
+
+        let token = self.ctx.builder.build_call(sp_intrinsic, &sp_args, "").try_as_basic_value().left().unwrap();
+
+        let return_type = fptr.get_type().get_element_type().into_function_type().get_return_type();
+        if let Some(return_type) = return_type {
+            let result_intrinsic =  unsafe {
+                self.ctx.module.get_intrinsic("llvm.experimental.gc.result", &[&return_type]).unwrap()
+            };
+            self.ctx.builder.build_call(result_intrinsic, &[token], "").try_as_basic_value().left()
+        } else {
+            None
+        }
     }
 
     fn build_call_intrinsic(&mut self, intrinsic: Intrinsic, args: &[inkwell::values::BasicValueEnum<'ctx>]) -> Option<inkwell::values::BasicValueEnum<'ctx>> {
         let func = self.emit.get_intrinsic(intrinsic);
-        self.build_call(func, args)
+        //self.build_call(func, args)
+        self.ctx.builder.build_call(func, args, "").try_as_basic_value().left()
     }
 
     fn build_call_catching<F>(&self, block: &Block, func: F, args: &[inkwell::values::BasicValueEnum<'ctx>]) -> Option<inkwell::values::BasicValueEnum<'ctx>>  where F: Into<either::Either<inkwell::values::FunctionValue<'ctx>, inkwell::values::PointerValue<'ctx>>> {

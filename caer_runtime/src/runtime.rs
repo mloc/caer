@@ -35,7 +35,7 @@ impl Runtime {
 
         let stackmaps_raw = unsafe {
             let len = stackmap_end.offset_from(stackmap_start);
-            if len < 0 {
+            if len <= 0 {
                 panic!("bad stackmap, len is {}", len);
             }
             std::slice::from_raw_parts(stackmap_start, len as usize)
