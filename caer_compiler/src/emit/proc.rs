@@ -232,31 +232,37 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
             either::Either::Left(func_val) => func_val.as_global_value().as_pointer_value(),
             either::Either::Right(pointer_val) => pointer_val,
         };
+
+        self.build_call_statepoint(fptr, args)
+    }
+
+    fn build_call_statepoint(&self, func: inkwell::values::PointerValue<'ctx>, args: &[inkwell::values::BasicValueEnum<'ctx>]) -> Option<inkwell::values::BasicValueEnum<'ctx>> {
         let sp_intrinsic = unsafe {
-            self.ctx.module.get_intrinsic("llvm.experimental.gc.statepoint", &[&fptr.get_type()]).unwrap()
+            self.ctx.module.get_intrinsic("llvm.experimental.gc.statepoint", &[&func.get_type()]).unwrap()
         };
 
-        let mut sp_args = vec![
+        let mut sp_args = Vec::with_capacity(7 + args.len());
+        sp_args.extend([
             self.ctx.llvm_ctx.i64_type().const_zero().into(), // id
             self.ctx.llvm_ctx.i32_type().const_zero().into(), // # patch bytes
-            fptr.into(), // func
-            self.ctx.llvm_ctx.i32_type().const_int(args.len() as u64, false).into(), // # args
+            func.into(), // func
+            self.ctx.llvm_ctx.i32_type().const_int(args.len() as u64, false).into(), // # call args
             self.ctx.llvm_ctx.i32_type().const_zero().into(), // flags
-        ];
+        ].iter());
         sp_args.extend(args.iter().copied());
         sp_args.extend([
-            self.ctx.llvm_ctx.i32_type().const_zero().into(), // transition args
-            self.ctx.llvm_ctx.i32_type().const_zero().into(), // deopt args
+            self.ctx.llvm_ctx.i32_type().const_zero().into(), // # transition args
+            self.ctx.llvm_ctx.i32_type().const_zero().into(), // # deopt args
         ].iter());
 
-        let token = self.ctx.builder.build_call(sp_intrinsic, &sp_args, "").try_as_basic_value().left().unwrap();
+        let statepoint_token = self.ctx.builder.build_call(sp_intrinsic, &sp_args, "").try_as_basic_value().left().unwrap();
 
-        let return_type = fptr.get_type().get_element_type().into_function_type().get_return_type();
+        let return_type = func.get_type().get_element_type().into_function_type().get_return_type();
         if let Some(return_type) = return_type {
             let result_intrinsic =  unsafe {
                 self.ctx.module.get_intrinsic("llvm.experimental.gc.result", &[&return_type]).unwrap()
             };
-            self.ctx.builder.build_call(result_intrinsic, &[token], "").try_as_basic_value().left()
+            self.ctx.builder.build_call(result_intrinsic, &[statepoint_token], "").try_as_basic_value().left()
         } else {
             None
         }

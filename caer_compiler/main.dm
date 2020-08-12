@@ -8,6 +8,7 @@
 	world << bar
 
 /proc/entry()
+	/*
 	world << (3 & 6)
 	var/s = "hey"
 	world << "[s] there[1/90]"
@@ -34,6 +35,11 @@
 	var/band = b & b
 	world << band
 	world << bitmess(band)
+	*/
+
+	var/x = 3
+	x = "hey"
+	world << x
 
 	//world << (c:foo)
 	//testlists()
