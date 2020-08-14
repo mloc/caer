@@ -410,9 +410,9 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         let (name, tys): (_, Vec<inkwell::types::BasicTypeEnum>) = match intrinsic {
             Intrinsic::FPow => ("llvm.pow", vec![ty_f32]),
             Intrinsic::Trap => ("llvm.trap", vec![]),
-            Intrinsic::LifetimeStart => ("llvm.lifetime.start", vec![]),
-            Intrinsic::LifetimeEnd => ("llvm.lifetime.end", vec![]),
-            Intrinsic::InvariantStart => ("llvm.invariant.start", vec![]),
+            //Intrinsic::LifetimeStart => ("llvm.lifetime.start", vec![]),
+            //Intrinsic::LifetimeEnd => ("llvm.lifetime.end", vec![]),
+            //Intrinsic::InvariantStart => ("llvm.invariant.start", vec![]),
         };
 
         unsafe { self.ctx.module.get_intrinsic(name, &tys).unwrap() }
@@ -424,7 +424,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 pub enum Intrinsic {
     FPow,
     Trap,
-    LifetimeStart,
-    LifetimeEnd,
-    InvariantStart,
+    //LifetimeStart,
+    //LifetimeEnd,
+    //InvariantStart,
 }

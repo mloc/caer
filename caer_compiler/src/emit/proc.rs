@@ -17,6 +17,7 @@ pub struct ProcEmit<'a, 'p, 'ctx> {
     pub emit: &'a mut ProgEmit<'p, 'ctx>,
     pub var_allocs: IndexVec<VarId, StackValue<'ctx>>,
     pub locals: IndexVec<LocalId, StackValue<'ctx>>,
+    local_assigned: IndexVec<LocalId, bool>,
     pub blocks: IndexVec<BlockId, BasicBlock<'ctx>>,
     pub func: FunctionValue<'ctx>,
     pub proc: &'a Proc,
@@ -29,6 +30,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
             emit,
             var_allocs: IndexVec::new(),
             locals: IndexVec::new(),
+            local_assigned: IndexVec::new(),
             blocks: IndexVec::new(),
             func,
             proc,
@@ -57,12 +59,11 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         let block = self.ctx.llvm_ctx.append_basic_block(self.func, "entry");
         self.ctx.builder.position_at_end(block);
 
-        let null_val = self.ctx.rt.ty.val_type.const_zero();
-
         for (i, local) in self.proc.locals.iter().enumerate() {
             let local_alloca = self.build_val_alloca(&local.ty);
             local_alloca.set_name(&format!("local_{}", i));
             self.locals.push(StackValue::new(Some(local_alloca), local.ty.clone()));
+            self.local_assigned.push(false);
         }
 
         for var in self.proc.vars.iter() {
@@ -98,7 +99,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         block
     }
 
-    fn finalize_entry_block(&self, entry: inkwell::basic_block::BasicBlock) {
+    fn finalize_entry_block(&self, entry: BasicBlock) {
         self.ctx.builder.position_at_end(entry);
         self.ctx.builder.build_unconditional_branch(self.blocks[BlockId::new(0)]);
     }
@@ -122,7 +123,6 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
 
     fn assign_literal(&mut self, lit: &Literal, local_id: LocalId) {
         let lit_ty = lit.get_ty();
-        let val_alloca = self.build_val_alloca(&lit_ty);
         let val: BasicValueEnum = match lit {
             Literal::Num(x) => self.ctx.llvm_ctx.f32_type().const_float(*x as f64).into(),
             Literal::String(id) => self.ctx.llvm_ctx.i64_type().const_int(id.id(), false).into(),
@@ -131,17 +131,6 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         };
 
         self.set_local(local_id, &SSAValue::new(val, lit_ty));
-    }
-
-    fn load_ssa(&self, local_alloca: PointerValue<'ctx>) -> BasicValueEnum<'ctx> {
-        self.ctx.builder.build_load(local_alloca, "")
-    }
-
-    /// Take an SSA value and place it in an alloca, allowing it to be accounted.
-    fn ssa_introduce(&self, val: BasicValueEnum, ty: &ty::Complex) {
-        // TODO: hoist this alloca creation up to the start block?
-        let alloca = self.build_val_alloca(ty);
-        self.ctx.builder.build_store(alloca, val);
     }
 
     // TODO: refactor out as_any, bad.
@@ -158,7 +147,22 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
     }
 
     fn set_local(&mut self, local_id: LocalId, val: &SSAValue<'ctx>) {
+        assert!(!self.local_assigned[local_id]);
+        let stackptr = self.locals[local_id].val.unwrap();
+        let lts_intrinsic = unsafe {
+            self.ctx.module.get_intrinsic("llvm.lifetime.start", &[stackptr.get_type().into()]).unwrap()
+        };
+        self.build_call(lts_intrinsic, &[self.ctx.llvm_ctx.i64_type().const_int(self.locals[local_id].ty.get_store_size(), false).into(), stackptr.into()]);
         self.store_val(val, &self.locals[local_id]);
+        self.local_assigned[local_id] = true;
+    }
+
+    fn local_die(&self, local_id: LocalId) {
+        let stackptr = self.locals[local_id].val.unwrap();
+        let lte_intrinsic = unsafe {
+            self.ctx.module.get_intrinsic("llvm.lifetime.end", &[stackptr.get_type().into()]).unwrap()
+        };
+        self.build_call(lte_intrinsic, &[self.ctx.llvm_ctx.i64_type().const_int(self.locals[local_id].ty.get_store_size(), false).into(), stackptr.into()]);
     }
 
     fn load_var(&self, var_id: VarId) -> SSAValue<'ctx> {
@@ -206,7 +210,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                     ty::Primitive::Float => {
                         // TODO fix this, this is mega bad, won't work on big endian systems
                         let val_as_i32 = self.ctx.builder.build_bitcast(ssa_val.val, self.ctx.llvm_ctx.i32_type(), "pack_val");
-                        let val_as_i64: inkwell::values::IntValue = self.ctx.builder.build_int_z_extend(val_as_i32.into_int_value(), self.ctx.llvm_ctx.i64_type(), "pack_val");
+                        let val_as_i64: IntValue = self.ctx.builder.build_int_z_extend(val_as_i32.into_int_value(), self.ctx.llvm_ctx.i64_type(), "pack_val");
                         (1, val_as_i64)
                     },
                     ty::Primitive::String => {
@@ -214,7 +218,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                         (2, val_as_int)
                     },
                     ty::Primitive::Ref(_) => {
-                        let val_as_int: inkwell::values::IntValue = self.ctx.builder.build_ptr_to_int(ssa_val.val.into_pointer_value(), self.ctx.llvm_ctx.i64_type(), "pack_val");
+                        let val_as_int: IntValue = self.ctx.builder.build_ptr_to_int(ssa_val.val.into_pointer_value(), self.ctx.llvm_ctx.i64_type(), "pack_val");
                         (3, val_as_int)
                     },
                     _ => unimplemented!(),
@@ -330,7 +334,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                     let store_val = self.get_local(*local, false);
                     if store_val.ty.needs_destructor() {
                         let store_val_any = self.conv_val(&store_val, &ty::Complex::Any);
-                        self.build_call(self.ctx.rt.rt_val_cloned, &[(&store_val).into()],);
+                        self.build_call(self.ctx.rt.rt_val_cloned, &[(&store_val_any).into()],);
                     }
                     self.store_var(*var, &store_val);
                 },
@@ -504,7 +508,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                         },
                         ty::Primitive::Float => {
                             let disc_val = self.get_local(*discriminant, false);
-                            self.ctx.builder.build_cast(inkwell::values::InstructionOpcode::FPToSI, disc_val.val, self.ctx.llvm_ctx.i32_type(), "disc").into_int_value()
+                            self.ctx.builder.build_cast(InstructionOpcode::FPToSI, disc_val.val, self.ctx.llvm_ctx.i32_type(), "disc").into_int_value()
                         },
                         _ => unimplemented!("{:?}", prim_ty),
                     }
@@ -577,7 +581,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
     // convert an f32 val into a signed i32, saturating at min/max values
     // conversion taken from https://github.com/rust-lang/rust/blob/master/src/librustc_codegen_ssa/mir/rvalue.rs#L883
     // TODO: replace once LLVM gets proper saturating conversion intrinsics. this is bad.
-    fn f32_to_i32_sat(&self, f32_val: inkwell::values::FloatValue<'ctx>) -> inkwell::values::IntValue<'ctx> {
+    fn f32_to_i32_sat(&self, f32_val: FloatValue<'ctx>) -> IntValue<'ctx> {
         let i32_type = self.ctx.llvm_ctx.i32_type();
         let f32_type = self.ctx.llvm_ctx.f32_type();
 
@@ -602,17 +606,17 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         self.ctx.builder.build_select(is_nan, i32_type.const_zero().into(), s1, "").into_int_value()
     }
 
-    fn float_to_i24(&self, f32_val: inkwell::values::FloatValue<'ctx>) -> inkwell::values::IntValue<'ctx> {
+    fn float_to_i24(&self, f32_val: FloatValue<'ctx>) -> IntValue<'ctx> {
         let i24_type = self.ctx.llvm_ctx.custom_width_int_type(24);
         let i32_val = self.f32_to_i32_sat(f32_val);
         self.ctx.builder.build_int_truncate(i32_val, i24_type, "")
     }
 
-    fn i24_to_float(&self, i24_val: inkwell::values::IntValue<'ctx>) -> inkwell::values::FloatValue<'ctx> {
+    fn i24_to_float(&self, i24_val: IntValue<'ctx>) -> FloatValue<'ctx> {
         self.ctx.builder.build_unsigned_int_to_float(i24_val, self.ctx.llvm_ctx.f32_type(), "")
     }
 
-    fn build_argpack(&self, src: Option<LocalId>, args: &[LocalId]) -> inkwell::values::PointerValue<'ctx> {
+    fn build_argpack(&self, src: Option<LocalId>, args: &[LocalId]) -> PointerValue<'ctx> {
         let n_val = self.ctx.llvm_ctx.i64_type().const_int(args.len() as u64, false);
         let array_type = self.ctx.rt.ty.val_type.array_type(args.len() as u32);
         let mut argpack_unnamed = array_type.const_zero();
@@ -640,7 +644,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         argpack_alloca
     }
 
-    fn build_extract_ref_ptr(&self, val: inkwell::values::StructValue<'ctx>) -> inkwell::values::PointerValue<'ctx> {
+    fn build_extract_ref_ptr(&self, val: StructValue<'ctx>) -> PointerValue<'ctx> {
         // TODO: tycheck we're a ref
         // TODO: use some constant instead of 1
         // TODO: TYAPI
@@ -650,7 +654,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         ref_ptr
     }
 
-    fn build_extract_ty_id(&self, datum_ptr: inkwell::values::PointerValue<'ctx>) -> inkwell::values::IntValue<'ctx> {
+    fn build_extract_ty_id(&self, datum_ptr: PointerValue<'ctx>) -> IntValue<'ctx> {
         let ty_id_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(datum_ptr, &[
             self.ctx.llvm_ctx.i32_type().const_zero(),
             self.ctx.llvm_ctx.i32_type().const_int(datum::DATUM_TY_FIELD_OFFSET, false),
@@ -659,7 +663,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         ty_id
     }
 
-    fn build_vtable_lookup_inline(&self, ty_id: inkwell::values::IntValue<'ctx>, offset: u64) -> inkwell::values::BasicValueEnum<'ctx> {
+    fn build_vtable_lookup_inline(&self, ty_id: IntValue<'ctx>, offset: u64) -> BasicValueEnum<'ctx> {
         let field_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(self.emit.vt_global.as_pointer_value(), &[
             self.ctx.llvm_ctx.i32_type().const_zero(),
             ty_id,
@@ -669,7 +673,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         field
     }
 
-    fn build_vtable_lookup(&self, block: &Block, datum_ptr: inkwell::values::PointerValue<'ctx>, offset: u64) -> inkwell::values::BasicValueEnum<'ctx> {
+    fn build_vtable_lookup(&self, block: &Block, datum_ptr: PointerValue<'ctx>, offset: u64) -> BasicValueEnum<'ctx> {
         let lookup_fn = self.emit.vt_lookup[offset as usize];
         let field = self.build_call_catching(block, lookup_fn, &[datum_ptr.into()]).unwrap();
         field.set_name(&format!("vtable_field_{}", offset));
@@ -682,6 +686,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                 let local = &self.proc.locals[*local_id];
                 if local.ty.needs_destructor() {
                     self.build_call(self.ctx.rt.rt_val_drop, &[self.get_local_any(*local_id).into()]);
+                    self.local_die(*local_id);
                 }
             }
             for var_id in self.proc.scopes[block.scope].destruct_vars.iter() {

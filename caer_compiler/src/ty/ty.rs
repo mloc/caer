@@ -78,6 +78,15 @@ impl Complex {
             _ => false,
         }
     }
+
+    // BAD. TODO: remove, x64 specific
+    pub fn get_store_size(&self) -> u64 {
+        match self {
+            Complex::Any | Complex::OneOf(_) => 16, // discrim + val
+            Complex::Primitive(_) => 8,
+            _ => panic!("can't get size of {:?}", self),
+        }
+    }
 }
 
 impl Ty for Primitive {
