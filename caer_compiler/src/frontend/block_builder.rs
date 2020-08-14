@@ -62,9 +62,13 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
                 let var = self.add_var(&v.var_type, &v.name);
                 self.push_op(cfg::Op::MkVar(var));
 
+                let name_id = self.pb.builder.add_string(&v.name);
                 if let Some(expr) = &v.value {
-                    let name_id = self.pb.builder.add_string(&v.name);
                     self.build_assign(None, name_id, expr);
+                } else {
+                    let null = self.build_literal(cfg::Literal::Null);
+                    let var_id = self.pb.proc.lookup_var(self.block.scope, name_id).unwrap();
+                    self.push_op(cfg::Op::Store(var_id, null));
                 }
             },
 
