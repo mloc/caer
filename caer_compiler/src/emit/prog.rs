@@ -405,21 +405,17 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     fn create_intrinsic(&self, intrinsic: Intrinsic) -> inkwell::values::FunctionValue<'ctx> {
-        let ty_f32: inkwell::types::BasicTypeEnum = self.ctx.llvm_ctx.f32_type().into();
-        let ty_i32: inkwell::types::BasicTypeEnum = self.ctx.llvm_ctx.i32_type().into();
-        let ty_i64: inkwell::types::BasicTypeEnum = self.ctx.llvm_ctx.i64_type().into();
-        let ty_void = self.ctx.llvm_ctx.void_type();
-        let ty_token = self.ctx.llvm_ctx.token_type();
+        let ty_f32 = self.ctx.llvm_ctx.f32_type().into();
 
-        //(i64, i32, i32 ()*, i32, i32, ...)
-
-        let (name, ty) = match intrinsic {
-            Intrinsic::FPow => ("llvm.pow.f32", ty_f32.fn_type(&[ty_f32, ty_f32], false)),
-            Intrinsic::Trap => ("llvm.trap", ty_void.fn_type(&[], false)),
-            Intrinsic::StatepointVoid => ("llvm.experimental.gc.statepoint.p0f_i32f", ty_token.fn_type(&[ty_i64, ty_i32, ty_i32.fn_type(&[], false).ptr_type(inkwell::AddressSpace::Generic).into(), ty_i32, ty_i32], true)),
+        let (name, tys): (_, Vec<inkwell::types::BasicTypeEnum>) = match intrinsic {
+            Intrinsic::FPow => ("llvm.pow", vec![ty_f32]),
+            Intrinsic::Trap => ("llvm.trap", vec![]),
+            Intrinsic::LifetimeStart => ("llvm.lifetime.start", vec![]),
+            Intrinsic::LifetimeEnd => ("llvm.lifetime.end", vec![]),
+            Intrinsic::InvariantStart => ("llvm.invariant.start", vec![]),
         };
 
-        self.ctx.module.add_function(name, ty, None)
+        unsafe { self.ctx.module.get_intrinsic(name, &tys).unwrap() }
     }
 }
 
@@ -428,5 +424,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 pub enum Intrinsic {
     FPow,
     Trap,
-    StatepointVoid,
+    LifetimeStart,
+    LifetimeEnd,
+    InvariantStart,
 }

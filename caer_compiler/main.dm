@@ -39,6 +39,7 @@
 
 	var/x = 3
 	x = "hey"
+
 	world << x
 
 	//world << (c:foo)

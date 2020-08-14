@@ -1,8 +1,8 @@
-use index_vec::{define_index_type};
 use caer_runtime::type_tree;
+use index_vec::define_index_type;
 use std::collections::BTreeSet;
 
-define_index_type!{pub struct TyId = u32;}
+define_index_type! {pub struct TyId = u32;}
 
 pub trait Ty {
     fn needs_destructor(&self) -> bool;
@@ -23,11 +23,16 @@ pub enum Primitive {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub enum Complex {
     Any,
+    Pointer(Box<Complex>),
     List(Box<Complex>),
     Primitive(Primitive),
     // btreeset is bad.
     OneOf(BTreeSet<Complex>),
-    Proc { args: Vec<Complex>, var_args: Option<Box<Complex>>, ret: Box<Complex> },
+    Proc {
+        args: Vec<Complex>,
+        var_args: Option<Box<Complex>>,
+        ret: Box<Complex>,
+    },
 }
 
 impl Complex {
@@ -38,10 +43,14 @@ impl Complex {
             /*if ty == Complex::Any {
                 return Complex::Any;
             }*/
-            if let Complex::OneOf(oset) = ty {
-                set.extend(oset.iter().cloned());
-            } else {
-                set.insert(ty.clone());
+            match ty {
+                Complex::Any => return Complex::Any,
+                Complex::OneOf(oset) => {
+                    set.extend(oset.iter().cloned());
+                }
+                _ => {
+                    set.insert(ty.clone());
+                }
             }
         }
 
@@ -80,7 +89,7 @@ impl Ty for Primitive {
     }
 
     fn as_primitive(&self) -> Option<Primitive> {
-        return Some(*self)
+        return Some(*self);
     }
 
     fn is_primitive(&self, prim: Primitive) -> bool {

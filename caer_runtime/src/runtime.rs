@@ -33,7 +33,7 @@ impl Runtime {
             env: init_env,
         };
 
-        let stackmaps_raw = unsafe {
+        /*let stackmaps_raw = unsafe {
             let len = stackmap_end.offset_from(stackmap_start);
             if len <= 0 {
                 panic!("bad stackmap, len is {}", len);
@@ -42,7 +42,7 @@ impl Runtime {
         };
 
         let stackmap = llvm_stackmaps::Parser::<llvm_stackmaps::LittleEndian>::parse(stackmaps_raw).unwrap();
-        println!("STACKMAP: {:#?}", stackmap);
+        println!("STACKMAP: {:#?}", stackmap);*/
 
         // this fn should only be called by init on a zeroed-out Runtime, which we need to ignore
         mem::forget(mem::replace(self, new));
