@@ -37,6 +37,8 @@
 	world << bitmess(band)
 	*/
 
+	world << abc()
+
 	var/x = 3
 	x = "hey"
 
@@ -58,10 +60,11 @@
 	world << loopy()
 	world << y + 4
 	forl()
-
+*/
 /proc/abc()
 	var/x
 	if(3)
+		//var/y
 		x = 3
 		world.log << 3
 	else if(7)
@@ -70,7 +73,7 @@
 		x = 39
 	world.log << 78
 	return x
-*/
+
 
 /proc/loopy()
 	var/x = 0

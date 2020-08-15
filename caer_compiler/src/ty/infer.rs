@@ -41,6 +41,7 @@ impl Idx for InferKey {
 #[derive(Debug, Clone, Default)]
 pub struct InferValue {
     tys: BTreeSet<ty::Complex>,
+    participating_keys: Vec<InferKey>,
     frozen: bool,
 }
 
@@ -48,6 +49,7 @@ impl InferValue {
     fn from_ty(ty: ty::Complex) -> Self {
         Self {
             tys: std::iter::once(ty).collect(),
+            participating_keys: Vec::new(),
             frozen: false,
         }
     }
@@ -75,6 +77,7 @@ impl InferValue {
     fn freeze(&self) -> Self {
         Self {
             tys: self.tys.clone(),
+            participating_keys: self.participating_keys.clone(),
             frozen: true,
         }
     }
@@ -95,8 +98,11 @@ impl UnifyValue for InferValue {
                 target: v1.tys.clone(),
             })
         } else {
+            let mut keys = v1.participating_keys.clone();
+            keys.extend(&v2.participating_keys);
             Ok(Self {
                 tys: v1.tys.union(&v2.tys).cloned().collect(),
+                participating_keys: keys,
                 frozen: v1.frozen || v2.frozen,
             })
         }
@@ -150,6 +156,14 @@ impl InferEngine {
         self.table.new_key(None)
     }
 
+    pub fn find(&mut self, key: InferKey) -> InferKey {
+        self.table.find(key)
+    }
+
+    pub fn get_subs(&self) -> &Option<Vec<(InferKey, InferKey)>> {
+        &self.sub_expanded
+    }
+
     pub fn snapshot(&mut self) -> usize {
         self.snapshot_stack.push(self.table.snapshot());
         self.snapshot_stack.len() - 1
@@ -175,7 +189,7 @@ impl InferEngine {
     }
 
     pub fn propogate_subs(&mut self) -> Result<(), InferUnifyError> {
-        for (sub, sup) in self.sub_expanded.as_ref().unwrap().iter() {
+        for (sub, sup) in self.sub_expanded.as_ref().unwrap().iter().rev() {
             let sub_val = self.table.probe_value(*sub);
             self.table.unify_var_value(*sup, sub_val)?;
         }
@@ -328,8 +342,8 @@ impl<'i> SubtypeResolver<'i> {
 
         let topsort = petgraph::algo::toposort(&graph, None).expect("subtype graph has cycles");
         topsort.into_iter().flat_map(|node| {
-            graph.neighbors_directed(node, petgraph::Direction::Outgoing).map(move |super_node| {
-                (graph[node], graph[super_node])
+            graph.neighbors_directed(node, petgraph::Direction::Incoming).map(move |sub_node| {
+                (graph[sub_node], graph[node])
             })
         }).collect()
     }

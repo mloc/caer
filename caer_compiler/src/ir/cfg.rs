@@ -479,6 +479,7 @@ pub struct Block {
     pub ops: Vec<Op>,
     pub terminator: Terminator,
     pub scope: ScopeId,
+    pub scope_begin: bool,
     pub scope_end: bool,
 }
 
@@ -489,6 +490,7 @@ impl Block {
             ops: Vec::new(),
             terminator: Terminator::Return,
             scope,
+            scope_begin: false,
             scope_end: false,
         }
     }

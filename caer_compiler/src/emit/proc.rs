@@ -45,6 +45,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                     ty::Primitive::Float => self.ctx.builder.build_alloca(self.ctx.llvm_ctx.f32_type(), ""),
                     ty::Primitive::String => self.ctx.builder.build_alloca(self.ctx.llvm_ctx.i64_type(), ""),
                     ty::Primitive::Ref(_) => self.ctx.builder.build_alloca(self.ctx.rt.ty.datum_common_type_ptr, ""),
+                    ty::Primitive::Null => self.ctx.builder.build_alloca(self.ctx.llvm_ctx.i64_type(), ""),
                     _ => unimplemented!("unhandled prim: {:?}", prim),
                 }
             },
@@ -163,6 +164,14 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
             self.ctx.module.get_intrinsic("llvm.lifetime.end", &[stackptr.get_type().into()]).unwrap()
         };
         self.build_call(lte_intrinsic, &[self.ctx.llvm_ctx.i64_type().const_int(self.locals[local_id].ty.get_store_size(), false).into(), stackptr.into()]);
+    }
+
+    fn var_die(&self, var_id: VarId) {
+        let stackptr = self.var_allocs[var_id].val.unwrap();
+        let lte_intrinsic = unsafe {
+            self.ctx.module.get_intrinsic("llvm.lifetime.end", &[stackptr.get_type().into()]).unwrap()
+        };
+        self.build_call(lte_intrinsic, &[self.ctx.llvm_ctx.i64_type().const_int(self.var_allocs[var_id].ty.get_store_size(), false).into(), stackptr.into()]);
     }
 
     fn load_var(&self, var_id: VarId) -> SSAValue<'ctx> {
@@ -686,8 +695,8 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                 let local = &self.proc.locals[*local_id];
                 if local.ty.needs_destructor() {
                     self.build_call(self.ctx.rt.rt_val_drop, &[self.get_local_any(*local_id).into()]);
-                    self.local_die(*local_id);
                 }
+                self.local_die(*local_id);
             }
             for var_id in self.proc.scopes[block.scope].destruct_vars.iter() {
                 let var = &self.proc.vars[*var_id];
@@ -696,6 +705,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                     let var_any = self.conv_val(&var_val, &ty::Complex::Any);
                     self.build_call(self.ctx.rt.rt_val_drop, &[var_any.into()]);
                 }
+                self.var_die(*var_id);
             }
         }
     }
