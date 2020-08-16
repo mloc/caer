@@ -1,4 +1,4 @@
-use caer_runtime::type_tree;
+use crate::id::TypeId;
 use index_vec::define_index_type;
 use std::collections::BTreeSet;
 
@@ -17,7 +17,7 @@ pub enum Primitive {
     String,
     //Int,
     // None => any ref. maybe replace with id 0
-    Ref(Option<type_tree::TypeId>),
+    Ref(Option<TypeId>),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]

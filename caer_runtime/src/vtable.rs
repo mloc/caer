@@ -1,9 +1,8 @@
 use crate::arg_pack::ArgPack;
 use crate::datum::Datum;
 use crate::runtime::Runtime;
-use crate::string_table::StringId;
-use crate::type_tree::TypeId;
 use crate::val::Val;
+use caer_types::id::{StringId, TypeId};
 
 use std::ops::Index;
 use std::ptr::NonNull;
@@ -29,11 +28,6 @@ impl Index<TypeId> for Vtable {
         &self.table[id.index()]
     }
 }
-
-pub const VTABLE_SIZE_FIELD_OFFSET: u64 = 0;
-pub const VTABLE_VAR_GET_FIELD_OFFSET: u64 = 1;
-pub const VTABLE_VAR_SET_FIELD_OFFSET: u64 = 2;
-pub const VTABLE_PROC_LOOKUP_FIELD_OFFSET: u64 = 3;
 
 pub type ProcPtr = extern "C" fn(arg_pack: *const ArgPack, rt: NonNull<Runtime>) -> Val;
 

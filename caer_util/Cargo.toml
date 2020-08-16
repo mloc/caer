@@ -5,4 +5,4 @@ authors = ["Colm Ó hIcí <colmohici@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-index_vec = "0.1.1"
+index_vec = { version = "0.1.2", features = ["serde"] }

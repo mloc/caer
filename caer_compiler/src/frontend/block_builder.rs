@@ -1,11 +1,10 @@
 use super::proc_builder::ProcBuilder;
-use crate::ir::cfg;
-use crate::ir::id::*;
+use caer_ir::cfg;
+use caer_ir::id::{ScopeId, BlockId, VarId, LocalId};
 use dreammaker::ast;
-use caer_runtime::op::BinaryOp;
-use caer_runtime::string_table::StringId;
-use caer_runtime::type_tree;
-use crate::ty;
+use caer_types::op::BinaryOp;
+use caer_types::id::{StringId, TypeId};
+use caer_types::ty;
 
 // TODO: tidy up the lifetimes dood
 pub struct BlockBuilder<'a, 'pb, 'cb, 'ot> {
@@ -273,7 +272,7 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
             };
 
             // TODO: encapsulate type_tree
-            let dty_id = self.pb.builder.env.rt_env.type_tree.type_by_node_id[&(var_ty.index().index() as u64)];
+            let dty_id = self.pb.builder.env.type_tree.type_by_node_id[&(var_ty.index().index() as u64)];
             self.pb.proc.vars[var].assoc_dty = Some(dty_id);
         }
 
@@ -386,7 +385,7 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
                 };
 
                 // TODO: encap tt
-                let dty = &self.pb.builder.env.rt_env.type_tree.types[dty_id];
+                let dty = &self.pb.builder.env.type_tree.types[dty_id];
                 if !dty.proc_lookup.contains_key(&proc_name) {
                     panic!("type {} has no proc {}", self.pb.builder.env.string_table.get(dty.path_str), self.pb.builder.env.string_table.get(proc_name));
                 }
@@ -400,7 +399,7 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
 
     // TODO: ERRH(fe)
     /// Returns the dtype ID of the indexed field, if indexed with a .-like operator
-    fn validate_datum_index(&mut self, datum_local: LocalId, var: StringId, index_kind: ast::IndexKind) -> Option<type_tree::TypeId> {
+    fn validate_datum_index(&mut self, datum_local: LocalId, var: StringId, index_kind: ast::IndexKind) -> Option<TypeId> {
         match index_kind {
             ast::IndexKind::Colon | ast::IndexKind::SafeColon => None,
             ast::IndexKind::Dot | ast::IndexKind::SafeDot => {
@@ -410,7 +409,7 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
                 };
 
                 // TODO: encap tt
-                let dty = &self.pb.builder.env.rt_env.type_tree.types[dty_id];
+                let dty = &self.pb.builder.env.type_tree.types[dty_id];
                 if let Some(var_info) = dty.var_lookup.get(&var) {
                     var_info.assoc_dty
                 } else {
@@ -587,7 +586,7 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
                         assert!(pf.vars.is_empty());
                         // TODO: ughhhh, move path resolving into a helper, better encapsulation
                         let pf_ty = self.pb.builder.objtree.root().navigate_path(&pf.path).unwrap().ty();
-                        let type_id = self.pb.builder.env.rt_env.type_tree.type_by_node_id[&(pf_ty.index().index() as u64)];
+                        let type_id = self.pb.builder.env.type_tree.type_by_node_id[&(pf_ty.index().index() as u64)];
                         type_id
                     },
                     _ => unimplemented!("new with newty {:?}", newty),

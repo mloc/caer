@@ -1,9 +1,10 @@
 use crate::datum::Datum;
 use crate::list::List;
-use crate::op;
+use caer_types::op;
+use caer_types::id::StringId;
 use crate::runtime::Runtime;
-use crate::type_tree::Specialization;
-use crate::string_table::{StringId, StringTable};
+use caer_types::type_tree::Specialization;
+use crate::string_table::StringTable;
 use crate::arg_pack::ArgPack;
 use std::ptr::NonNull;
 use std::ops::*;
@@ -70,7 +71,7 @@ pub extern "C" fn rt_val_to_switch_disc(val: Val) -> u32 {
     match val {
         Val::Float(val) => (val.into_inner() != 0.0) as u32,
         Val::Null => 0,
-        Val::String(s) => s.is_empty() as u32,
+        Val::String(s) => (s.index() != 0) as u32,
         Val::Ref(ptr) => ptr.is_some() as u32,
     }
 }

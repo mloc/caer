@@ -1,7 +1,7 @@
 use inkwell;
 use std::mem::size_of;
 use inkwell::types::BasicType;
-use caer_runtime::datum;
+use caer_types::layout;
 
 #[derive(Debug)]
 pub struct Context<'a, 'ctx> {
@@ -36,7 +36,7 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
             let datum_ptr = func.get_first_param().unwrap().into_pointer_value();
             let ty_id_ptr = unsafe { self.builder.build_in_bounds_gep(datum_ptr, &[
                 self.llvm_ctx.i32_type().const_zero(),
-                self.llvm_ctx.i32_type().const_int(datum::DATUM_TY_FIELD_OFFSET, false),
+                self.llvm_ctx.i32_type().const_int(layout::DATUM_TY_FIELD_OFFSET, false),
             ], "ty_id_ptr") };
             let ty_id = self.builder.build_load(ty_id_ptr, "ty_id").into_int_value();
 

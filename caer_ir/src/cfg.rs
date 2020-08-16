@@ -1,9 +1,6 @@
 use super::id::*;
-use crate::ty;
-use caer_runtime;
-use caer_runtime::environment::ProcId;
-use caer_runtime::string_table::StringId;
-use caer_runtime::type_tree::TypeId;
+use caer_types::ty;
+use caer_types::id::{StringId, TypeId, ProcId};
 use dot;
 use index_vec::IndexVec;
 use std::collections::{HashMap, HashSet};
@@ -19,7 +16,7 @@ pub struct Local {
     // if a value is moved, it won't be destructed with this local
     pub destruct_scope: Option<ScopeId>,
     // DM-style "compile-time" typepath
-    pub assoc_dty: Option<caer_runtime::type_tree::TypeId>,
+    pub assoc_dty: Option<TypeId>,
 }
 
 #[derive(Debug, Clone)]
@@ -30,7 +27,7 @@ pub struct Var {
     pub ty: ty::Complex,
     // DM-style "compile-time" typepath, only used for error checking safe deref ops
     // TODO: maybe fold into ty?
-    pub assoc_dty: Option<caer_runtime::type_tree::TypeId>,
+    pub assoc_dty: Option<TypeId>,
 }
 
 #[derive(Debug)]
@@ -80,14 +77,14 @@ impl<'a> Proc {
         let mut new = Self {
             // awful, TODO: fetch a better name, MANGLE?
             name: StringId::new(0),
-            id: id,
+            id,
 
             locals: IndexVec::new(),
             vars: IndexVec::new(),
             vars_by_name: HashMap::new(),
             params: Vec::new(),
             blocks: IndexVec::new(),
-            scopes: scopes,
+            scopes,
 
             global_scope: global_scope_id,
 
@@ -119,11 +116,11 @@ impl<'a> Proc {
     }
 
     // TODO: localref
-    pub fn set_assoc_dty(&mut self, local: LocalId, dty: caer_runtime::type_tree::TypeId) {
+    pub fn set_assoc_dty(&mut self, local: LocalId, dty: TypeId) {
         self.locals[local].assoc_dty = Some(dty);
     }
 
-    pub fn get_assoc_dty(&self, local: LocalId) -> Option<caer_runtime::type_tree::TypeId> {
+    pub fn get_assoc_dty(&self, local: LocalId) -> Option<TypeId> {
         self.locals[local].assoc_dty
     }
 
@@ -424,7 +421,7 @@ impl<'a> dot::Labeller<'a, BlockId, (BlockId, BlockId, String)> for Proc {
 
     fn graph_id(&'a self) -> dot::Id<'a> {
         // TODO: extract actual name
-        dot::Id::new(format!("block_{}", self.name.id().to_string())).unwrap()
+        dot::Id::new(format!("block_{}", self.name.index().to_string())).unwrap()
     }
 }
 
@@ -564,8 +561,8 @@ pub enum Op {
 
     Put(LocalId),
     // TODO: merge hard and soft, soft is a variant op with (Any, Any) -> Any
-    Binary(LocalId, caer_runtime::op::BinaryOp, LocalId, LocalId),
-    HardBinary(LocalId, ty::op::HardBinary, LocalId, LocalId),
+    Binary(LocalId, caer_types::op::BinaryOp, LocalId, LocalId),
+    HardBinary(LocalId, caer_types::op::HardBinary, LocalId, LocalId),
 
     // TODO: STRINGID
     // TODO: use + ref a procid

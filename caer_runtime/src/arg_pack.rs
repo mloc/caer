@@ -1,7 +1,6 @@
-use crate::string_table::StringId;
+use caer_types::id::{StringId, ProcId};
 use crate::runtime::Runtime;
 use crate::val::Val;
-use crate::environment::ProcId;
 use crate::ffi::FFIArray;
 
 #[repr(C)]

@@ -1,8 +1,28 @@
-use caer_runtime::op::BinaryOp;
+use crate::ty::{Complex, Primitive};
 
-use super::ty::{Complex, Primitive};
-
-use inkwell::FloatPredicate;
+#[derive(Debug, Copy, Clone, PartialEq)]
+#[repr(u32)]
+pub enum BinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Pow,
+    Eq,
+    Ne,
+    Gt,
+    Ge,
+    Lt,
+    Le,
+    Shl,
+    Shr,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Equiv,
+    NotEquiv,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum BitOp {
@@ -98,4 +118,25 @@ impl HardBinary {
             Self::FloatBitOp(_) => Primitive::Float.into(),
         }
     }
+}
+
+// lifted from inkwell for now, TODO: move, reexpose?
+#[derive(Debug, Clone, Copy)]
+pub enum FloatPredicate {
+    OEQ,
+    OGE,
+    OGT,
+    OLE,
+    OLT,
+    ONE,
+    ORD,
+    PredicateFalse,
+    PredicateTrue,
+    UEQ,
+    UGE,
+    UGT,
+    ULE,
+    ULT,
+    UNE,
+    UNO,
 }

@@ -1,4 +1,4 @@
-use crate::ty;
+use caer_types::ty;
 use inkwell::values::{PointerValue, GlobalValue, BasicValue, BasicValueEnum, IntValue};
 
 #[derive(Debug, Clone)]

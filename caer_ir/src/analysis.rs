@@ -1,15 +1,12 @@
-use super::cfg::{self, Op};
-use super::env::Env;
-use super::id::*;
-use crate::ty;
-use crate::ty::infer;
-
-use caer_runtime::environment::ProcId;
-use caer_runtime::op::BinaryOp;
-use caer_runtime::val::Val;
-
+use crate::cfg::{self, Op};
+use crate::env::Env;
+use crate::id::*;
+use caer_types::ty;
+use caer_types::id::ProcId;
+use caer_infer as infer;
+use crate::const_val::ConstVal;
+use caer_types::op::BinaryOp;
 use index_vec::IndexVec;
-
 use std::collections::{HashMap, HashSet};
 
 // modifies a clone of the proc, for now. proc-level cfg opts
@@ -27,8 +24,8 @@ impl<'a> ProcAnalysis<'a> {
         let initial_var_info = proc.vars.indices().map(|id| VarInfo::new(id)).collect();
 
         let mut pa = ProcAnalysis {
-            env: env,
-            proc: proc,
+            env,
+            proc,
             local_info: initial_local_info,
             var_info: initial_var_info,
         };
@@ -291,14 +288,14 @@ impl<'a> ProcAnalysis<'a> {
         const_v.is_some()
     }*/
 
-    fn val_to_lit(val: Val) -> cfg::Literal {
+    /*fn val_to_lit(val: Val) -> cfg::Literal {
         match val {
             Val::Null => cfg::Literal::Null,
             Val::Float(n) => cfg::Literal::Num(n.into()),
             Val::String(id) => cfg::Literal::String(id),
             _ => unimplemented!("other val {:?}", val),
         }
-    }
+    }*/
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -337,17 +334,15 @@ pub struct LocalInfo {
     dependent_ops: Vec<RefIndex>,
 
     decl_op: Option<OpIndex>, // block index, op index
-    const_val: Option<caer_runtime::val::Val>,
+    const_val: Option<ConstVal>,
 }
 
 impl LocalInfo {
     /// Create an empty info struct for a given local
     fn new(id: LocalId) -> Self {
         Self {
-            id: id,
-
+            id,
             dependent_ops: Vec::new(),
-
             decl_op: None,
             const_val: None,
         }
@@ -355,9 +350,9 @@ impl LocalInfo {
 
     fn const_from_lit(&mut self, lit: &cfg::Literal) {
         self.const_val = Some(match lit {
-            cfg::Literal::Null => Val::Null,
-            cfg::Literal::Num(n) => Val::Float((*n).into()),
-            cfg::Literal::String(id) => Val::String(*id),
+            cfg::Literal::Null => ConstVal::Null,
+            cfg::Literal::Num(n) => ConstVal::Float((*n).into()),
+            cfg::Literal::String(id) => ConstVal::String(*id),
             _ => unimplemented!("{:?}", lit),
         });
     }
@@ -391,7 +386,7 @@ struct InferCheckpoint {
     snapshot_idx: usize,
     interest_idx: usize,
     attempt_idx: usize,
-    on_fail: Vec<ty::infer::Rule>,
+    on_fail: Vec<infer::Rule>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -644,7 +639,7 @@ impl InferRunner {
                             .map_or(true, |t| *t != (block_idx, op_idx))
                         {
                             if let Some(hard_op) =
-                                ty::op::HardBinary::from_in_ty(*binop, (lhs_ty, rhs_ty))
+                                caer_types::op::HardBinary::from_in_ty(*binop, (lhs_ty, rhs_ty))
                             {
                                 self.overload_attempted.push((block_idx, op_idx));
                                 self.checkpoint(

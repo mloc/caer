@@ -1,7 +1,5 @@
 mod emit;
 mod frontend;
-mod ir;
-mod ty;
 
 fn main() {
     inkwell::targets::Target::initialize_native(&inkwell::targets::InitializationConfig::default())
@@ -17,7 +15,7 @@ fn main() {
     let tree = parser.parse_object_tree();
     println!("PARSED");
 
-    let mut env = ir::env::Env::new();
+    let mut env = caer_ir::env::Env::new();
     let mut tb = frontend::TreeBuilder::new(&tree, &mut env);
     tb.build();
     println!("CFG BUILT");

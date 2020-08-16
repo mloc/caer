@@ -1,11 +1,10 @@
 use super::cfg_builder::CfgBuilder;
-use caer_runtime::type_tree::{self, TypeId, Specialization};
-use caer_runtime::string_table::StringId;
-use caer_runtime::environment::ProcId;
+use caer_types::type_tree::{self, Specialization};
+use caer_types::id::{StringId, ProcId, TypeId};
 use dreammaker::objtree;
 use index_vec::IndexVec;
 use std::collections::HashMap;
-use crate::ir;
+use caer_ir as ir;
 
 /// Walks the object tree, generating a type tree and queueing work for CfgBuilder.
 pub struct TreeBuilder<'a, 'ot> {
@@ -17,8 +16,8 @@ pub struct TreeBuilder<'a, 'ot> {
 impl<'a, 'ot> TreeBuilder<'a, 'ot> {
     pub fn new(objtree: &'ot objtree::ObjectTree, env: &'a mut ir::env::Env) -> Self {
         Self {
-            objtree: objtree,
-            env: env,
+            objtree,
+            env,
             procs: IndexVec::new(),
         }
     }
@@ -41,7 +40,7 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
     // nasty, copied from old tt builder
     // TODO: encapsulate types better
     fn populate_ty(&mut self, oty: objtree::TypeRef<'ot>, types_topsort: &mut Vec<(TypeId, objtree::TypeRef<'ot>)>) -> TypeId {
-        if let Some(id) = self.env.rt_env.type_tree.type_by_node_id.get(&(oty.index().index() as u64)) {
+        if let Some(id) = self.env.type_tree.type_by_node_id.get(&(oty.index().index() as u64)) {
             return *id;
         }
 
@@ -50,7 +49,7 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
         let path = self.path_to_pvec(oty);
         let mut type_path = parent_ty.map_or_else(
             || { Vec::new() },
-            |id| { self.env.rt_env.type_tree.types[id].type_path.clone() },
+            |id| { self.env.type_tree.types[id].type_path.clone() },
         );
         if !oty.is_root() {
             type_path.push(*path.last().unwrap());
@@ -58,17 +57,17 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
 
         let mut specialization = parent_ty.map_or_else(
             || { Specialization::Datum },
-            |id| { self.env.rt_env.type_tree.types[id].specialization },
+            |id| { self.env.type_tree.types[id].specialization },
         );
         if oty.path == "/list" {
             specialization = Specialization::List;
         }
 
-        let id = TypeId::new(self.env.rt_env.type_tree.types.len());
+        let id = TypeId::new(self.env.type_tree.types.len());
         let dty = type_tree::DType {
-            id: id,
+            id,
             path_str: self.env.intern_string(&oty.path),
-            path: path,
+            path,
             type_path: type_path,
             parent: parent_ty,
             specialization,
@@ -82,17 +81,17 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
             assert_eq!(id.index(), 0);
         }
 
-        self.env.rt_env.type_tree.type_by_node_id.insert(oty.index().index() as u64, id);
-        self.env.rt_env.type_tree.type_by_path_str.insert(dty.path_str, id);
-        self.env.rt_env.type_tree.types.push(dty);
+        self.env.type_tree.type_by_node_id.insert(oty.index().index() as u64, id);
+        self.env.type_tree.type_by_path_str.insert(dty.path_str, id);
+        self.env.type_tree.types.push(dty);
         types_topsort.push((id, oty));
         id
     }
 
     fn populate_vars(&mut self, dty_id: TypeId, oty: objtree::TypeRef<'ot>) {
-        let (mut vars, mut var_lookup) = match self.env.rt_env.type_tree.types[dty_id].parent {
+        let (mut vars, mut var_lookup) = match self.env.type_tree.types[dty_id].parent {
             Some(ty_id) => {
-                let p = &self.env.rt_env.type_tree.types[ty_id];
+                let p = &self.env.type_tree.types[ty_id];
                 (p.vars.clone(), p.var_lookup.clone())
             }
             None => (Vec::new(), HashMap::new()),
@@ -119,7 +118,7 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
                 if !decl.var_type.type_path.is_empty() {
                     let assoc_dty_id = match &self.objtree.type_by_path(&decl.var_type.type_path) {
                         Some(assoc_ty) => {
-                            self.env.rt_env.type_tree.type_by_node_id[&(assoc_ty.index().index() as u64)]
+                            self.env.type_tree.type_by_node_id[&(assoc_ty.index().index() as u64)]
                         },
                         None => panic!("no such type {:?}", decl.var_type.type_path),
                     };
@@ -136,15 +135,15 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
 
         }
 
-        let dty = &mut self.env.rt_env.type_tree.types[dty_id];
+        let dty = &mut self.env.type_tree.types[dty_id];
         dty.vars = vars;
         dty.var_lookup = var_lookup;
     }
 
     fn populate_procs(&mut self, dty_id: TypeId, oty: objtree::TypeRef<'ot>) {
-        let (mut procs, mut proc_lookup) = match self.env.rt_env.type_tree.types[dty_id].parent {
+        let (mut procs, mut proc_lookup) = match self.env.type_tree.types[dty_id].parent {
             Some(ty_id) => {
-                let p = &self.env.rt_env.type_tree.types[ty_id];
+                let p = &self.env.type_tree.types[ty_id];
                 (p.procs.clone(), p.proc_lookup.clone())
             }
             None => (Vec::new(), HashMap::new()),
@@ -162,7 +161,7 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
                     objtree::Code::Builtin => continue,
                     objtree::Code::Disabled => panic!("woop woop procs disabled"),
                 }
-                let proc_id = self.env.rt_env.add_proc(name_id);
+                let proc_id = self.env.add_proc(name_id);
                 top_proc = Some(proc_id);
                 assert_eq!(proc_id.index(), self.procs.len());
                 self.procs.push(pv.clone());
@@ -193,7 +192,7 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
             }
         }
 
-        let dty = &mut self.env.rt_env.type_tree.types[dty_id];
+        let dty = &mut self.env.type_tree.types[dty_id];
         dty.procs = procs;
         dty.proc_lookup = proc_lookup;
     }

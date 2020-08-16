@@ -1,0 +1,12 @@
+[package]
+name = "caer_infer"
+version = "0.1.0"
+authors = ["Colm Ó hIcí <git@ohici.ie>"]
+edition = "2018"
+
+[dependencies]
+ena = "0.14.0"
+petgraph = "0.5.1"
+thiserror = "1.0.20"
+index_vec = "0.1.2"
+caer_types = { path = "../caer_types" }

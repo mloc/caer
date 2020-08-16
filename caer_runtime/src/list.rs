@@ -3,9 +3,8 @@
 use crate::arg_pack::ArgPack;
 use crate::datum::Datum;
 use crate::runtime::Runtime;
-use crate::string_table::StringId;
-use crate::type_tree::Specialization;
-use crate::type_tree::TypeId;
+use caer_types::id::{TypeId, StringId};
+use caer_types::type_tree::{Specialization};
 use crate::val::{rt_val_drop, Val};
 use crate::vtable::ProcPtr;
 use std::collections::HashMap;

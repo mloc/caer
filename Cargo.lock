@@ -48,7 +48,9 @@ name = "caer_compiler"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "caer_ir",
  "caer_runtime",
+ "caer_types",
  "caer_util",
  "dot",
  "dreammaker",
@@ -63,10 +65,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "caer_infer"
+version = "0.1.0"
+dependencies = [
+ "caer_types",
+ "ena",
+ "index_vec",
+ "petgraph",
+ "thiserror",
+]
+
+[[package]]
+name = "caer_ir"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "caer_infer",
+ "caer_types",
+ "caer_util",
+ "dot",
+ "index_vec",
+ "ordered-float",
+ "serde",
+]
+
+[[package]]
 name = "caer_runtime"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "caer_types",
  "cstub_bindgen_macro",
  "index_vec",
  "leb128",
@@ -75,6 +103,14 @@ dependencies = [
  "ordered-float",
  "rustc_dwarf",
  "rustc_unwind",
+ "serde",
+]
+
+[[package]]
+name = "caer_types"
+version = "0.1.0"
+dependencies = [
+ "index_vec",
  "serde",
 ]
 
@@ -124,7 +160,7 @@ checksum = "a74b6c4d4a1cff5f454164363c16b72fa12463ca6b31f4b5f2035a65fa3d5906"
 [[package]]
 name = "dreammaker"
 version = "0.1.0"
-source = "git+https://github.com/mloc/SpacemanDMM?branch=catch-param#f51c78dc532dad3d07875fdb1aee398e4519a251"
+source = "git+https://github.com/mloc/SpacemanDMM?branch=catch-param#ef782e520146acda1345e0bf8b0dc750ce8c5f96"
 dependencies = [
  "bitflags",
  "guard",
@@ -238,7 +274,7 @@ checksum = "5b141fdc7836c525d4d594027d318c84161ca17aaf8113ab1f81ab93ae897485"
 [[package]]
 name = "interval-tree"
 version = "0.8.0"
-source = "git+https://github.com/mloc/SpacemanDMM?branch=catch-param#f51c78dc532dad3d07875fdb1aee398e4519a251"
+source = "git+https://github.com/mloc/SpacemanDMM?branch=catch-param#ef782e520146acda1345e0bf8b0dc750ce8c5f96"
 
 [[package]]
 name = "itoa"
@@ -271,9 +307,9 @@ source = "git+https://github.com/SpaceManiac/linked-hash-map?branch=get-key-valu
 
 [[package]]
 name = "llvm-sys"
-version = "100.1.0"
+version = "100.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5545bf9a09267c644e4d0ac68f37ac200af6579ae2e82aebce382654eb4abab1"
+checksum = "31069d5023e1a4789900ae3dde23dc3c71bfa5a49d7927d33a528c2b08dca036"
 dependencies = [
  "cc",
  "lazy_static",
@@ -553,9 +589,9 @@ checksum = "26412eb97c6b088a6997e05f69403a802a92d520de2f8e63c2b65f9e0f47c4e8"
 
 [[package]]
 name = "rgb"
-version = "0.8.23"
+version = "0.8.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "552cbc6167bf0a06c79f8c2a92fdb91cfb5257966c02c2c8f462cb1433e92f15"
+checksum = "7466cad0eb3303798229ffab23bb8f598d185c71f3dfa17cd751d440e375782a"
 dependencies = [
  "bytemuck",
 ]

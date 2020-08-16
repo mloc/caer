@@ -1,5 +1,4 @@
-use index_vec::{define_index_type};
-use serde::{Serialize, Deserialize};
+use index_vec::define_index_type;
 
 define_index_type!{pub struct LocalId = u32;}
 define_index_type!{pub struct VarId = u32;}

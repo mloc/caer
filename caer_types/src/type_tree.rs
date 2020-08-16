@@ -1,13 +1,9 @@
-use crate::string_table::StringId;
 use serde::{Serialize, Deserialize};
-use index_vec::{IndexVec, define_index_type};
+use index_vec::IndexVec;
 use std::collections::HashMap;
-use crate::environment::ProcId;
+use crate::id::{TypeId, StringId, ProcId};
 
-// TODO: move all ids into their own mod?
-define_index_type!{pub struct TypeId = u32;}
-
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypeTree {
     pub types: IndexVec<TypeId, DType>,
     pub type_by_path_str: HashMap<StringId, TypeId>,
@@ -34,7 +30,7 @@ pub enum Specialization {
     List,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DType {
     pub id: TypeId,
     pub path_str: StringId,

@@ -1,13 +1,12 @@
 // this is gonna be too monolithic, split it up;
 
-use index_vec::{IndexVec, define_index_type, Idx};
+use index_vec::IndexVec;
 use serde::{Serialize, Deserialize};
 
-use crate::proc_spec::ProcSpec;
-use crate::string_table::StringId;
-use crate::type_tree::TypeTree;
-
-define_index_type!{pub struct ProcId = u32;}
+use caer_types::proc::ProcSpec;
+use caer_types::id::{StringId, ProcId};
+use caer_types::rt_env::RtEnv;
+use caer_types::type_tree::TypeTree;
 
 // TODO: move stringtable into here, at least intern
 #[derive(Debug, Serialize, Deserialize)]
@@ -18,16 +17,16 @@ pub struct Environment {
 }
 
 impl Environment {
-    pub fn new() -> Self {
+    pub fn from_rt_env(rt_env: RtEnv) -> Self {
         Self {
-            proc_specs: IndexVec::new(),
-            type_tree: TypeTree::new(),
+            proc_specs: rt_env.proc_specs,
+            type_tree: rt_env.type_tree,
         }
     }
 
     pub fn add_proc(&mut self, name: StringId) -> ProcId {
         let spec = ProcSpec {
-            name: name,
+            name,
             params: vec![],
             names: vec![],
         };

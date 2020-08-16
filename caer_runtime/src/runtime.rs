@@ -1,8 +1,9 @@
 use crate::datum::Datum;
 use crate::environment::Environment;
 use crate::list::List;
-use crate::string_table::{StringId, StringTable};
-use crate::type_tree::{Specialization, TypeId};
+use crate::string_table::StringTable;
+use caer_types::id::{StringId, TypeId};
+use caer_types::type_tree::Specialization;
 use crate::vtable;
 
 use cstub_bindgen_macro::expose_c_stubs;
@@ -23,14 +24,15 @@ impl Runtime {
     // TODO: ERRH
     pub fn init(&mut self, stackmap_start: *const u8, stackmap_end: *const u8, vtable_ptr: *const vtable::Entry) {
         let init_st = StringTable::deserialize(File::open("stringtable.bincode").unwrap());
-        let init_env: Environment =
+        let init_env =
             bincode::deserialize_from(File::open("environment.bincode").unwrap()).unwrap();
-        let vtable = vtable::Vtable::from_static(vtable_ptr, init_env.type_tree.types.len());
+        let env = Environment::from_rt_env(init_env);
+        let vtable = vtable::Vtable::from_static(vtable_ptr, env.type_tree.types.len());
 
         let new = Runtime {
             string_table: init_st,
             vtable,
-            env: init_env,
+            env: env,
         };
 
         /*let stackmaps_raw = unsafe {

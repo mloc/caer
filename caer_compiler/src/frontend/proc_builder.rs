@@ -1,11 +1,10 @@
 use super::cfg_builder::CfgBuilder; use super::block_builder::BlockBuilder;
 use std::collections::HashMap;
-use crate::ir::cfg;
-use crate::ir::id::*;
+use caer_ir::cfg;
+use caer_ir::id::{ScopeId, BlockId, VarId, LocalId};
 use dreammaker::{ast, objtree};
-use caer_runtime::string_table::StringId;
-use caer_runtime::environment::ProcId;
-use crate::ty;
+use caer_types::id::{StringId, ProcId};
+use caer_types::ty;
 
 pub struct ProcBuilder<'a, 'cb, 'ot> {
     pub builder: &'a mut CfgBuilder<'cb, 'ot>,
@@ -44,11 +43,11 @@ impl<'a, 'cb, 'ot> ProcBuilder<'a, 'cb, 'ot> {
             let var_id = self.add_var(self.proc.global_scope, name_id);
             self.proc.params.push(var_id);
 
-            let spec = self.builder.env.rt_env.get_proc_mut(self.proc.id);
+            let spec = self.builder.env.get_proc_mut(self.proc.id);
             spec.params.push(name_id);
             spec.names.push((name_id, i as u32));
         }
-        let spec = self.builder.env.rt_env.get_proc_mut(self.proc.id);
+        let spec = self.builder.env.get_proc_mut(self.proc.id);
         spec.names.sort_unstable_by_key(|(ref s, _)| {*s});
 
         let body = if let objtree::Code::Present(ref b) = self.ast_proc.code {

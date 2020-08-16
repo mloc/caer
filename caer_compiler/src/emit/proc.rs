@@ -1,15 +1,14 @@
 use super::context::Context;
 use inkwell::values::*;
-use inkwell::types::*;
 use inkwell::basic_block::BasicBlock;
+use caer_types::layout;
 use super::value::{StackValue, SSAValue, BVEWrapper};
 use super::prog::{ProgEmit, Intrinsic};
 use index_vec::IndexVec;
-use crate::ir::cfg::*;
-use crate::ir::id::*;
-use crate::ty::{self, Ty};
-use caer_runtime::datum;
-use caer_runtime::vtable;
+use caer_ir::cfg::*;
+use caer_types::ty::{self, Ty};
+use caer_ir::id::{VarId, LocalId, BlockId};
+use caer_types::op;
 
 #[derive(Debug)]
 pub struct ProcEmit<'a, 'p, 'ctx> {
@@ -68,7 +67,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         }
 
         for var in self.proc.vars.iter() {
-            let name = &if var.name.id() != 0 {
+            let name = &if var.name.index() != 0 {
                 format!("var_{}", self.emit.env.string_table.get(var.name))
             } else {
                 format!("ret_var")
@@ -126,7 +125,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         let lit_ty = lit.get_ty();
         let val: BasicValueEnum = match lit {
             Literal::Num(x) => self.ctx.llvm_ctx.f32_type().const_float(*x as f64).into(),
-            Literal::String(id) => self.ctx.llvm_ctx.i64_type().const_int(id.id(), false).into(),
+            Literal::String(id) => self.ctx.llvm_ctx.i64_type().const_int(id.index() as u64, false).into(),
             Literal::Null => self.ctx.llvm_ctx.i64_type().const_zero().into(),
             _ => unimplemented!("{:?}", lit),
         };
@@ -409,13 +408,13 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                 Op::DatumLoadVar(dst, src, var_id) => {
                     let val = self.get_local_any(*src).val.into_struct_value();
                     let ref_ptr = self.build_extract_ref_ptr(val);
-                    let var_get_ptr = self.build_vtable_lookup(block, ref_ptr, vtable::VTABLE_VAR_GET_FIELD_OFFSET).into_pointer_value();
+                    let var_get_ptr = self.build_vtable_lookup(block, ref_ptr, layout::VTABLE_VAR_GET_FIELD_OFFSET).into_pointer_value();
 
                     // TODO: drop/cloned
 
                     let var_val = self.build_call_catching(block, var_get_ptr, &[
                         ref_ptr.into(),
-                        self.ctx.llvm_ctx.i64_type().const_int(var_id.id(), false).into(),
+                        self.ctx.llvm_ctx.i64_type().const_int(var_id.index() as u64, false).into(),
                     ]).unwrap();
                     self.set_local(*dst, &SSAValue::new(var_val, ty::Complex::Any));
                 },
@@ -423,12 +422,12 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                 Op::DatumStoreVar(dst, var_id, src) => {
                     let dst_val = self.get_local_any(*dst).val.into_struct_value();
                     let ref_ptr = self.build_extract_ref_ptr(dst_val);
-                    let var_set_ptr = self.build_vtable_lookup(block, ref_ptr, vtable::VTABLE_VAR_SET_FIELD_OFFSET).into_pointer_value();
+                    let var_set_ptr = self.build_vtable_lookup(block, ref_ptr, layout::VTABLE_VAR_SET_FIELD_OFFSET).into_pointer_value();
 
                     let src_val = self.get_local_any(*src);
                     self.build_call_catching(block, var_set_ptr, &[
                         ref_ptr.into(),
-                        self.ctx.llvm_ctx.i64_type().const_int(var_id.id(), false).into(),
+                        self.ctx.llvm_ctx.i64_type().const_int(var_id.index() as u64, false).into(),
                         src_val.into(),
                     ]);
                 },
@@ -440,10 +439,10 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                     match src_val.ty {
                         ty::Complex::Primitive(ty::Primitive::Ref(_)) => {
                             let ref_ptr = self.build_extract_ref_ptr(src_val_any.val.into_struct_value());
-                            let proc_lookup_ptr = self.build_vtable_lookup(block, ref_ptr, vtable::VTABLE_PROC_LOOKUP_FIELD_OFFSET).into_pointer_value();
+                            let proc_lookup_ptr = self.build_vtable_lookup(block, ref_ptr, layout::VTABLE_PROC_LOOKUP_FIELD_OFFSET).into_pointer_value();
 
                             let proc_ptr = self.build_call_catching(block, proc_lookup_ptr, &[
-                                self.ctx.llvm_ctx.i64_type().const_int(proc_name.id(), false).into(),
+                                self.ctx.llvm_ctx.i64_type().const_int(proc_name.index() as u64, false).into(),
                                 self.emit.rt_global.into(),
                             ]).unwrap().into_pointer_value();
 
@@ -458,7 +457,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                             // soft call
                             let res_val = self.build_call_catching(block, self.ctx.rt.rt_val_call_proc, &[
                                 src_val_any.into(),
-                                self.ctx.llvm_ctx.i64_type().const_int(proc_name.id(), false).into(),
+                                self.ctx.llvm_ctx.i64_type().const_int(proc_name.index() as u64, false).into(),
                                 argpack_ptr.into(),
                                 self.emit.rt_global.into(),
                             ]).unwrap();
@@ -544,42 +543,63 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         }
     }
 
-    fn emit_binary(&mut self, block: &Block, op: ty::op::HardBinary, lhs: &SSAValue<'ctx>, rhs: &SSAValue<'ctx>) -> SSAValue<'ctx> {
+    fn conv_pred(pred: op::FloatPredicate) -> inkwell::FloatPredicate {
+        match pred {
+            op::FloatPredicate::OEQ => inkwell::FloatPredicate::OEQ,
+            op::FloatPredicate::OGE => inkwell::FloatPredicate::OGE,
+            op::FloatPredicate::OGT => inkwell::FloatPredicate::OGT,
+            op::FloatPredicate::OLE => inkwell::FloatPredicate::OLE,
+            op::FloatPredicate::OLT => inkwell::FloatPredicate::OLT,
+            op::FloatPredicate::ONE => inkwell::FloatPredicate::ONE,
+            op::FloatPredicate::ORD => inkwell::FloatPredicate::ORD,
+            op::FloatPredicate::PredicateFalse => inkwell::FloatPredicate::PredicateFalse,
+            op::FloatPredicate::PredicateTrue => inkwell::FloatPredicate::PredicateTrue,
+            op::FloatPredicate::UEQ => inkwell::FloatPredicate::UEQ,
+            op::FloatPredicate::UGE => inkwell::FloatPredicate::UGE,
+            op::FloatPredicate::UGT => inkwell::FloatPredicate::UGT,
+            op::FloatPredicate::ULE => inkwell::FloatPredicate::ULE,
+            op::FloatPredicate::ULT => inkwell::FloatPredicate::ULT,
+            op::FloatPredicate::UNE => inkwell::FloatPredicate::UNE,
+            op::FloatPredicate::UNO => inkwell::FloatPredicate::UNO,
+        }
+    }
+
+    fn emit_binary(&mut self, block: &Block, op: op::HardBinary, lhs: &SSAValue<'ctx>, rhs: &SSAValue<'ctx>) -> SSAValue<'ctx> {
         let res = match op {
-            ty::op::HardBinary::StringConcat => {
+            op::HardBinary::StringConcat => {
                 self.build_call_catching(block, self.ctx.rt.rt_runtime_concat_strings, &[self.emit.rt_global.into(), lhs.into(), rhs.into()]).unwrap()
             }
-            ty::op::HardBinary::FloatAdd => {
+            op::HardBinary::FloatAdd => {
                 self.ctx.builder.build_float_add(lhs.val.into_float_value(), rhs.val.into_float_value(), "").into()
             }
-            ty::op::HardBinary::FloatSub => {
+            op::HardBinary::FloatSub => {
                 self.ctx.builder.build_float_sub(lhs.val.into_float_value(), rhs.val.into_float_value(), "").into()
             }
-            ty::op::HardBinary::FloatMul => {
+            op::HardBinary::FloatMul => {
                 self.ctx.builder.build_float_mul(lhs.val.into_float_value(), rhs.val.into_float_value(), "").into()
             }
-            ty::op::HardBinary::FloatDiv => {
+            op::HardBinary::FloatDiv => {
                 self.ctx.builder.build_float_div(lhs.val.into_float_value(), rhs.val.into_float_value(), "").into()
             }
-            ty::op::HardBinary::FloatMod => {
+            op::HardBinary::FloatMod => {
                 self.ctx.builder.build_float_rem(lhs.val.into_float_value(), rhs.val.into_float_value(), "").into()
             }
-            ty::op::HardBinary::FloatPow => {
+            op::HardBinary::FloatPow => {
                 self.build_call_intrinsic(Intrinsic::FPow, &[lhs.into(), rhs.into()]).unwrap()
             }
-            ty::op::HardBinary::FloatCmp(pred) => {
-                let bool_res = self.ctx.builder.build_float_compare(pred, lhs.val.into_float_value(), rhs.val.into_float_value(), "");
+            op::HardBinary::FloatCmp(pred) => {
+                let bool_res = self.ctx.builder.build_float_compare(Self::conv_pred(pred), lhs.val.into_float_value(), rhs.val.into_float_value(), "");
                 self.ctx.builder.build_unsigned_int_to_float(bool_res, self.ctx.llvm_ctx.f32_type(), "").into()
             }
-            ty::op::HardBinary::FloatBitOp(bitop) => {
+            op::HardBinary::FloatBitOp(bitop) => {
                 let lhs_i24 = self.float_to_i24(lhs.val.into_float_value());
                 let rhs_i24 = self.float_to_i24(rhs.val.into_float_value());
                 let res_i24 = match bitop {
-                    ty::op::BitOp::And => self.ctx.builder.build_and(lhs_i24, rhs_i24, ""),
-                    ty::op::BitOp::Or => self.ctx.builder.build_or(lhs_i24, rhs_i24, ""),
-                    ty::op::BitOp::Xor => self.ctx.builder.build_xor(lhs_i24, rhs_i24, ""),
-                    ty::op::BitOp::Shl => self.ctx.builder.build_left_shift(lhs_i24, rhs_i24, ""),
-                    ty::op::BitOp::Shr => self.ctx.builder.build_right_shift(lhs_i24, rhs_i24, false, ""),
+                    op::BitOp::And => self.ctx.builder.build_and(lhs_i24, rhs_i24, ""),
+                    op::BitOp::Or => self.ctx.builder.build_or(lhs_i24, rhs_i24, ""),
+                    op::BitOp::Xor => self.ctx.builder.build_xor(lhs_i24, rhs_i24, ""),
+                    op::BitOp::Shl => self.ctx.builder.build_left_shift(lhs_i24, rhs_i24, ""),
+                    op::BitOp::Shr => self.ctx.builder.build_right_shift(lhs_i24, rhs_i24, false, ""),
                 };
                 self.i24_to_float(res_i24).into()
             }
@@ -666,7 +686,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
     fn build_extract_ty_id(&self, datum_ptr: PointerValue<'ctx>) -> IntValue<'ctx> {
         let ty_id_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(datum_ptr, &[
             self.ctx.llvm_ctx.i32_type().const_zero(),
-            self.ctx.llvm_ctx.i32_type().const_int(datum::DATUM_TY_FIELD_OFFSET, false),
+            self.ctx.llvm_ctx.i32_type().const_int(layout::DATUM_TY_FIELD_OFFSET, false),
         ], "ty_id_ptr") };
         let ty_id = self.ctx.builder.build_load(ty_id_ptr, "ty_id").into_int_value();
         ty_id

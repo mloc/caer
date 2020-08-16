@@ -1,15 +1,14 @@
 use super::proc::ProcEmit;
 use super::context::Context;
-use inkwell::types::BasicType;
-use crate::ir::cfg::*;
-use crate::ir::env::Env;
-use caer_runtime::string_table::StringId;
-use caer_runtime::type_tree::{TypeId, DType, Specialization};
+use caer_ir::cfg::*;
+use caer_ir::env::Env;
+use caer_types::rt_env::RtEnv;
+use caer_types::layout;
+use caer_types::type_tree::{DType, Specialization};
+use caer_types::id::{StringId, TypeId, ProcId};
 use index_vec::IndexVec;
 use std::fs::{self, File};
 use inkwell::values::AnyValueEnum;
-use caer_runtime::datum;
-use caer_runtime::environment::ProcId;
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -32,7 +31,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         rt_global.set_initializer(&ctx.rt.ty.rt_type.const_zero());
 
         // TODO: don't dig so deep into env?
-        let vt_global_ty = ctx.rt.ty.vt_entry_type.array_type(env.rt_env.type_tree.types.len() as u32);
+        let vt_global_ty = ctx.rt.ty.vt_entry_type.array_type(env.type_tree.types.len() as u32);
         let vt_global = ctx.module.add_global(vt_global_ty, Some(inkwell::AddressSpace::Generic), "vtable");
         vt_global.set_constant(true);
 
@@ -56,7 +55,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     pub fn lookup_global_proc(&self, name: StringId) -> inkwell::values::FunctionValue<'ctx> {
-        let global_dty = self.env.rt_env.type_tree.global_type();
+        let global_dty = self.env.type_tree.global_type();
         let proc_id = global_dty.proc_lookup[&name].top_proc;
         self.sym[proc_id]
     }
@@ -94,10 +93,14 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         self.ctx.builder.position_at_end(block);
 
         // TODO: move file emit to a better place
-        self.env.string_table.serialize(File::create("stringtable.bincode").unwrap());
-        bincode::serialize_into(File::create("environment.bincode").unwrap(), &self.env.rt_env).unwrap();
+        let rt_env = RtEnv {
+            type_tree: self.env.type_tree.clone(),
+            proc_specs: self.env.proc_specs.clone(),
+        };
+        self.env.string_table.serialize_runtime(File::create("stringtable.bincode").unwrap());
+        bincode::serialize_into(File::create("environment.bincode").unwrap(), &rt_env).unwrap();
 
-        serde_json::to_writer_pretty(File::create("environment.json").unwrap(), &self.env.rt_env).unwrap();
+        serde_json::to_writer_pretty(File::create("environment.json").unwrap(), &rt_env).unwrap();
 
         let vt_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(self.vt_global.as_pointer_value(), &[
             self.ctx.llvm_ctx.i32_type().const_zero(),
@@ -130,7 +133,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     fn populate_datum_types(&mut self) {
-        for ty in self.env.rt_env.type_tree.types.iter() {
+        for ty in self.env.type_tree.types.iter() {
             let vars_field_ty = self.ctx.rt.ty.val_type.array_type(ty.vars.len() as u32);
             let datum_ty = self.ctx.llvm_ctx.struct_type(&[
                 self.ctx.llvm_ctx.i32_type().into(),
@@ -144,7 +147,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     fn emit_vtable(&mut self) {
         let mut vt_entries = Vec::new();
         // yuck, TODO: encapsulate typetree
-        for ty in self.env.rt_env.type_tree.types.iter() {
+        for ty in self.env.type_tree.types.iter() {
             let size_val = self.datum_types[ty.id].size_of().unwrap().const_cast(self.ctx.llvm_ctx.i64_type(), false);
 
             let entries = &match ty.specialization {
@@ -200,7 +203,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 
         /*
         let exception_path = self.env.intern_string_ro("/exception");
-        let exception_ty = self.env.rt_env.type_tree.type_by_path_str[&exception_path];
+        let exception_ty = self.env.type_tree.type_by_path_str[&exception_path];
         let datum_ptr = self.ctx.builder.build_call(self.ctx.rt.rt_runtime_alloc_datum, &[
             self.rt_global.as_pointer_value().into(),
             self.ctx.llvm_ctx.i32_type().const_int(exception_ty.index() as _, false).into(),
@@ -215,9 +218,9 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         let mut cases = Vec::new();
         let mut phi_incoming = Vec::new();
         for (i, var_name) in ty.vars.iter().enumerate() {
-            let case_block = self.ctx.llvm_ctx.append_basic_block(func, &format!("case_{}", var_name.id()));
+            let case_block = self.ctx.llvm_ctx.append_basic_block(func, &format!("case_{}", var_name.index()));
             self.ctx.builder.position_at_end(case_block);
-            let disc_val = self.ctx.llvm_ctx.i64_type().const_int(var_name.id(), false);
+            let disc_val = self.ctx.llvm_ctx.i64_type().const_int(var_name.index() as u64, false);
             let this_offset_val = self.ctx.llvm_ctx.i32_type().const_int(i as u64, false);
             self.ctx.builder.build_unconditional_branch(conv_block);
             cases.push((disc_val, case_block));
@@ -261,7 +264,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         let var_index = self.ctx.builder.build_call(index_func, &[var_name.into()], "var_index").try_as_basic_value().left().unwrap().into_int_value();
         let var_val_ptr = unsafe {self.ctx.builder.build_in_bounds_gep(datum_ptr, &[
             self.ctx.llvm_ctx.i32_type().const_zero(),
-            self.ctx.llvm_ctx.i32_type().const_int(datum::DATUM_VARS_FIELD_OFFSET, false),
+            self.ctx.llvm_ctx.i32_type().const_int(layout::DATUM_VARS_FIELD_OFFSET, false),
             var_index,
         ], "var_val_ptr")};
         let var_val = self.ctx.builder.build_load(var_val_ptr, "var_val");
@@ -286,7 +289,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         let var_index = self.ctx.builder.build_call(index_func, &[var_name.into()], "var_index").try_as_basic_value().left().unwrap().into_int_value();
         let var_val_ptr = unsafe {self.ctx.builder.build_in_bounds_gep(datum_ptr, &[
             self.ctx.llvm_ctx.i32_type().const_zero(),
-            self.ctx.llvm_ctx.i32_type().const_int(datum::DATUM_VARS_FIELD_OFFSET, false),
+            self.ctx.llvm_ctx.i32_type().const_int(layout::DATUM_VARS_FIELD_OFFSET, false),
             var_index,
         ], "var_val_ptr")};
         self.ctx.builder.build_store(var_val_ptr, asg_val);
@@ -314,9 +317,9 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         let mut phi_incoming = Vec::new();
         let mut proc_lookup_vals = Vec::new();
         for (i, proc_name) in ty.procs.iter().enumerate() {
-            let case_block = self.ctx.llvm_ctx.append_basic_block(func, &format!("case_{}", proc_name.id()));
+            let case_block = self.ctx.llvm_ctx.append_basic_block(func, &format!("case_{}", proc_name.index()));
             self.ctx.builder.position_at_end(case_block);
-            let disc_val = self.ctx.llvm_ctx.i64_type().const_int(proc_name.id(), false);
+            let disc_val = self.ctx.llvm_ctx.i64_type().const_int(proc_name.index() as u64, false);
             let proc_index_val = self.ctx.llvm_ctx.i32_type().const_int(i as u64, false);
             self.ctx.builder.build_unconditional_branch(conv_block);
             cases.push((disc_val, case_block));

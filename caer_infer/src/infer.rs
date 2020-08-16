@@ -1,13 +1,11 @@
-use crate::ty;
+use caer_types::ty;
 
-use caer_runtime;
-
-use ena::unify::{self, InPlace, UnificationTable, UnifyKey, UnifyValue, Snapshot};
+use ena::unify::{InPlace, UnificationTable, UnifyKey, UnifyValue, Snapshot};
 use index_vec::{IndexVec, Idx};
 use thiserror::Error;
 use petgraph::graph::DiGraph;
 
-use std::collections::{BTreeSet, HashSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct InferKey(u32);
@@ -125,16 +123,6 @@ pub enum Rule {
     Const(InferKey, ty::Complex),
     ConstFreeze(InferKey, ty::Complex),
     Equals(InferKey, InferKey),
-    // TODO: break cr:op:Binaryop into cfg or something
-    //BinOp(InferKey, caer_runtime::op::BinaryOp, InferKey, InferKey),
-    // TODO break out proc ty from complex
-    //Apply(ty::Complex, Vec<ty::TyId>, Option<ty::TyId>, Option<ty::TyId>),
-}
-
-#[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
-pub enum Step {
-    Single(Vec<Rule>),
-    Choice(Vec<Vec<Rule>>),
 }
 
 pub struct InferEngine {
@@ -200,33 +188,6 @@ impl InferEngine {
         self.table.probe_value(key).unwrap_or_default()
     }
 
-    /*pub fn process_steps(&mut self, steps: &[Step], sub_rules: &[(InferKey, InferKey)]) -> Result<(), InferUnifyError> {
-        match steps.split_first() {
-            None => self.process_sub(sub_rules),
-            Some((Step::Single(rules), rest)) => {
-                self.process_rules(rules)?;
-                self.process_steps(rest, sub_rules)
-            }
-            Some((Step::Choice(choices), rest)) => {
-                let mut pre_snapshot = self.table.snapshot();
-                for rules_choice in choices {
-                    match self.process_rules(rules_choice).and_then(|_| self.process_steps(rest, sub_rules)) {
-                        Ok(_) => {
-                            self.table.commit(pre_snapshot);
-                            return Ok(())
-                        }
-                        Err(_) => {
-                            self.table.rollback_to(pre_snapshot);
-                            pre_snapshot = self.table.snapshot();
-                        }
-                    }
-                }
-                self.table.rollback_to(pre_snapshot);
-                Err(InferUnifyError::ExhaustedChoices)
-            }
-        }
-    }*/
-
     pub fn process_rules(&mut self, rules: &[Rule]) -> Result<(), InferUnifyError> {
         for rule in rules {
             self.process_rule(rule)?
@@ -274,7 +235,7 @@ struct SubtypeResolver<'i> {
 
 impl<'i> SubtypeResolver<'i> {
     fn expand_subs(table: &'i mut UnificationTable<InPlace<InferKey>>, subs: Vec<(InferKey, InferKey)>) -> Result<Vec<(InferKey, InferKey)>, InferUnifyError> {
-        let mut resolver = Self {
+        let resolver = Self {
             table: table,
             sub_constraints: subs,
         };
