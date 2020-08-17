@@ -14,18 +14,15 @@ thiserror = "1.0.20"
 petgraph = "0.5.1"
 either = "1.5.3"
 serde_json = "1.0.57"
+caer_frontend = { path = "../caer_frontend" }
 caer_types = { path = "../caer_types" }
 caer_ir = { path = "../caer_ir" }
+# pretty much just to get runtime's size for static alloc
+caer_runtime = { path = "../caer_runtime" }
 
 [dependencies.dreammaker]
 git = "https://github.com/mloc/SpacemanDMM"
 branch = "catch-param"
-
-[dependencies.caer_runtime]
-path = "../caer_runtime"
-
-[dependencies.caer_util]
-path = "../caer_util"
 
 [dependencies.inkwell]
 git = "https://github.com/mloc/inkwell"

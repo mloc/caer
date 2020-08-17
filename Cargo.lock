@@ -48,10 +48,10 @@ name = "caer_compiler"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "caer_frontend",
  "caer_ir",
  "caer_runtime",
  "caer_types",
- "caer_util",
  "dot",
  "dreammaker",
  "either",
@@ -62,6 +62,16 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "caer_frontend"
+version = "0.1.0"
+dependencies = [
+ "caer_ir",
+ "caer_types",
+ "dreammaker",
+ "index_vec",
 ]
 
 [[package]]

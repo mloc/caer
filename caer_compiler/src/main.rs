@@ -1,23 +1,12 @@
 mod emit;
-mod frontend;
+
+use caer_frontend as frontend;
 
 fn main() {
     inkwell::targets::Target::initialize_native(&inkwell::targets::InitializationConfig::default())
         .unwrap();
 
-    let dm_context = dreammaker::Context::default();
-    let preproc =
-        dreammaker::preprocessor::Preprocessor::new(&dm_context, "main.dm".into()).unwrap();
-    let indents = dreammaker::indents::IndentProcessor::new(&dm_context, preproc);
-    let mut parser = dreammaker::parser::Parser::new(&dm_context, indents);
-    parser.enable_procs();
-
-    let tree = parser.parse_object_tree();
-    println!("PARSED");
-
-    let mut env = caer_ir::env::Env::new();
-    let mut tb = frontend::TreeBuilder::new(&tree, &mut env);
-    tb.build();
+    let env = frontend::build("main.dm");
     println!("CFG BUILT");
 
     let llctx = inkwell::context::Context::create();

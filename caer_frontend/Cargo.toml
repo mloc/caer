@@ -1,0 +1,14 @@
+[package]
+name = "caer_frontend"
+version = "0.1.0"
+authors = ["Colm Ó hIcí <git@ohici.ie>"]
+edition = "2018"
+
+[dependencies]
+caer_types = { path = "../caer_types" }
+caer_ir = { path = "../caer_ir" }
+index_vec = { version = "0.1.2", features = ["serde"] }
+
+[dependencies.dreammaker]
+git = "https://github.com/mloc/SpacemanDMM"
+branch = "catch-param"
