@@ -373,7 +373,6 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                     let argpack_ptr = self.build_argpack(None, &args);
 
                     // TODO: better proc lookup, consider src
-                    println!("E: {:?}", self.emit.env.string_table.get(*name));
                     let func = self.emit.lookup_global_proc(*name);
                     let res_val = self.build_call_catching(block, func, &[argpack_ptr.into(), self.emit.rt_global.into()]).unwrap();
                     let val = SSAValue::new(res_val, ty::Complex::Any);

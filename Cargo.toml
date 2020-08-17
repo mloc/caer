@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "caer_codegen_llvm",
     "caer_compiler",
     "caer_frontend",
     "caer_infer",

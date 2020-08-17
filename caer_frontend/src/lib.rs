@@ -3,8 +3,6 @@ mod proc_builder;
 mod block_builder;
 mod tree;
 
-pub use tree::TreeBuilder;
-
 use std::path::Path;
 
 // temporary
@@ -19,7 +17,7 @@ pub fn build(path: impl AsRef<Path>) -> caer_ir::env::Env {
     let tree = parser.parse_object_tree();
 
     let mut env = caer_ir::env::Env::new();
-    let mut tb = TreeBuilder::new(&tree, &mut env);
+    let mut tb = tree::TreeBuilder::new(&tree, &mut env);
     tb.build();
     env
 }

@@ -98,8 +98,6 @@ impl<'a> ProcAnalysis<'a> {
             }
         }
 
-        println!("{:#?}", self.var_info);
-
         //self.binop_prop();
         self.demote_vars();
         self.infer_types(&postorder.iter().cloned().rev().collect::<Vec<_>>());
