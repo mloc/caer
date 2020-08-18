@@ -1,11 +1,11 @@
 use crate::cfg::{self, Op};
-use crate::env::Env;
-use crate::id::*;
-use caer_types::ty;
-use caer_types::id::ProcId;
-use caer_infer as infer;
 use crate::const_val::ConstVal;
+use crate::env::Env;
+use crate::id::{BlockId, LocalId, ScopeId, VarId};
+use caer_infer as infer;
+use caer_types::id::ProcId;
 use caer_types::op::BinaryOp;
+use caer_types::ty;
 use index_vec::IndexVec;
 use std::collections::{HashMap, HashSet};
 
@@ -42,6 +42,7 @@ impl<'a> ProcAnalysis<'a> {
         let mut visited = self.proc.blocks.iter().map(|_| false).collect();
         let mut postorder = Vec::new();
         self.build_orders(
+            None,
             &self.proc.blocks.first().unwrap(),
             &mut visited,
             &mut postorder,
@@ -49,7 +50,7 @@ impl<'a> ProcAnalysis<'a> {
         assert!(visited.iter().all(|b| *b));
         assert_eq!(visited.len(), postorder.len());
 
-        for block_id in postorder.iter() {
+        for (_, block_id) in postorder.iter() {
             let block = &self.proc.blocks[*block_id];
             for (i, op) in block.ops.iter().enumerate() {
                 let dest = op.dest_local();
@@ -100,7 +101,7 @@ impl<'a> ProcAnalysis<'a> {
 
         //self.binop_prop();
         self.demote_vars();
-        self.infer_types(&postorder.iter().cloned().rev().collect::<Vec<_>>());
+        self.infer_types(&postorder.iter().map(|(_, x)| x).cloned().rev().collect::<Vec<_>>());
     }
 
     // nasty but handy
@@ -120,9 +121,10 @@ impl<'a> ProcAnalysis<'a> {
 
     fn build_orders(
         &self,
+        pred: Option<BlockId>,
         block: &cfg::Block,
         visited: &mut IndexVec<BlockId, bool>,
-        postorder: &mut Vec<BlockId>,
+        postorder: &mut Vec<(Option<BlockId>, BlockId)>,
     ) {
         if visited[block.id] {
             return;
@@ -130,9 +132,9 @@ impl<'a> ProcAnalysis<'a> {
         visited[block.id] = true;
 
         for id in block.iter_successors() {
-            self.build_orders(&self.proc.blocks[id], visited, postorder);
+            self.build_orders(Some(block.id), &self.proc.blocks[id], visited, postorder);
         }
-        postorder.push(block.id);
+        postorder.push((pred, block.id));
     }
 
     // forward only
@@ -245,12 +247,52 @@ impl<'a> ProcAnalysis<'a> {
         patch.gc_vars(&mut self.proc);
     }
 
-    // huge, meh
-    // TODO: move out of here, break up
     fn infer_types(&mut self, order: &[BlockId]) {
         println!("RUNNING type inference for {:?}", self.proc.id);
         let mut runner = InferRunner::create(&mut self.proc, order.to_owned());
         runner.run(&mut self.proc);
+    }
+
+    // order is reverse postorder with pred
+    pub fn annotate_local_lifetimes(&self, order: &[(Option<BlockId>, BlockId)]) -> Lifetimes {
+        let mut work: IndexVec<BlockId, Option<BlockLifetime>> =
+            self.proc.blocks.iter().map(|_| None).collect();
+
+        let mut scope_jb: IndexVec<ScopeId, Option<usize>> =
+            self.proc.scopes.iter().map(|_| None).collect();
+        scope_jb[self.proc.global_scope] = Some(0);
+
+        for (pred_id, id) in order.iter().copied() {
+            let block = &self.proc.blocks[id];
+
+            let start;
+            if let Some(pred_id) = pred_id {
+                start = work[pred_id].clone().unwrap().end;
+            } else {
+                start = LifetimeSet::empty();
+            }
+
+            let mut end = start.clone();
+
+            for op in block.ops.iter() {
+                if let Some(dest) = op.dest_local() {
+                    end.local.push(dest);
+                }
+
+                match op {
+                    cfg::Op::Store(dest, _) | cfg::Op::CatchException(Some(dest)) => {
+                        end.var.push(*dest)
+                    }
+                    _ => {}
+                }
+            }
+
+            work[id] = Some(BlockLifetime { start, end });
+        }
+
+        Lifetimes {
+            blocks: work.into_iter().map(|x| x.unwrap()).collect(),
+        }
     }
 
     fn fold_consts(&mut self, order: &[BlockId]) -> bool {
@@ -375,6 +417,36 @@ impl VarInfo {
             stores: Vec::new(),
         }
     }
+}
+
+// just turn vars back into locals ffs
+#[derive(Debug, Clone)]
+pub struct LifetimeSet {
+    pub local: Vec<LocalId>,
+    pub var: Vec<VarId>,
+}
+
+impl LifetimeSet {
+    fn empty() -> Self {
+        Self {
+            local: vec![],
+            var: vec![],
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BlockLifetime {
+    pub start: LifetimeSet,
+    pub end: LifetimeSet,
+}
+
+#[derive(Debug, Clone)]
+pub struct Lifetimes {
+    // TODO: use some kind of persistent DS here? or LL
+    // this will be *very* memory inefficient with large projects
+    // but might be ok if it's lazy?
+    pub blocks: IndexVec<BlockId, BlockLifetime>,
 }
 
 #[derive(Debug, Clone)]

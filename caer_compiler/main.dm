@@ -70,7 +70,8 @@
 	else if(7)
 		x = 999
 	else
-		x = 39
+		if(0)
+			x = 39
 	world.log << 78
 	return x
 
