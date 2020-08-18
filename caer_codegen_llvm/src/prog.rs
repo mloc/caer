@@ -9,6 +9,7 @@ use caer_types::id::{StringId, TypeId, ProcId};
 use index_vec::IndexVec;
 use std::fs::{self, File};
 use inkwell::values::AnyValueEnum;
+use caer_ir::walker::CFGWalker;
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -21,8 +22,6 @@ pub struct ProgEmit<'a, 'ctx> {
     pub vt_lookup: Vec<inkwell::values::FunctionValue<'ctx>>,
     pub datum_types: IndexVec<TypeId, inkwell::types::StructType<'ctx>>,
     pub sym: IndexVec<ProcId, inkwell::values::FunctionValue<'ctx>>,
-
-    intrinsics: HashMap<Intrinsic, inkwell::values::FunctionValue<'ctx>>,
 }
 
 impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
@@ -44,7 +43,6 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             vt_lookup: ctx.make_vtable_lookup(vt_global),
             datum_types: IndexVec::new(),
             sym: IndexVec::new(),
-            intrinsics: HashMap::new(),
         }
     }
 
@@ -78,7 +76,9 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 
         for (proc, func) in self.procs.drain(..).collect::<Vec<_>>() { // TODO no
             println!("EMITTING {:?}", proc.id);
-            ProcEmit::emit(self.ctx, self, proc, func);
+            let walker = CFGWalker::build(proc);
+            let mut proc_emit = ProcEmit::new(self.ctx, self, proc, func);
+            walker.walk(proc, &mut proc_emit);
         }
         let main_proc = self.lookup_global_proc(self.env.intern_string_ro("entry"));
 
@@ -397,17 +397,8 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         assert!(success);
     }
 
-    pub fn get_intrinsic(&mut self, intrinsic: Intrinsic) -> inkwell::values::FunctionValue<'ctx> {
-        if let Some(ifn) = self.intrinsics.get(&intrinsic) {
-            *ifn
-        } else {
-            let ifn = self.create_intrinsic(intrinsic);
-            self.intrinsics.insert(intrinsic, ifn);
-            ifn
-        }
-    }
-
-    fn create_intrinsic(&self, intrinsic: Intrinsic) -> inkwell::values::FunctionValue<'ctx> {
+    pub fn get_intrinsic(&self, intrinsic: Intrinsic) -> inkwell::values::FunctionValue<'ctx> {
+        // TODO: cache?
         let ty_f32 = self.ctx.llvm_ctx.f32_type().into();
 
         let (name, tys): (_, Vec<inkwell::types::BasicTypeEnum>) = match intrinsic {

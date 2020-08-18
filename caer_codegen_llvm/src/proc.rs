@@ -8,35 +8,62 @@ use index_vec::IndexVec;
 use caer_ir::cfg::*;
 use caer_types::ty::{self, Ty};
 use caer_ir::id::{VarId, LocalId, BlockId};
+use caer_ir::walker::{WalkActor, CFGWalker};
 use caer_types::op;
 
 #[derive(Debug)]
 pub struct ProcEmit<'a, 'p, 'ctx> {
-    pub ctx: &'a Context<'a, 'ctx>,
-    pub emit: &'a mut ProgEmit<'p, 'ctx>,
-    pub var_allocs: IndexVec<VarId, StackValue<'ctx>>,
-    pub locals: IndexVec<LocalId, StackValue<'ctx>>,
+    ctx: &'a Context<'a, 'ctx>,
+    proc: &'a Proc,
+    prog_emit: &'a ProgEmit<'p, 'ctx>,
+
+    var_allocs: IndexVec<VarId, StackValue<'ctx>>,
+    locals: IndexVec<LocalId, StackValue<'ctx>>,
     local_assigned: IndexVec<LocalId, bool>,
-    pub blocks: IndexVec<BlockId, BasicBlock<'ctx>>,
-    pub func: FunctionValue<'ctx>,
-    pub proc: &'a Proc,
+    blocks: IndexVec<BlockId, BasicBlock<'ctx>>,
+    func: FunctionValue<'ctx>,
 }
 
 impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
-    pub fn emit(ctx: &'a Context<'p, 'ctx>, emit: &'a mut ProgEmit<'p, 'ctx>, proc: &'a Proc, func: FunctionValue<'ctx>) {
-        let mut pe = Self {
+    pub fn new(ctx: &'a Context<'a, 'ctx>, prog_emit: &'a ProgEmit<'p, 'ctx>, proc: &'a Proc, func: FunctionValue<'ctx>) -> Self {
+        Self {
             ctx,
-            emit,
+            proc,
+            prog_emit,
+
             var_allocs: IndexVec::new(),
             locals: IndexVec::new(),
             local_assigned: IndexVec::new(),
             blocks: IndexVec::new(),
             func,
-            proc,
-        };
-        pe.emit_proc();
+        }
     }
+}
 
+impl<'a, 'p, 'ctx> WalkActor for ProcEmit<'a, 'p, 'ctx> {
+    fn pre_start(&mut self, _: &CFGWalker) {
+        let entry_bb = self.emit_entry_block();
+        for cfg_block in self.proc.blocks.iter() {
+            let block = self.ctx.llvm_ctx.append_basic_block(self.func, &format!("s{}b{}", cfg_block.scope.index(), cfg_block.id.index()));
+            self.blocks.push(block);
+        }
+        self.ctx.builder.position_at_end(entry_bb);
+        self.ctx.builder.build_unconditional_branch(self.blocks[BlockId::new(0)]);
+    }
+    fn block_start(&mut self, _: &CFGWalker, id: BlockId) {
+        let ll_block = self.blocks[id];
+        self.ctx.builder.position_at_end(ll_block);
+    }
+    fn block_end(&mut self, walker: &CFGWalker, id: BlockId) {
+        self.emit_terminator(id);
+    }
+    fn handle_op(&mut self, walker: &CFGWalker, id: BlockId, op: &Op, idx: usize) {
+        self.emit_op(walker, id, op, idx);
+    }
+    fn end(&mut self, _: &CFGWalker) {}
+}
+
+impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
     fn build_val_alloca(&self, ty: &ty::Complex) -> PointerValue<'ctx> {
         match ty {
             ty::Complex::Primitive(prim) => {
@@ -68,7 +95,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
 
         for var in self.proc.vars.iter() {
             let name = &if var.name.index() != 0 {
-                format!("var_{}", self.emit.env.string_table.get(var.name))
+                format!("var_{}", self.prog_emit.env.string_table.get(var.name))
             } else {
                 format!("ret_var")
             };
@@ -94,7 +121,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         let param_locals_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(param_locals_alloca, &[cz, cz], "param_locals_ptr") };
         let argpack_local = self.func.get_params()[0];
 
-        self.build_call(self.ctx.rt.rt_arg_pack_unpack_into, &[argpack_local.into(), param_locals_ptr.into(), self.ctx.llvm_ctx.i64_type().const_int(self.proc.id.index() as u64, false).into(), self.emit.rt_global.into()]);
+        self.build_call(self.ctx.rt.rt_arg_pack_unpack_into, &[argpack_local.into(), param_locals_ptr.into(), self.ctx.llvm_ctx.i64_type().const_int(self.proc.id.index() as u64, false).into(), self.prog_emit.rt_global.into()]);
 
         block
     }
@@ -102,23 +129,6 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
     fn finalize_entry_block(&self, entry: BasicBlock) {
         self.ctx.builder.position_at_end(entry);
         self.ctx.builder.build_unconditional_branch(self.blocks[BlockId::new(0)]);
-    }
-
-    pub fn emit_proc(&mut self) {
-        let entry_bb = self.emit_entry_block();
-
-        for cfg_block in self.proc.blocks.iter() {
-            let block = self.ctx.llvm_ctx.append_basic_block(self.func, &format!("s{}b{}", cfg_block.scope.index(), cfg_block.id.index()));
-            self.blocks.push(block);
-        }
-
-        for (id, block) in self.proc.blocks.iter_enumerated() {
-            let ll_block = self.blocks[id];
-            self.ctx.builder.position_at_end(ll_block);
-            self.emit_block(block);
-        }
-
-        self.finalize_entry_block(entry_bb);
     }
 
     fn assign_literal(&mut self, lit: &Literal, local_id: LocalId) {
@@ -293,7 +303,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
     }
 
     fn build_call_intrinsic(&mut self, intrinsic: Intrinsic, args: &[BVEWrapper<'ctx>]) -> Option<BasicValueEnum<'ctx>> {
-        let func = self.emit.get_intrinsic(intrinsic);
+        let func = self.prog_emit.get_intrinsic(intrinsic);
         self.build_call_internal(func, args)
     }
 
@@ -309,189 +319,191 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         }
     }
 
-    fn emit_block(&mut self, block: &Block) {
-        for (i, op) in block.ops.iter().enumerate() {
-            match op {
-                Op::Noop => {},
+    fn emit_op(&mut self, walker: &CFGWalker, id: BlockId, op: &Op, idx: usize) {
+        let block = &self.proc.blocks[id];
+        match op {
+            Op::Noop => {},
 
-                Op::Literal(id, literal) => {
-                    self.assign_literal(literal, *id);
-                },
+            Op::Literal(id, literal) => {
+                self.assign_literal(literal, *id);
+            },
 
-                Op::MkVar(_) => {
-                    // nothing now - can we remove this?
-                }
-
-                Op::Load(local, var) => {
-                    let copy = self.load_var(*var);
-                    self.set_local(*local, &copy);
-                    if copy.ty.needs_destructor() {
-                        let copy_any = self.conv_val(&copy, &ty::Complex::Any);
-                        self.build_call(self.ctx.rt.rt_val_cloned, &[copy_any.into()]);
-                    }
-                },
-
-                Op::Store(var, local) => {
-                    let var_ty = &self.proc.vars[*var].ty;
-                    if var_ty.needs_destructor() {
-                        let val = self.load_var(*var);
-                        let val_any = self.conv_val(&val, &ty::Complex::Any);
-                        self.build_call(self.ctx.rt.rt_val_drop, &[val_any.into()]);
-                    }
-
-                    let store_val = self.get_local(*local, false);
-                    if store_val.ty.needs_destructor() {
-                        let store_val_any = self.conv_val(&store_val, &ty::Complex::Any);
-                        self.build_call(self.ctx.rt.rt_val_cloned, &[(&store_val_any).into()],);
-                    }
-                    self.store_var(*var, &store_val);
-                },
-
-                Op::Put(id) => {
-                    let norm = self.get_local_any(*id);
-
-                    self.build_call_catching(block, self.ctx.rt.rt_val_print, &[norm.into(), self.emit.rt_global.into()]);
-                },
-
-                Op::Binary(id, op, lhs, rhs) => {
-                    let lhs_ref = self.get_local_any(*lhs);
-                    let rhs_ref = self.get_local_any(*rhs);
-                    let op_var = self.ctx.llvm_ctx.i32_type().const_int(*op as u64, false);
-
-                    let res = self.build_call_catching(block, self.ctx.rt.rt_val_binary_op, &[self.emit.rt_global.into(), op_var.into(), lhs_ref.into(), rhs_ref.into()]).unwrap();
-                    self.set_local(*id, &SSAValue::new(res, ty::Complex::Any));
-                },
-
-                Op::HardBinary(id, op, lhs, rhs) => {
-                    let lhs_val = self.get_local(*lhs, false);
-                    let rhs_val = self.get_local(*rhs, false);
-                    let res = self.emit_binary(block, *op, &lhs_val, &rhs_val);
-                    self.set_local(*id, &res);
-                },
-
-                Op::Call(id, name, args) => {
-                    let argpack_ptr = self.build_argpack(None, &args);
-
-                    // TODO: better proc lookup, consider src
-                    let func = self.emit.lookup_global_proc(*name);
-                    let res_val = self.build_call_catching(block, func, &[argpack_ptr.into(), self.emit.rt_global.into()]).unwrap();
-                    let val = SSAValue::new(res_val, ty::Complex::Any);
-                    self.set_local(*id, &val);
-                },
-
-                Op::Cast(dst, src, ty) => {
-                    // TODO: impl eq for prim<->complex
-                    assert!(self.proc.locals[*dst].ty == (*ty).into());
-                    if *ty != ty::Primitive::String {
-                        unimplemented!("can only cast to string, not {:?}", ty);
-                    }
-
-                    let src_llval = self.get_local_any(*src);
-                    let res_llval = self.build_call_catching(block, self.ctx.rt.rt_val_cast_string_val, &[src_llval.into(), self.emit.rt_global.into()]).unwrap();
-                    let res_val = SSAValue::new(res_llval, (*ty).into());
-                    self.set_local(*dst, &res_val);
-                },
-
-                Op::AllocDatum(dst, ty_id) => {
-                    // TODO: impl eq for prim<->complex
-                    // TODO: assert actual type once inference pops it
-                    assert!(self.proc.locals[*dst].ty == ty::Primitive::Ref(None).into());
-                    let datum_ptr = self.build_call_catching(block, self.ctx.rt.rt_runtime_alloc_datum, &[
-                        self.emit.rt_global.into(),
-                        self.ctx.llvm_ctx.i32_type().const_int(ty_id.index() as u64, false).into(),
-                    ]).unwrap();
-                    let ref_val = SSAValue::new(datum_ptr, ty::Primitive::Ref(None).into());
-                    self.set_local(*dst, &ref_val);
-                },
-
-                Op::DatumLoadVar(dst, src, var_id) => {
-                    let val = self.get_local_any(*src).val.into_struct_value();
-                    let ref_ptr = self.build_extract_ref_ptr(val);
-                    let var_get_ptr = self.build_vtable_lookup(block, ref_ptr, layout::VTABLE_VAR_GET_FIELD_OFFSET).into_pointer_value();
-
-                    // TODO: drop/cloned
-
-                    let var_val = self.build_call_catching(block, var_get_ptr, &[
-                        ref_ptr.into(),
-                        self.ctx.llvm_ctx.i64_type().const_int(var_id.index() as u64, false).into(),
-                    ]).unwrap();
-                    self.set_local(*dst, &SSAValue::new(var_val, ty::Complex::Any));
-                },
-
-                Op::DatumStoreVar(dst, var_id, src) => {
-                    let dst_val = self.get_local_any(*dst).val.into_struct_value();
-                    let ref_ptr = self.build_extract_ref_ptr(dst_val);
-                    let var_set_ptr = self.build_vtable_lookup(block, ref_ptr, layout::VTABLE_VAR_SET_FIELD_OFFSET).into_pointer_value();
-
-                    let src_val = self.get_local_any(*src);
-                    self.build_call_catching(block, var_set_ptr, &[
-                        ref_ptr.into(),
-                        self.ctx.llvm_ctx.i64_type().const_int(var_id.index() as u64, false).into(),
-                        src_val.into(),
-                    ]);
-                },
-
-                Op::DatumCallProc(dst, src, proc_name, args) => {
-                    let argpack_ptr = self.build_argpack(Some(*src), &args);
-                    let src_val = self.get_local(*src, false);
-                    let src_val_any = self.conv_val(&src_val, &ty::Complex::Any);
-                    match src_val.ty {
-                        ty::Complex::Primitive(ty::Primitive::Ref(_)) => {
-                            let ref_ptr = self.build_extract_ref_ptr(src_val_any.val.into_struct_value());
-                            let proc_lookup_ptr = self.build_vtable_lookup(block, ref_ptr, layout::VTABLE_PROC_LOOKUP_FIELD_OFFSET).into_pointer_value();
-
-                            let proc_ptr = self.build_call_catching(block, proc_lookup_ptr, &[
-                                self.ctx.llvm_ctx.i64_type().const_int(proc_name.index() as u64, false).into(),
-                                self.emit.rt_global.into(),
-                            ]).unwrap().into_pointer_value();
-
-                            let res_val = self.build_call_catching(block, proc_ptr, &[
-                                argpack_ptr.into(),
-                                self.emit.rt_global.into(),
-                            ]).unwrap();
-
-                            self.set_local(*dst, &SSAValue::new(res_val, ty::Complex::Any));
-                        }
-                        _ => {
-                            // soft call
-                            let res_val = self.build_call_catching(block, self.ctx.rt.rt_val_call_proc, &[
-                                src_val_any.into(),
-                                self.ctx.llvm_ctx.i64_type().const_int(proc_name.index() as u64, false).into(),
-                                argpack_ptr.into(),
-                                self.emit.rt_global.into(),
-                            ]).unwrap();
-
-                            self.set_local(*dst, &SSAValue::new(res_val, ty::Complex::Any));
-                        }
-                    }
-                },
-
-                Op::Throw(exception_local) => {
-                    let exception_val = self.get_local_any(*exception_local);
-                    self.build_call_catching(block, self.ctx.rt.rt_throw, &[exception_val.into()]);
-                }
-
-                Op::CatchException(maybe_except_var) => {
-                    if i != 0 {
-                        panic!("CatchException op not at start of block");
-                    }
-
-                    let landingpad = self.ctx.builder.build_landingpad(self.ctx.rt.ty.landingpad_type, "lp");
-                    landingpad.set_cleanup(true);
-
-
-                    if let Some(except_var) = maybe_except_var {
-                        let exception_container = self.ctx.builder.build_extract_value(landingpad.as_basic_value().into_struct_value(), 0, "").unwrap();
-                        let exception = self.build_call(self.ctx.rt.rt_exception_get_val, &[exception_container.into()]).unwrap();
-                        let except_val = SSAValue::new(exception, ty::Complex::Any);
-                        self.store_var(*except_var, &except_val);
-                    }
-                },
-
-                //_ => unimplemented!("{:?}", op),
+            Op::MkVar(_) => {
+                // nothing now - can we remove this?
             }
-        }
 
+            Op::Load(local, var) => {
+                let copy = self.load_var(*var);
+                self.set_local(*local, &copy);
+                if copy.ty.needs_destructor() {
+                    let copy_any = self.conv_val(&copy, &ty::Complex::Any);
+                    self.build_call(self.ctx.rt.rt_val_cloned, &[copy_any.into()]);
+                }
+            },
+
+            Op::Store(var, local) => {
+                let var_ty = &self.proc.vars[*var].ty;
+                if var_ty.needs_destructor() {
+                    let val = self.load_var(*var);
+                    let val_any = self.conv_val(&val, &ty::Complex::Any);
+                    self.build_call(self.ctx.rt.rt_val_drop, &[val_any.into()]);
+                }
+
+                let store_val = self.get_local(*local, false);
+                if store_val.ty.needs_destructor() {
+                    let store_val_any = self.conv_val(&store_val, &ty::Complex::Any);
+                    self.build_call(self.ctx.rt.rt_val_cloned, &[(&store_val_any).into()],);
+                }
+                self.store_var(*var, &store_val);
+            },
+
+            Op::Put(id) => {
+                let norm = self.get_local_any(*id);
+
+                self.build_call_catching(block, self.ctx.rt.rt_val_print, &[norm.into(), self.prog_emit.rt_global.into()]);
+            },
+
+            Op::Binary(id, op, lhs, rhs) => {
+                let lhs_ref = self.get_local_any(*lhs);
+                let rhs_ref = self.get_local_any(*rhs);
+                let op_var = self.ctx.llvm_ctx.i32_type().const_int(*op as u64, false);
+
+                let res = self.build_call_catching(block, self.ctx.rt.rt_val_binary_op, &[self.prog_emit.rt_global.into(), op_var.into(), lhs_ref.into(), rhs_ref.into()]).unwrap();
+                self.set_local(*id, &SSAValue::new(res, ty::Complex::Any));
+            },
+
+            Op::HardBinary(id, op, lhs, rhs) => {
+                let lhs_val = self.get_local(*lhs, false);
+                let rhs_val = self.get_local(*rhs, false);
+                let res = self.emit_binary(block, *op, &lhs_val, &rhs_val);
+                self.set_local(*id, &res);
+            },
+
+            Op::Call(id, name, args) => {
+                let argpack_ptr = self.build_argpack(None, &args);
+
+                // TODO: better proc lookup, consider src
+                let func = self.prog_emit.lookup_global_proc(*name);
+                let res_val = self.build_call_catching(block, func, &[argpack_ptr.into(), self.prog_emit.rt_global.into()]).unwrap();
+                let val = SSAValue::new(res_val, ty::Complex::Any);
+                self.set_local(*id, &val);
+            },
+
+            Op::Cast(dst, src, ty) => {
+                // TODO: impl eq for prim<->complex
+                assert!(self.proc.locals[*dst].ty == (*ty).into());
+                if *ty != ty::Primitive::String {
+                    unimplemented!("can only cast to string, not {:?}", ty);
+                }
+
+                let src_llval = self.get_local_any(*src);
+                let res_llval = self.build_call_catching(block, self.ctx.rt.rt_val_cast_string_val, &[src_llval.into(), self.prog_emit.rt_global.into()]).unwrap();
+                let res_val = SSAValue::new(res_llval, (*ty).into());
+                self.set_local(*dst, &res_val);
+            },
+
+            Op::AllocDatum(dst, ty_id) => {
+                // TODO: impl eq for prim<->complex
+                // TODO: assert actual type once inference pops it
+                assert!(self.proc.locals[*dst].ty == ty::Primitive::Ref(None).into());
+                let datum_ptr = self.build_call_catching(block, self.ctx.rt.rt_runtime_alloc_datum, &[
+                    self.prog_emit.rt_global.into(),
+                    self.ctx.llvm_ctx.i32_type().const_int(ty_id.index() as u64, false).into(),
+                ]).unwrap();
+                let ref_val = SSAValue::new(datum_ptr, ty::Primitive::Ref(None).into());
+                self.set_local(*dst, &ref_val);
+            },
+
+            Op::DatumLoadVar(dst, src, var_id) => {
+                let val = self.get_local_any(*src).val.into_struct_value();
+                let ref_ptr = self.build_extract_ref_ptr(val);
+                let var_get_ptr = self.build_vtable_lookup(block, ref_ptr, layout::VTABLE_VAR_GET_FIELD_OFFSET).into_pointer_value();
+
+                // TODO: drop/cloned
+
+                let var_val = self.build_call_catching(block, var_get_ptr, &[
+                    ref_ptr.into(),
+                    self.ctx.llvm_ctx.i64_type().const_int(var_id.index() as u64, false).into(),
+                ]).unwrap();
+                self.set_local(*dst, &SSAValue::new(var_val, ty::Complex::Any));
+            },
+
+            Op::DatumStoreVar(dst, var_id, src) => {
+                let dst_val = self.get_local_any(*dst).val.into_struct_value();
+                let ref_ptr = self.build_extract_ref_ptr(dst_val);
+                let var_set_ptr = self.build_vtable_lookup(block, ref_ptr, layout::VTABLE_VAR_SET_FIELD_OFFSET).into_pointer_value();
+
+                let src_val = self.get_local_any(*src);
+                self.build_call_catching(block, var_set_ptr, &[
+                    ref_ptr.into(),
+                    self.ctx.llvm_ctx.i64_type().const_int(var_id.index() as u64, false).into(),
+                    src_val.into(),
+                ]);
+            },
+
+            Op::DatumCallProc(dst, src, proc_name, args) => {
+                let argpack_ptr = self.build_argpack(Some(*src), &args);
+                let src_val = self.get_local(*src, false);
+                let src_val_any = self.conv_val(&src_val, &ty::Complex::Any);
+                match src_val.ty {
+                    ty::Complex::Primitive(ty::Primitive::Ref(_)) => {
+                        let ref_ptr = self.build_extract_ref_ptr(src_val_any.val.into_struct_value());
+                        let proc_lookup_ptr = self.build_vtable_lookup(block, ref_ptr, layout::VTABLE_PROC_LOOKUP_FIELD_OFFSET).into_pointer_value();
+
+                        let proc_ptr = self.build_call_catching(block, proc_lookup_ptr, &[
+                            self.ctx.llvm_ctx.i64_type().const_int(proc_name.index() as u64, false).into(),
+                            self.prog_emit.rt_global.into(),
+                        ]).unwrap().into_pointer_value();
+
+                        let res_val = self.build_call_catching(block, proc_ptr, &[
+                            argpack_ptr.into(),
+                            self.prog_emit.rt_global.into(),
+                        ]).unwrap();
+
+                        self.set_local(*dst, &SSAValue::new(res_val, ty::Complex::Any));
+                    }
+                    _ => {
+                        // soft call
+                        let res_val = self.build_call_catching(block, self.ctx.rt.rt_val_call_proc, &[
+                            src_val_any.into(),
+                            self.ctx.llvm_ctx.i64_type().const_int(proc_name.index() as u64, false).into(),
+                            argpack_ptr.into(),
+                            self.prog_emit.rt_global.into(),
+                        ]).unwrap();
+
+                        self.set_local(*dst, &SSAValue::new(res_val, ty::Complex::Any));
+                    }
+                }
+            },
+
+            Op::Throw(exception_local) => {
+                let exception_val = self.get_local_any(*exception_local);
+                self.build_call_catching(block, self.ctx.rt.rt_throw, &[exception_val.into()]);
+            }
+
+            Op::CatchException(maybe_except_var) => {
+                if idx != 0 {
+                    panic!("CatchException op not at start of block");
+                }
+
+                let landingpad = self.ctx.builder.build_landingpad(self.ctx.rt.ty.landingpad_type, "lp");
+                landingpad.set_cleanup(true);
+
+
+                if let Some(except_var) = maybe_except_var {
+                    let exception_container = self.ctx.builder.build_extract_value(landingpad.as_basic_value().into_struct_value(), 0, "").unwrap();
+                    let exception = self.build_call(self.ctx.rt.rt_exception_get_val, &[exception_container.into()]).unwrap();
+                    let except_val = SSAValue::new(exception, ty::Complex::Any);
+                    self.store_var(*except_var, &except_val);
+                }
+            },
+
+            //_ => unimplemented!("{:?}", op),
+        }
+    }
+
+    fn emit_terminator(&mut self, block_id: BlockId) {
+        let block = &self.proc.blocks[block_id];
         match &block.terminator {
             Terminator::Return => {
                 self.finalize_block(block);
@@ -566,7 +578,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
     fn emit_binary(&mut self, block: &Block, op: op::HardBinary, lhs: &SSAValue<'ctx>, rhs: &SSAValue<'ctx>) -> SSAValue<'ctx> {
         let res = match op {
             op::HardBinary::StringConcat => {
-                self.build_call_catching(block, self.ctx.rt.rt_runtime_concat_strings, &[self.emit.rt_global.into(), lhs.into(), rhs.into()]).unwrap()
+                self.build_call_catching(block, self.ctx.rt.rt_runtime_concat_strings, &[self.prog_emit.rt_global.into(), lhs.into(), rhs.into()]).unwrap()
             }
             op::HardBinary::FloatAdd => {
                 self.ctx.builder.build_float_add(lhs.val.into_float_value(), rhs.val.into_float_value(), "").into()
@@ -692,7 +704,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
     }
 
     fn build_vtable_lookup_inline(&self, ty_id: IntValue<'ctx>, offset: u64) -> BasicValueEnum<'ctx> {
-        let field_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(self.emit.vt_global.as_pointer_value(), &[
+        let field_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(self.prog_emit.vt_global.as_pointer_value(), &[
             self.ctx.llvm_ctx.i32_type().const_zero(),
             ty_id,
             self.ctx.llvm_ctx.i32_type().const_int(offset, false),
@@ -702,7 +714,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
     }
 
     fn build_vtable_lookup(&self, block: &Block, datum_ptr: PointerValue<'ctx>, offset: u64) -> BasicValueEnum<'ctx> {
-        let lookup_fn = self.emit.vt_lookup[offset as usize];
+        let lookup_fn = self.prog_emit.vt_lookup[offset as usize];
         let field = self.build_call_catching(block, lookup_fn, &[datum_ptr.into()]).unwrap();
         field.set_name(&format!("vtable_field_{}", offset));
         field
