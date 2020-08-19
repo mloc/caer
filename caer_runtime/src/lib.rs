@@ -5,6 +5,7 @@ pub mod datum;
 mod eh;
 pub mod environment;
 pub mod ffi;
+mod gc_stackmap;
 pub mod list;
 pub mod runtime;
 pub mod string_table;

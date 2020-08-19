@@ -87,9 +87,9 @@ impl<'a> CFGWalker<'a> {
 }
 
 #[derive(Debug)]
-pub struct Lifetimes {
-    pub local: Vec<LocalId>,
-    pub var: Vec<VarId>,
+pub struct Lifetimes<'a> {
+    pub local: &'a [LocalId],
+    pub var: &'a [VarId],
 }
 
 #[derive(Debug)]
@@ -120,10 +120,13 @@ impl<'a> LifetimeTracker<'a> {
     }
 
     fn get_cur_lifetimes(&self) -> Lifetimes {
-        let cur_lifetimes = &self.cur_lifetimes.as_ref().unwrap();
-        Lifetimes {
-            local: cur_lifetimes.0.clone(),
-            var: cur_lifetimes.1.clone(),
+        if let Some(ref cur_lifetimes) = self.cur_lifetimes {
+            Lifetimes {
+                local: &cur_lifetimes.0,
+                var: &cur_lifetimes.1,
+            }
+        } else {
+            panic!();
         }
     }
 

@@ -8,7 +8,7 @@ use index_vec::IndexVec;
 use caer_ir::cfg::*;
 use caer_types::ty::{self, Ty};
 use caer_ir::id::{VarId, LocalId, BlockId};
-use caer_ir::walker::{WalkActor, CFGWalker};
+use caer_ir::walker::{WalkActor, CFGWalker, Lifetimes};
 use caer_types::op;
 
 #[derive(Debug)]
@@ -261,35 +261,53 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
     }
 
     fn build_call<F>(&self, func: F, args: &[BVEWrapper<'ctx>]) -> Option<BasicValueEnum<'ctx>> where F: Into<either::Either<FunctionValue<'ctx>, PointerValue<'ctx>>> {
-        /*let fptr = match func.into() {
+        let fptr = match func.into() {
             either::Either::Left(func_val) => func_val.as_global_value().as_pointer_value(),
             either::Either::Right(pointer_val) => pointer_val,
-        };*/
+        };
 
         //self.build_call_statepoint(fptr, args)
-        self.build_call_internal(func, &args)
+        self.build_call_internal(fptr, &args)
     }
 
-    fn build_call_statepoint(&self, func: PointerValue<'ctx>, args: &[BasicValueEnum<'ctx>]) -> Option<BasicValueEnum<'ctx>> {
+    fn build_call_statepoint(&self, block: &Block, live: &Lifetimes, func: PointerValue<'ctx>, args: &[BVEWrapper<'ctx>]) -> Option<BasicValueEnum<'ctx>> {
         let sp_intrinsic = unsafe {
             self.ctx.module.get_intrinsic("llvm.experimental.gc.statepoint", &[func.get_type().into()]).unwrap()
         };
+        let args_ll: Vec<_> = args.iter().map(|arg| arg.bve).collect();
 
-        let mut sp_args = Vec::with_capacity(7 + args.len());
+        let mut stack_ptrs: Vec<BasicValueEnum> = Vec::new();
+        for live_local in live.local.iter().copied() {
+            stack_ptrs.push(self.locals[live_local].val.unwrap().into());
+        }
+        for live_var in live.var.iter().copied() {
+            stack_ptrs.push(self.var_allocs[live_var].val.unwrap().into());
+        }
+
+        let mut sp_args = Vec::with_capacity(7 + args.len() + stack_ptrs.len()*2);
         sp_args.extend([
-            self.ctx.llvm_ctx.i64_type().const_zero().into(), // id
+            self.ctx.llvm_ctx.i64_type().const_int(caer_types::layout::GC_STACKMAP_ID, false).into(), // id
             self.ctx.llvm_ctx.i32_type().const_zero().into(), // # patch bytes
             func.into(), // func
             self.ctx.llvm_ctx.i32_type().const_int(args.len() as u64, false).into(), // # call args
             self.ctx.llvm_ctx.i32_type().const_zero().into(), // flags
         ].iter());
-        sp_args.extend(args.iter().copied());
+        sp_args.extend(args_ll.into_iter());
         sp_args.extend([
             self.ctx.llvm_ctx.i32_type().const_zero().into(), // # transition args
-            self.ctx.llvm_ctx.i32_type().const_zero().into(), // # deopt args
+            self.ctx.llvm_ctx.i32_type().const_int(stack_ptrs.len() as u64, false).into(), // # deopt args
         ].iter());
+        sp_args.extend(stack_ptrs.iter().copied());
+        sp_args.extend(stack_ptrs.into_iter());
 
-        let statepoint_token = self.ctx.builder.build_call(sp_intrinsic, &sp_args, "").try_as_basic_value().left().unwrap();
+        let statepoint_token;
+        if let Some(pad) = self.proc.scopes[block.scope].landingpad {
+            let continuation = self.ctx.llvm_ctx.append_basic_block(self.func, "");
+            statepoint_token = self.ctx.builder.build_invoke(sp_intrinsic, &sp_args, continuation, self.blocks[pad], "").try_as_basic_value().left().unwrap();
+            self.ctx.builder.position_at_end(continuation);
+        } else {
+            statepoint_token = self.ctx.builder.build_call(sp_intrinsic, &sp_args, "").try_as_basic_value().left().unwrap();
+        }
 
         let return_type = func.get_type().get_element_type().into_function_type().get_return_type();
         if let Some(return_type) = return_type {
@@ -383,8 +401,8 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                 let argpack_ptr = self.build_argpack(None, &args);
 
                 // TODO: better proc lookup, consider src
-                let func = self.prog_emit.lookup_global_proc(*name);
-                let res_val = self.build_call_catching(block, func, &[argpack_ptr.into(), self.prog_emit.rt_global.into()]).unwrap();
+                let func = self.prog_emit.lookup_global_proc(*name).as_global_value().as_pointer_value();
+                let res_val = self.build_call_statepoint(block, &walker.get_cur_lifetimes(), func, &[argpack_ptr.into(), self.prog_emit.rt_global.into()]).unwrap();
                 let val = SSAValue::new(res_val, ty::Complex::Any);
                 self.set_local(*id, &val);
             },
@@ -455,7 +473,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                             self.prog_emit.rt_global.into(),
                         ]).unwrap().into_pointer_value();
 
-                        let res_val = self.build_call_catching(block, proc_ptr, &[
+                        let res_val = self.build_call_statepoint(block, &walker.get_cur_lifetimes(), proc_ptr, &[
                             argpack_ptr.into(),
                             self.prog_emit.rt_global.into(),
                         ]).unwrap();
@@ -464,7 +482,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                     }
                     _ => {
                         // soft call
-                        let res_val = self.build_call_catching(block, self.ctx.rt.rt_val_call_proc, &[
+                        let res_val = self.build_call_statepoint(block, &walker.get_cur_lifetimes(), self.ctx.rt.rt_val_call_proc.as_global_value().as_pointer_value(), &[
                             src_val_any.into(),
                             self.ctx.llvm_ctx.i64_type().const_int(proc_name.index() as u64, false).into(),
                             argpack_ptr.into(),
@@ -489,13 +507,17 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                 let landingpad = self.ctx.builder.build_landingpad(self.ctx.rt.ty.landingpad_type, "lp");
                 landingpad.set_cleanup(true);
 
-
                 if let Some(except_var) = maybe_except_var {
                     let exception_container = self.ctx.builder.build_extract_value(landingpad.as_basic_value().into_struct_value(), 0, "").unwrap();
                     let exception = self.build_call(self.ctx.rt.rt_exception_get_val, &[exception_container.into()]).unwrap();
                     let except_val = SSAValue::new(exception, ty::Complex::Any);
                     self.store_var(*except_var, &except_val);
                 }
+            },
+
+            Op::Suspend => {
+                println!("{:?}", walker.get_cur_lifetimes());
+                self.build_call_statepoint(block, &walker.get_cur_lifetimes(), self.ctx.rt.rt_runtime_suspend.as_global_value().as_pointer_value(), &[self.prog_emit.rt_global.as_pointer_value().into()]);
             },
 
             //_ => unimplemented!("{:?}", op),

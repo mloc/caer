@@ -25,10 +25,10 @@ pub struct Location {
     pub pointer: LocationPointer,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LocationPointer {
     Register { reg: u16 },
-    Direct { addr: u64 },
+    Direct { reg: u16, offset: i32 },
     Indirect { reg: u16, offset: i32 },
     Constant(u64),
 }

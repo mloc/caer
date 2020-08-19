@@ -16,6 +16,7 @@ ordered-float = "2.0.0"
 leb128 = "0.2.4"
 libc = "0.2.74"
 caer_types = { path = "../caer_types" }
+unwind = "0.3.0"
 
 [dependencies.cstub_bindgen_macro]
 path = "../cstub_bindgen_macro"

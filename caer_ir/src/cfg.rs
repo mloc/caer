@@ -266,6 +266,8 @@ impl<'a> Proc {
                     }
 
                     Op::CatchException(_) => {}
+
+                    Op::Suspend => {}
                 }
             }
 
@@ -586,6 +588,8 @@ pub enum Op {
     // specifies the var for the caught exception val, if provided
     // TODO: rework to be less llvm-bound
     CatchException(Option<VarId>),
+
+    Suspend, // temporary
 }
 
 impl Op {
@@ -607,6 +611,7 @@ impl Op {
             Op::DatumCallProc(dst, _, _, _) => Some(*dst),
             Op::Throw(_) => None,
             Op::CatchException(_) => None,
+            Op::Suspend => None,
         }
     }
 
@@ -633,6 +638,7 @@ impl Op {
             }
             Op::Throw(src) => vec![*src],
             Op::CatchException(_) => vec![],
+            Op::Suspend => vec![],
         }
     }
 
@@ -655,6 +661,7 @@ impl Op {
             Op::DatumStoreVar(_, _, _) => {}
             Op::Throw(_) => {}
             Op::CatchException(_) => {}
+            Op::Suspend => {}
         }
     }
 
@@ -688,6 +695,7 @@ impl Op {
             Op::Load(_, _) => {}
             Op::AllocDatum(_, _) => {}
             Op::CatchException(_) => {}
+            Op::Suspend => {}
         }
     }
 

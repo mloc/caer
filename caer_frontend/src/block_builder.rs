@@ -252,6 +252,10 @@ impl<'a, 'pb, 'cb, 'ot> BlockBuilder<'a, 'pb, 'cb, 'ot> {
                 self.push_op(cfg::Op::Throw(throw_val));
             },
 
+            ast::Statement::Spawn { .. } => {
+                self.push_op(cfg::Op::Suspend);
+            },
+
             _ => unimplemented!(),
         }
     }

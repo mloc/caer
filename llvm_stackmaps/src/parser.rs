@@ -143,7 +143,8 @@ impl<'a, BO: ByteOrder + 'a> Parser<'a, BO> {
         let pointer = match pointer_type {
             0x01 => LocationPointer::Register { reg },
             0x02 => LocationPointer::Direct {
-                addr: ((reg as i32) + offset) as u64,
+                reg,
+                offset,
             },
             0x03 => LocationPointer::Indirect { reg, offset },
             0x04 => LocationPointer::Constant(offset as u64),

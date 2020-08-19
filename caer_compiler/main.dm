@@ -67,6 +67,7 @@
 		//var/y
 		x = 3
 		world.log << 3
+		spawn
 	else if(7)
 		x = 999
 	else

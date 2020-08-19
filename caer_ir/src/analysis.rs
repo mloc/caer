@@ -617,6 +617,7 @@ impl InferRunner {
                     ))?;
                 }
             }
+            Op::Suspend => {}
 
             // flow cases
             Op::Binary(out_l, binop, lhs_l, rhs_l) => {
