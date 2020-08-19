@@ -253,48 +253,6 @@ impl<'a> ProcAnalysis<'a> {
         runner.run(&mut self.proc);
     }
 
-    // order is reverse postorder with pred
-    pub fn annotate_local_lifetimes(&self, order: &[(Option<BlockId>, BlockId)]) -> Lifetimes {
-        let mut work: IndexVec<BlockId, Option<BlockLifetime>> =
-            self.proc.blocks.iter().map(|_| None).collect();
-
-        let mut scope_jb: IndexVec<ScopeId, Option<usize>> =
-            self.proc.scopes.iter().map(|_| None).collect();
-        scope_jb[self.proc.global_scope] = Some(0);
-
-        for (pred_id, id) in order.iter().copied() {
-            let block = &self.proc.blocks[id];
-
-            let start;
-            if let Some(pred_id) = pred_id {
-                start = work[pred_id].clone().unwrap().end;
-            } else {
-                start = LifetimeSet::empty();
-            }
-
-            let mut end = start.clone();
-
-            for op in block.ops.iter() {
-                if let Some(dest) = op.dest_local() {
-                    end.local.push(dest);
-                }
-
-                match op {
-                    cfg::Op::Store(dest, _) | cfg::Op::CatchException(Some(dest)) => {
-                        end.var.push(*dest)
-                    }
-                    _ => {}
-                }
-            }
-
-            work[id] = Some(BlockLifetime { start, end });
-        }
-
-        Lifetimes {
-            blocks: work.into_iter().map(|x| x.unwrap()).collect(),
-        }
-    }
-
     fn fold_consts(&mut self, order: &[BlockId]) -> bool {
         let mut changed = false;
         /*for block_id in order.iter() {
@@ -417,36 +375,6 @@ impl VarInfo {
             stores: Vec::new(),
         }
     }
-}
-
-// just turn vars back into locals ffs
-#[derive(Debug, Clone)]
-pub struct LifetimeSet {
-    pub local: Vec<LocalId>,
-    pub var: Vec<VarId>,
-}
-
-impl LifetimeSet {
-    fn empty() -> Self {
-        Self {
-            local: vec![],
-            var: vec![],
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct BlockLifetime {
-    pub start: LifetimeSet,
-    pub end: LifetimeSet,
-}
-
-#[derive(Debug, Clone)]
-pub struct Lifetimes {
-    // TODO: use some kind of persistent DS here? or LL
-    // this will be *very* memory inefficient with large projects
-    // but might be ok if it's lazy?
-    pub blocks: IndexVec<BlockId, BlockLifetime>,
 }
 
 #[derive(Debug, Clone)]

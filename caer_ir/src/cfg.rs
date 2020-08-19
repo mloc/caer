@@ -403,7 +403,8 @@ impl<'a> dot::Labeller<'a, BlockId, (BlockId, BlockId, String)> for Proc {
         let end_str = if block.scope_end { "END SCOPE\\l|" } else { "" };
 
         dot::LabelText::escaped(format!(
-            "{{{}\\l|{}{{{}}}}}",
+            "{{{}|{}\\l|{}{{{}}}}}",
+            block.id.index(),
             block
                 .ops
                 .iter()
