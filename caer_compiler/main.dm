@@ -36,6 +36,10 @@
 	world << band
 	world << bitmess(band)
 	*/
+	var/y = 0
+	y = "foo"
+
+	world << bitmess(84)
 
 	world << abc()
 

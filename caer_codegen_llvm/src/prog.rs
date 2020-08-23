@@ -9,6 +9,7 @@ use caer_types::id::{StringId, TypeId, ProcId};
 use index_vec::IndexVec;
 use std::fs::{self, File};
 use inkwell::values::AnyValueEnum;
+use crate::context::GC_ADDRESS_SPACE;
 use caer_ir::walker::CFGWalker;
 use std::collections::HashMap;
 
@@ -128,7 +129,9 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         let argpack_alloca = self.ctx.builder.build_alloca(self.ctx.rt.ty.arg_pack_type, "argpack_ptr");
         let argpack = self.ctx.rt.ty.arg_pack_type.const_zero();
         self.ctx.builder.build_store(argpack_alloca, argpack);
-        self.ctx.builder.build_call(entry_func, &[argpack_alloca.into(), self.rt_global.as_pointer_value().into()], "");
+        let ret_val = self.ctx.builder.build_alloca(self.ctx.rt.ty.val_type, "ret_val");
+        let ret_val_gc = self.ctx.builder.build_address_space_cast(ret_val, self.ctx.rt.ty.val_type_ptr, "");
+        self.ctx.builder.build_call(entry_func, &[argpack_alloca.into(), self.rt_global.as_pointer_value().into(), ret_val_gc.into()], "");
         self.ctx.builder.build_return(None);
     }
 
@@ -250,7 +253,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     fn make_get_var_func(&self, ty: &DType, index_func: inkwell::values::FunctionValue<'ctx>) -> inkwell::values::FunctionValue<'ctx> {
-        let datum_type_ptr = self.datum_types[ty.id].ptr_type(inkwell::AddressSpace::Generic);
+        let datum_type_ptr = self.datum_types[ty.id].ptr_type(GC_ADDRESS_SPACE);
         let func_ty = self.ctx.rt.ty.val_type.fn_type(&[datum_type_ptr.into(), self.ctx.llvm_ctx.i64_type().into()], false);
         // TODO: MANGLE
         let func = self.ctx.module.add_function(&format!("ty_{}_var_get", ty.id.index()), func_ty, None);
@@ -274,7 +277,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     fn make_set_var_func(&self, ty: &DType, index_func: inkwell::values::FunctionValue<'ctx>) -> inkwell::values::FunctionValue<'ctx> {
-        let datum_type_ptr = self.datum_types[ty.id].ptr_type(inkwell::AddressSpace::Generic);
+        let datum_type_ptr = self.datum_types[ty.id].ptr_type(GC_ADDRESS_SPACE);
         let func_ty = self.ctx.llvm_ctx.void_type().fn_type(&[datum_type_ptr.into(), self.ctx.llvm_ctx.i64_type().into(), self.ctx.rt.ty.val_type.into()], false);
         // TODO: MANGLE
         let func = self.ctx.module.add_function(&format!("ty_{}_var_set", ty.id.index()), func_ty, None);

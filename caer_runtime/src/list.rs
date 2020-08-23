@@ -41,13 +41,13 @@ impl AssocValue {
 
     fn update_val(&mut self, new_val: Val) {
         if let Some(old_val) = self.val.replace(new_val) {
-            rt_val_drop(old_val);
+            rt_val_drop(&old_val);
         }
     }
 
     fn remove_val(&mut self) {
         if let Some(old_val) = self.val.take() {
-            rt_val_drop(old_val);
+            rt_val_drop(&old_val);
         }
     }
 
@@ -163,7 +163,7 @@ impl List {
             map.get_mut(old_val).unwrap().remove_val();
         }
 
-        rt_val_drop(*old_val);
+        rt_val_drop(old_val);
         *old_val = new_val;
 
         map.entry(new_val).or_default().inc_count();
@@ -323,13 +323,13 @@ impl List {
 }
 
 #[no_mangle]
-pub extern "C" fn rt_list_var_get(list: &mut List, var: StringId) -> Val {
-    list.var_get(var)
+pub extern "C" fn rt_list_var_get(list: &mut List, var: StringId, out: &mut Val) {
+    *out = list.var_get(var)
 }
 
 #[no_mangle]
-pub extern "C" fn rt_list_var_set(list: &mut List, var: StringId, val: Val) {
-    list.var_set(var, val)
+pub extern "C" fn rt_list_var_set(list: &mut List, var: StringId, val: &Val) {
+    list.var_set(var, *val)
 }
 
 #[no_mangle]

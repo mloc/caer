@@ -4,9 +4,11 @@ set -ex
 
 RUST_BACKTRACE=1 cargo run
 
+llvm-as-10 -o /dev/null out/unopt.ll
 llc-10 -o out/unopt.s out/unopt.bc
 clang-10 -L ../target/debug/deps out/unopt.bc -Wl,-Tlink.ld -lcaer_runtime -lm -o out/unopt
 
+llvm-as-10 -o /dev/null out/opt.ll
 llc-10 -o out/opt.s out/opt.bc
 clang-10 -L ../target/debug/deps out/opt.bc -Wl,-Tlink.ld -lcaer_runtime -lm -o out/opt
 

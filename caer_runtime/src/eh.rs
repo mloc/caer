@@ -14,19 +14,19 @@ struct Exception {
     exception_val: Val,
 }
 #[no_mangle]
-unsafe extern "C" fn rt_exception_get_val(exception: &Exception) -> Val {
-    exception.exception_val
+unsafe extern "C" fn rt_exception_get_val(exception: &Exception, out_val: &mut Val) {
+    *out_val = exception.exception_val
 }
 
 #[no_mangle]
-unsafe extern "C" fn rt_throw(exception_val: Val) -> ! {
+unsafe extern "C" fn rt_throw(exception_val: &Val) -> ! {
     let exception = Box::new(Exception {
         header: unwind::_Unwind_Exception {
             exception_class: DM_EXCEPTION_CLASS,
             exception_cleanup,
             private: [0; unwind::unwinder_private_data_size],
         },
-        exception_val,
+        exception_val: *exception_val,
     });
     let exception_param = Box::into_raw(exception) as *mut unwind::_Unwind_Exception;
     let ret = unwind::_Unwind_RaiseException(exception_param);

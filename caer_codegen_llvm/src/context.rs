@@ -3,6 +3,9 @@ use std::mem::size_of;
 use inkwell::types::BasicType;
 use caer_types::layout;
 
+/// Only way of getting addressspace(1) in inkwell, for now
+pub const GC_ADDRESS_SPACE: inkwell::AddressSpace = inkwell::AddressSpace::Global;
+
 #[derive(Debug)]
 pub struct Context<'a, 'ctx> {
     pub llvm_ctx: &'ctx inkwell::context::Context,
@@ -19,7 +22,7 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
             builder: llbuild,
             module: llmod,
             llvm_ctx: llctx,
-            rt: rt,
+            rt,
         }
     }
 
@@ -83,23 +86,23 @@ pub struct RtFuncTyBundle<'ctx> {
 impl<'ctx> RtFuncTyBundle<'ctx> {
     fn new(ctx: &'ctx inkwell::context::Context) -> Self {
         let val_type = ctx.struct_type(&[ctx.i32_type().into(), ctx.i64_type().into()], false);
-        let val_type_ptr = val_type.ptr_type(inkwell::AddressSpace::Generic);
+        let val_type_ptr = val_type.ptr_type(GC_ADDRESS_SPACE);
 
         let opaque_type = ctx.opaque_struct_type("opaque");
         let rt_type = ctx.i8_type().array_type(size_of::<caer_runtime::runtime::Runtime>() as u32);
 
-        let arg_pack_tuple_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.into()], false);
+        let arg_pack_tuple_type = ctx.struct_type(&[ctx.i64_type().into(), val_type.into()], false);
         let arg_pack_tuple_type_ptr = arg_pack_tuple_type.ptr_type(inkwell::AddressSpace::Generic);
 
-        let arg_pack_type = ctx.struct_type(&[ctx.i64_type().into(), val_type_ptr.into(), ctx.i64_type().into(), arg_pack_tuple_type_ptr.into(), val_type.into()], false);
+        let arg_pack_type = ctx.struct_type(&[ctx.i64_type().into(), val_type.ptr_type(inkwell::AddressSpace::Generic).into(), ctx.i64_type().into(), arg_pack_tuple_type_ptr.into(), val_type.into()], false);
 
-        let proc_type = val_type.fn_type(&[arg_pack_type.ptr_type(inkwell::AddressSpace::Generic).into(), rt_type.ptr_type(inkwell::AddressSpace::Generic).into()], false);
+        let proc_type = ctx.void_type().fn_type(&[arg_pack_type.ptr_type(inkwell::AddressSpace::Generic).into(), rt_type.ptr_type(inkwell::AddressSpace::Generic).into(), val_type_ptr.into()], false);
 
         let datum_common_type = ctx.struct_type(&[
             // ref
             ctx.i32_type().into(),
         ], false);
-        let datum_common_type_ptr = datum_common_type.ptr_type(inkwell::AddressSpace::Generic);
+        let datum_common_type_ptr = datum_common_type.ptr_type(GC_ADDRESS_SPACE);
 
         let vt_entry_type = ctx.struct_type(&[
             // size
@@ -206,6 +209,10 @@ macro_rules! rt_funcs {
     );
 
     ( @genty @ptrify ptr , $e:expr) => (
+        $e.ptr_type(GC_ADDRESS_SPACE)
+    );
+
+    ( @genty @ptrify gptr , $e:expr) => (
         $e.ptr_type(inkwell::AddressSpace::Generic)
     );
 }
@@ -213,29 +220,27 @@ macro_rules! rt_funcs {
 rt_funcs!{
     RtFuncs,
     [
-        (rt_val_float, val_type~val, [f32_type~val]),
-        (rt_val_string, val_type~val, [i64_type~val]),
-        (rt_val_binary_op, val_type~val, [rt_type~ptr, i32_type~val, val_type~val, val_type~val]),
-        (rt_val_to_switch_disc, i32_type~val, [val_type~val]),
-        (rt_val_print, void_type~val, [val_type~val, rt_type~ptr]),
-        (rt_val_cloned, void_type~val, [val_type~val]),
-        (rt_val_drop, void_type~val, [val_type~val]),
-        (rt_val_cast_string_val, i64_type~val, [val_type~val, rt_type~ptr]),
-        (rt_val_call_proc, val_type~val, [val_type~val, i64_type~val, arg_pack_type~ptr, rt_type~ptr]),
+        (rt_val_binary_op, void_type~val, [rt_type~gptr, i32_type~val, val_type~ptr, val_type~ptr, val_type~ptr]),
+        (rt_val_to_switch_disc, i32_type~val, [val_type~ptr]),
+        (rt_val_print, void_type~val, [val_type~ptr, rt_type~gptr]),
+        (rt_val_cloned, void_type~val, [val_type~ptr]),
+        (rt_val_drop, void_type~val, [val_type~ptr]),
+        (rt_val_cast_string_val, i64_type~val, [val_type~ptr, rt_type~gptr]),
+        (rt_val_call_proc, void_type~val, [val_type~ptr, i64_type~val, arg_pack_type~ptr, rt_type~gptr, val_type~ptr]),
 
-        (rt_runtime_init, void_type~val, [rt_type~ptr, i8_type~ptr, i8_type~ptr, vt_entry_type~ptr]),
-        (rt_runtime_alloc_datum, datum_common_type~ptr, [rt_type~ptr, i32_type~val]),
-        (rt_runtime_concat_strings, i64_type~val, [rt_type~ptr, i64_type~val, i64_type~val]),
-        (rt_runtime_suspend, void_type~val, [rt_type~ptr]),
+        (rt_runtime_init, void_type~val, [rt_type~gptr, i8_type~gptr, i8_type~gptr, vt_entry_type~gptr]),
+        (rt_runtime_alloc_datum, datum_common_type~ptr, [rt_type~gptr, i32_type~val]),
+        (rt_runtime_concat_strings, i64_type~val, [rt_type~gptr, i64_type~val, i64_type~val]),
+        (rt_runtime_suspend, void_type~val, [rt_type~gptr]),
 
-        (rt_arg_pack_unpack_into, void_type~val, [arg_pack_type~ptr, val_type_ptr~ptr, i64_type~val, rt_type~ptr]),
+        (rt_arg_pack_unpack_into, void_type~val, [arg_pack_type~gptr, val_type_ptr~gptr, i64_type~val, rt_type~gptr]),
 
-        (rt_list_var_get, val_type~val, [opaque_type~ptr, i64_type~val]),
-        (rt_list_var_set, void_type~val, [opaque_type~ptr, i64_type~val, val_type~val]),
+        (rt_list_var_get, void_type~val, [opaque_type~ptr, i64_type~val, val_type~ptr]),
+        (rt_list_var_set, void_type~val, [opaque_type~ptr, i64_type~val, val_type~ptr]),
         (rt_list_proc_lookup, proc_type~ptr, [opaque_type~ptr, i64_type~val, rt_type~ptr]),
 
-        (rt_throw, void_type~val, [val_type~val]),
-        (rt_exception_get_val, val_type~val, [opaque_type~ptr]),
+        (rt_throw, void_type~val, [val_type~ptr]),
+        (rt_exception_get_val, void_type~val, [opaque_type~gptr, val_type~ptr]),
 
         (dm_eh_personality, i32_type~val, [i32_type~val, i32_type~val, i64_type~val, opaque_type~ptr, opaque_type~ptr]),
     ]

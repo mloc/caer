@@ -22,30 +22,20 @@ pub enum Val {
 }
 
 #[no_mangle]
-pub extern "C" fn rt_val_float(val: f32) -> Val {
-    Val::Float(val.into())
-}
-
-#[no_mangle]
-pub extern "C" fn rt_val_string(string: StringId) -> Val {
-    Val::String(string)
-}
-
-#[no_mangle]
-pub extern "C" fn rt_val_binary_op(rt: &mut Runtime, op: op::BinaryOp, lhs: Val, rhs: Val) -> Val {
+pub extern "C" fn rt_val_binary_op(rt: &mut Runtime, op: op::BinaryOp, lhs: &Val, rhs: &Val, out: &mut Val) {
     match op {
         op::BinaryOp::Eq | op::BinaryOp::Ne | op::BinaryOp::Equiv | op::BinaryOp::NotEquiv => {
-            return Val::handle_equality(rt, op, lhs, rhs);
+            *out = Val::handle_equality(rt, op, lhs, rhs);
         }
         _ => {}
     }
 
-    let mut lhs = lhs;
+    let mut lhs = *lhs;
     if let Val::Null = lhs {
         lhs = rhs.zero_value();
     }
 
-    match lhs {
+    *out = match lhs {
         Val::Null => Val::Null,
         Val::Float(lval) => Val::Float(Val::binary_arithm(op, lval.into(), rhs.cast_float().into()).into()),
         Val::String(lval) => {
@@ -62,12 +52,12 @@ pub extern "C" fn rt_val_binary_op(rt: &mut Runtime, op: op::BinaryOp, lhs: Val,
 
 // bad, needed for now
 #[no_mangle]
-pub extern "C" fn rt_val_cast_string_val(val: Val, rt: &mut Runtime) -> StringId {
+pub extern "C" fn rt_val_cast_string_val(val: &Val, rt: &mut Runtime) -> StringId {
     val.cast_string(rt)
 }
 
 #[no_mangle]
-pub extern "C" fn rt_val_to_switch_disc(val: Val) -> u32 {
+pub extern "C" fn rt_val_to_switch_disc(val: &Val) -> u32 {
     match val {
         Val::Float(val) => (val.into_inner() != 0.0) as u32,
         Val::Null => 0,
@@ -77,11 +67,11 @@ pub extern "C" fn rt_val_to_switch_disc(val: Val) -> u32 {
 }
 
 #[no_mangle]
-pub extern "C" fn rt_val_print(val: Val, rt: &mut Runtime) {
+pub extern "C" fn rt_val_print(val: &Val, rt: &mut Runtime) {
     match val {
         Val::Null | Val::Ref(None) => println!("null"),
         Val::Float(n) => println!("{}", n),
-        Val::String(s) => println!("{:?}", rt.string_table.get(s)),
+        Val::String(s) => println!("{:?}", rt.string_table.get(*s)),
         _ => {
             let sid = val.cast_string(rt);
             println!("{}", rt.string_table.get(sid));
@@ -90,7 +80,7 @@ pub extern "C" fn rt_val_print(val: Val, rt: &mut Runtime) {
 }
 
 #[no_mangle]
-pub extern "C" fn rt_val_cloned(val: Val) {
+pub extern "C" fn rt_val_cloned(val: &Val) {
     if let Val::Ref(_) = val {
         //unimplemented!("update refcounts")
     }
@@ -98,7 +88,7 @@ pub extern "C" fn rt_val_cloned(val: Val) {
 
 // this is not Drop and shouldn't be treated as such.
 #[no_mangle]
-pub extern "C" fn rt_val_drop(val: Val) {
+pub extern "C" fn rt_val_drop(val: &Val) {
     if let Val::Ref(_) = val {
         //unimplemented!("update refcounts")
     }
@@ -106,20 +96,20 @@ pub extern "C" fn rt_val_drop(val: Val) {
 }
 
 #[no_mangle]
-pub extern "C" fn rt_val_call_proc(val: Val, proc_name: StringId, args: &ArgPack, rt: &mut Runtime) -> Val {
-    val.call_proc(proc_name, args, rt)
+pub extern "C" fn rt_val_call_proc(val: &Val, proc_name: StringId, args: &ArgPack, rt: &mut Runtime, out: &mut Val) {
+    *out = val.call_proc(proc_name, args, rt)
 }
 
 //this whole block is an awful mess, TODO: fix at some point
 impl Val {
-    fn handle_equality(_rt: &mut Runtime, op: op::BinaryOp, lhs: Val, rhs: Val) -> Val {
+    fn handle_equality(_rt: &mut Runtime, op: op::BinaryOp, lhs: &Val, rhs: &Val) -> Val {
         if let Val::Ref(_) = lhs {
             unimplemented!("overload case for lhs datum");
         }
 
         let bres = match op {
-            op::BinaryOp::Eq => Val::basic_eq(lhs, rhs),
-            op::BinaryOp::Ne => !Val::basic_eq(lhs, rhs),
+            op::BinaryOp::Eq => Val::basic_eq(*lhs, *rhs),
+            op::BinaryOp::Ne => !Val::basic_eq(*lhs, *rhs),
             _ => unimplemented!("{:?}", op),
         };
 
