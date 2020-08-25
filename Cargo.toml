@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "aco",
     "aco_sys",
     "caer_codegen_llvm",
     "caer_compiler",

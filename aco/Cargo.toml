@@ -1,0 +1,10 @@
+[package]
+name = "aco"
+version = "0.1.0"
+authors = ["Colm Ó hIcí <git@ohici.ie>"]
+edition = "2018"
+
+[dependencies]
+
+[dependencies.aco_sys]
+path = "../aco_sys"
