@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 index_vec = "0.1.2"
-serde = { version = "1.0.114", features = ["derive"] }
+serde = { version = "1.0.115", features = ["derive"] }
 caer_infer = { path = "../caer_infer" }
 caer_types = { path = "../caer_types" }
 caer_util = { path = "../caer_util" }

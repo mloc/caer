@@ -1,0 +1,11 @@
+[package]
+name = "aco_sys"
+version = "0.1.0"
+authors = ["Colm Ó hIcí <git@ohici.ei>"]
+edition = "2018"
+
+[dependencies]
+
+[build-dependencies]
+cc = "1.0.59"
+bindgen = "0.55.1"

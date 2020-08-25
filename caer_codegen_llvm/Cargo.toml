@@ -10,7 +10,7 @@ caer_ir = { path = "../caer_ir" }
 # pretty much just to get runtime's size for static alloc
 caer_runtime = { path = "../caer_runtime" }
 caer_types = { path = "../caer_types" }
-either = "1.5.3"
+either = "1.6.0"
 index_vec = { version = "0.1.2", features = ["serde"] }
 serde_json = "1.0.57"
 

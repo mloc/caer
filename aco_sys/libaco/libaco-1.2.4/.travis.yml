@@ -1,0 +1,63 @@
+dist: trusty
+sudo: required
+
+notifications:
+  email:
+    - 00hnes@gmail.com
+
+language: c
+
+script:
+    - echo $TRAVIS_EVENT_TYPE
+    - echo $TRAVIS_OS_NAME
+    - echo $CC
+    - cc --version
+    - if [ "$TRAVIS_OS_NAME" = "osx" ] ; then brew update; brew install grep --with-default-names; fi
+    - if [ "$TRAVIS_OS_NAME" = "osx" ] ; then brew install gnu-sed --with-default-names; fi
+    - if [ "$TRAVIS_OS_NAME" = "linux" ] ; then sudo apt-get install -qq -y libreadline-dev libncurses5-dev libpcre3-dev libssl-dev perl make build-essential valgrind gcc-multilib g++-multilib libc6-dbg libc6-dbg:i386 ; fi
+    - date
+    - export EXTRA_CFLAGS=""
+    - echo ""
+    - bash test.sh version_check=1.2.4
+    - echo ""
+    - if [ "$TRAVIS_OS_NAME" = "linux" ] ; then mkdir output ; bash make.sh ; ls output ; ls output | wc -l ; cd output ; bash ../test.sh ; cd .. ; rm -fr output; fi
+    - echo ""
+    - if [ "$TRAVIS_OS_NAME" = "linux" ] ; then mkdir output ; bash make.sh -o no-m32 ; ls output ; ls output | wc -l ; cd output ; bash ../test.sh ; cd .. ; rm -fr output; fi
+    - echo ""
+    - mkdir output ; bash make.sh -o no-valgrind ; ls output ; ls output | wc -l ; cd output ; bash ../test.sh ; cd .. ; rm -fr output
+    - echo ""
+    - if [ "$TRAVIS_OS_NAME" = "linux" ] ; then mkdir output ; bash make.sh -o no-valgrind -o no-m32 ; ls output ; ls output | wc -l ; cd output ; bash ../test.sh ; cd .. ; rm -fr output; fi
+    - echo ""
+    - export EXTRA_CFLAGS="--std=c99"
+    - echo ""
+    - if [ "$TRAVIS_OS_NAME" = "linux" ] ; then mkdir output ; bash make.sh ; ls output ; ls output | wc -l ; cd output ; bash ../test.sh ; cd .. ; rm -fr output; fi
+    - echo ""
+    - if [ "$TRAVIS_OS_NAME" = "linux" ] ; then mkdir output ; bash make.sh -o no-m32 ; ls output ; ls output | wc -l ; cd output ; bash ../test.sh ; cd .. ; rm -fr output; fi
+    - echo ""
+    - mkdir output ; bash make.sh -o no-valgrind ; ls output ; ls output | wc -l ; cd output ; bash ../test.sh ; cd .. ; rm -fr output
+    - echo ""
+    - if [ "$TRAVIS_OS_NAME" = "linux" ] ; then mkdir output ; bash make.sh -o no-valgrind -o no-m32 ; ls output ; ls output | wc -l ; cd output ; bash ../test.sh ; cd .. ; rm -fr output; fi
+    - echo "" ; date
+
+matrix:
+  include:
+    - os: linux
+      compiler: gcc-4.9
+      addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+          packages:
+            - gcc-4.9
+    - os: linux
+      compiler: clang-3.5
+      addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+            - llvm-toolchain-trusty-3.5
+          packages:
+            - clang-3.5
+    - os: osx
+      osx_image: xcode8.3
+      compiler: clang

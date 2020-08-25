@@ -8,4 +8,4 @@ edition = "2018"
 
 [dependencies]
 index_vec = { version = "0.1.2", features = ["serde"] }
-serde = { version = "1.0.114", features = ["derive"] }
+serde = { version = "1.0.115", features = ["derive"] }
