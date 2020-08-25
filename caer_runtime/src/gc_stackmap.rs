@@ -1,5 +1,6 @@
 use caer_types::layout::GC_STACKMAP_ID;
-use llvm_stackmaps::{LittleEndian, Location, LocationPointer, Parser};
+use llvm_stackmaps::{LittleEndian, Location, Parser};
+pub use llvm_stackmaps::LocationPointer;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]

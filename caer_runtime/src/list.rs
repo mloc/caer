@@ -2,9 +2,11 @@
 
 use crate::arg_pack::ArgPack;
 use crate::datum::Datum;
+use std::collections::hash_map;
+use std::slice;
 use crate::runtime::Runtime;
 use caer_types::id::{TypeId, StringId};
-use caer_types::type_tree::{Specialization};
+use caer_types::type_tree::Specialization;
 use crate::val::{rt_val_drop, Val};
 use crate::vtable::ProcPtr;
 use std::collections::HashMap;
@@ -73,9 +75,19 @@ impl Default for AssocValue {
 impl List {
     pub fn new(ty: TypeId) -> Self {
         Self {
-            datum: Datum { ty },
+            datum: Datum::new(ty),
             vec: Vec::new(),
             map: None,
+        }
+    }
+
+    pub fn on_gc_heap(rt: &mut Runtime, list: List) -> &mut Self {
+        let ptr = rt.alloc_list();
+
+        unsafe {
+            let lref = &mut *ptr.as_ptr();
+            *lref = list;
+            lref
         }
     }
 
@@ -252,8 +264,10 @@ impl List {
     }
 
     extern "C" fn proc_copy(args: *const ArgPack, mut rt: NonNull<Runtime>, out: *mut Val) {
+        let rt = unsafe { rt.as_mut() };
+
         let args = unsafe { &*args };
-        let mut list_ptr = unsafe { ensure_list(args.src, rt.as_mut()) };
+        let mut list_ptr = ensure_list(args.src, rt);
         let list = unsafe { list_ptr.as_mut() };
 
         let start = args.get(0).and_then(|v| v.try_cast_int()).unwrap_or(1);
@@ -263,12 +277,12 @@ impl List {
 
         if start == 1 && end == 0 {
             // easy case, clone the entire list
-            let newlist_ptr = Box::into_raw(Box::new(list.clone()));
+            let newlist_ptr = List::on_gc_heap(rt, list.clone()) as *mut List;
             unsafe { *out = Val::Ref(NonNull::new(newlist_ptr as _)) };
             return;
         }
 
-        let mut newlist = List::new(list.datum.ty);
+        let newlist = List::on_gc_heap(rt, List::new(list.datum.ty));
 
         let range = ((start - 1) as usize)..{
             if end == 0 {
@@ -288,7 +302,7 @@ impl List {
             }
         }
 
-        let newlist_ptr = Box::into_raw(Box::new(newlist));
+        let newlist_ptr = newlist as *mut List;
         unsafe { *out = Val::Ref(NonNull::new(newlist_ptr as _)) };
     }
 
@@ -320,6 +334,13 @@ impl List {
         }
 
         unsafe { *out = Val::Null };
+    }
+
+    pub fn gc_iter<'a>(&'a self) -> GcIterator<'a> {
+        GcIterator {
+            state: GcIterState::Array(self.vec.iter()),
+            list: self,
+        }
     }
 }
 
@@ -355,6 +376,74 @@ fn ensure_list(val: Val, rt: &Runtime) -> NonNull<List> {
             datum_ptr.cast()
         }
         _ => panic!("RTE not list"),
+    }
+}
+
+enum GcIterState<'a> {
+    Array(slice::Iter<'a, Val>),
+    Assoc(hash_map::Iter<'a, Val, AssocValue>),
+    Done,
+}
+
+pub struct GcIterator<'a> {
+    list: &'a List,
+    state: GcIterState<'a>,
+}
+
+impl<'a> Iterator for GcIterator<'a> {
+    type Item = &'a Val;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.state {
+            GcIterState::Array(ref mut iter) => {
+                match iter.next() {
+                    None => {
+                        match &self.list.map {
+                            Some(map) => {
+                                let mut map_iter = map.iter();
+                                let next = Self::grind_assoc(&mut map_iter);
+                                self.state = GcIterState::Assoc(map_iter);
+                                next
+                            }
+                            None => {
+                                self.state = GcIterState::Done;
+                                None
+                            }
+                        }
+                    }
+                    o => o,
+                }
+            }
+            GcIterState::Assoc(ref mut iter) => {
+                match Self::grind_assoc(iter) {
+                    Some(v) => {
+                        Some(v)
+                    }
+                    None => {
+                        self.state = GcIterState::Done;
+                        None
+                    }
+                }
+            }
+            GcIterState::Done => {
+                None
+            }
+        }
+    }
+}
+
+impl<'a> GcIterator<'a> {
+    fn grind_assoc(assoc_iter: &mut hash_map::Iter<'a, Val, AssocValue>) -> Option<&'a Val> {
+        loop {
+            match assoc_iter.next() {
+                None => return None,
+                Some((_, assoc)) => {
+                    if let Some(ref val) = assoc.val {
+                        return Some(val)
+                    }
+                }
+            }
+        }
     }
 }
 

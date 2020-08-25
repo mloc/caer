@@ -15,3 +15,11 @@ pub const VTABLE_PROC_LOOKUP_FIELD_OFFSET: u64 = 3;
 
 // DMGC
 pub const GC_STACKMAP_ID: u64 = 0x444d4743;
+
+// discriminants for runtime Val enums
+// VAL_DISCRIM_NULL acts as an upper bound for type ids
+// TODO: document standard struct layout
+pub const VAL_DISCRIM_NULL: u32 = 0xF000_0000;
+pub const VAL_DISCRIM_FLOAT: u32 = 0xF000_0001;
+pub const VAL_DISCRIM_STRING: u32 = 0xF000_0002;
+pub const VAL_DISCRIM_REF: u32 = 0xF000_0003;

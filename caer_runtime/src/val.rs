@@ -1,28 +1,35 @@
+use crate::arg_pack::ArgPack;
 use crate::datum::Datum;
 use crate::list::List;
-use caer_types::op;
-use caer_types::id::StringId;
 use crate::runtime::Runtime;
-use caer_types::type_tree::Specialization;
 use crate::string_table::StringTable;
-use crate::arg_pack::ArgPack;
-use std::ptr::NonNull;
-use std::ops::*;
+use caer_types::id::StringId;
+use caer_types::layout;
+use caer_types::op;
+use caer_types::type_tree::Specialization;
 use ordered_float::OrderedFloat;
+use std::ops::*;
+use std::ptr::NonNull;
 
 // null must be first
 // TODO: not copy?
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Copy, Clone)]
 #[repr(C, u32)]
 pub enum Val {
-    Null,
-    Float(OrderedFloat<f32>),
-    String(StringId),
-    Ref(Option<NonNull<Datum>>),
+    Null = layout::VAL_DISCRIM_NULL,
+    Float(OrderedFloat<f32>) = layout::VAL_DISCRIM_FLOAT,
+    String(StringId) = layout::VAL_DISCRIM_STRING,
+    Ref(Option<NonNull<Datum>>) = layout::VAL_DISCRIM_REF,
 }
 
 #[no_mangle]
-pub extern "C" fn rt_val_binary_op(rt: &mut Runtime, op: op::BinaryOp, lhs: &Val, rhs: &Val, out: &mut Val) {
+pub extern "C" fn rt_val_binary_op(
+    rt: &mut Runtime,
+    op: op::BinaryOp,
+    lhs: &Val,
+    rhs: &Val,
+    out: &mut Val,
+) {
     match op {
         op::BinaryOp::Eq | op::BinaryOp::Ne | op::BinaryOp::Equiv | op::BinaryOp::NotEquiv => {
             *out = Val::handle_equality(rt, op, lhs, rhs);
@@ -37,7 +44,9 @@ pub extern "C" fn rt_val_binary_op(rt: &mut Runtime, op: op::BinaryOp, lhs: &Val
 
     *out = match lhs {
         Val::Null => Val::Null,
-        Val::Float(lval) => Val::Float(Val::binary_arithm(op, lval.into(), rhs.cast_float().into()).into()),
+        Val::Float(lval) => {
+            Val::Float(Val::binary_arithm(op, lval.into(), rhs.cast_float().into()).into())
+        }
         Val::String(lval) => {
             if op != op::BinaryOp::Add {
                 unimplemented!("RTE badop")
@@ -96,7 +105,13 @@ pub extern "C" fn rt_val_drop(val: &Val) {
 }
 
 #[no_mangle]
-pub extern "C" fn rt_val_call_proc(val: &Val, proc_name: StringId, args: &ArgPack, rt: &mut Runtime, out: &mut Val) {
+pub extern "C" fn rt_val_call_proc(
+    val: &Val,
+    proc_name: StringId,
+    args: &ArgPack,
+    rt: &mut Runtime,
+    out: &mut Val,
+) {
     val.call_proc(proc_name, args, rt, out)
 }
 
@@ -159,7 +174,9 @@ impl Val {
 
         match lhs {
             Val::Null => Val::Null,
-            Val::Float(lval) => Val::Float(Val::binary_arithm(op, lval.into(), rhs.cast_float().into()).into()),
+            Val::Float(lval) => {
+                Val::Float(Val::binary_arithm(op, lval.into(), rhs.cast_float().into()).into())
+            }
             Val::String(lval) => {
                 if op != op::BinaryOp::Add {
                     unimplemented!("RTE badop")
@@ -216,7 +233,8 @@ impl Val {
     }
 
     pub fn cast_float(&self) -> OrderedFloat<f32> {
-        self.try_cast_float().unwrap_or_else(|| unimplemented!("RTE badcast: {:?} -> f", self))
+        self.try_cast_float()
+            .unwrap_or_else(|| unimplemented!("RTE badcast: {:?} -> f", self))
     }
 
     #[inline]
@@ -230,7 +248,8 @@ impl Val {
     }
 
     pub fn cast_int(&self) -> i64 {
-        self.try_cast_int().unwrap_or_else(|| unimplemented!("RTE badcast: {:?} -> i", self))
+        self.try_cast_int()
+            .unwrap_or_else(|| unimplemented!("RTE badcast: {:?} -> i", self))
     }
 
     fn cast_string(&self, rt: &mut Runtime) -> StringId {
@@ -248,10 +267,8 @@ impl Val {
                         let list_ptr = dp.cast();
                         let list: &List = unsafe { list_ptr.as_ref() };
                         rt.string_table.put(format!("{:?}", list))
-                    },
-                    Specialization::Datum => {
-                        rt.env.type_tree.types[dty].path_str
-                    },
+                    }
+                    Specialization::Datum => rt.env.type_tree.types[dty].path_str,
                 }
             }
         }

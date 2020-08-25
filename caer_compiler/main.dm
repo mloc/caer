@@ -58,7 +58,7 @@
 	world << x
 
 	//world << (c:foo)
-	//testlists()
+	testlists()
 
 	catchet()
 
@@ -73,7 +73,10 @@
 	world << loopy()
 	world << y + 4
 	forl()
-*/
+	 */
+
+	SUSPEND()
+
 /proc/abc()
 	var/x
 	if(3)
@@ -114,6 +117,8 @@
 	world << "l1.Copy(3): [l1:Copy(3)]"
 	world << "l1.Copy(2, 4): [l1:Copy(2, 4)]"
 
+	SUSPEND()
+
 /proc/catchet()
 	world << "before try"
 	try
@@ -140,5 +145,8 @@
 	for(var/i = 1; i - 4; i = i + 1)
 		for(var/j = 1; j - 4; j = j + 1)
 			world << i + j*/
+
+/proc/SUSPEND()
+	spawn
 
 //#include "badty.dm"

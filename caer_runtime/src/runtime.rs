@@ -1,3 +1,4 @@
+use crate::alloc::Alloc;
 use crate::datum::Datum;
 use crate::environment::Environment;
 use crate::list::List;
@@ -12,6 +13,7 @@ use cstub_bindgen_macro::expose_c_stubs;
 use std::alloc;
 use std::fs::File;
 use std::mem;
+use std::ptr::NonNull;
 
 #[derive(Debug)]
 pub struct Runtime {
@@ -19,6 +21,7 @@ pub struct Runtime {
     pub(crate) vtable: vtable::Vtable,
     pub(crate) env: Environment,
     pub(crate) gc_stackmap: GcStackmap,
+    pub(crate) alloc: Alloc,
 }
 
 #[expose_c_stubs(rt_runtime)]
@@ -51,43 +54,24 @@ impl Runtime {
             vtable,
             env,
             gc_stackmap,
+            alloc: Alloc::new(),
         };
 
         // this fn should only be called by init on a zeroed-out Runtime, which we need to ignore
         mem::forget(mem::replace(self, new));
     }
-
-    // TODO: change arg when better prim support in macro
-    pub fn alloc_datum(&self, ty: u32) -> *mut Datum {
-        let ty = TypeId::new(ty as usize);
-        let ventry = &self.vtable[ty];
-        // TODO: put spec in ventry?
-        let spec = self.env.type_tree.types[ty].specialization;
-
-        match spec {
-            Specialization::Datum => {
-                // TODO: revisit alignment
-                let layout = alloc::Layout::from_size_align(ventry.size as usize, 8).unwrap();
-                unsafe {
-                    // TODO: init vars instead of zeroing
-                    let ptr = alloc::alloc_zeroed(layout) as *mut Datum;
-                    (*ptr).ty = ty;
-
-                    ptr
-                }
-            }
-            Specialization::List => {
-                let list = Box::new(List::new(ty));
-                Box::into_raw(list) as _
-            }
-        }
-    }
 }
 
 impl Runtime {
     // TODO: fix lifetimes
-    pub fn new_datum(&self, ty: TypeId) -> &mut Datum {
-        unsafe { self.alloc_datum(ty.index() as u32).as_mut().unwrap() }
+    pub fn new_datum(&mut self, ty: TypeId) -> &mut Datum {
+        unsafe { &mut *self.rt_runtime_alloc_datum(ty.index() as u32).as_ptr() }
+    }
+
+    // TODO: genericify? + break out of Runtime
+    pub fn alloc_list(&mut self) -> NonNull<List> {
+        let size = mem::size_of::<List>();
+        self.alloc.alloc(size).cast()
     }
 }
 
@@ -103,34 +87,33 @@ impl Runtime {
 
     #[no_mangle]
     pub extern "C" fn rt_runtime_suspend(&mut self) {
-        use unwind::{Cursor, RegNum};
+        crate::gc::run(self);
+    }
 
-        Cursor::local(|mut cursor| {
-            loop {
-                let ip = cursor.register(RegNum::IP)?;
+    #[no_mangle]
+    pub extern fn rt_runtime_alloc_datum(&mut self, ty: u32) -> NonNull<Datum> {
+        let ty = TypeId::new(ty as usize);
+        let ventry = &self.vtable[ty];
+        // TODO: put spec in ventry?
+        let spec = self.env.type_tree.types[ty].specialization;
 
-                match (cursor.procedure_info(), cursor.procedure_name()) {
-                    (Ok(ref info), Ok(ref name)) if ip == info.start_ip() + name.offset() => {
-                        println!(
-                            "{:#016x} - {} ({:#016x}) + {:#x}",
-                            ip,
-                            name.name(),
-                            info.start_ip(),
-                            name.offset()
-                        );
-                    }
-                    _ => println!("{:#016x} - ????", ip),
-                }
+        match spec {
+            Specialization::Datum => {
+                unsafe {
+                    // TODO: init vars instead of zeroing
+                    let mut ptr: NonNull<Datum> = self.alloc.alloc(ventry.size as usize).cast();
+                    ptr.as_mut().ty = ty;
 
-                println!("{:#?}", self.gc_stackmap.addr_to_record.get(&ip));
-
-                if !cursor.step()? {
-                    break;
+                    ptr
                 }
             }
-
-            Ok(())
-        })
-        .unwrap();
+            Specialization::List => {
+                let mut ptr = self.alloc_list();
+                unsafe {
+                    *ptr.as_mut() = List::new(ty);
+                }
+                ptr.cast()
+            }
+        }
     }
 }

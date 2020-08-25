@@ -185,28 +185,27 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         let (disc, llval) = match src_ty.as_primitive().unwrap() {
             ty::Primitive::Null => {
                 let null_val = self.ctx.llvm_ctx.i64_type().const_zero();
-                // TODO: less magic for disc vals
-                (0, null_val)
+                (layout::VAL_DISCRIM_NULL, null_val)
             },
             ty::Primitive::Float => {
                 // TODO fix this, this is mega bad, won't work on big endian systems
                 let val_as_i32 = self.ctx.builder.build_bitcast(src_local, self.ctx.llvm_ctx.i32_type(), "pack_val");
                 let val_as_i64: IntValue = self.ctx.builder.build_int_z_extend(val_as_i32.into_int_value(), self.ctx.llvm_ctx.i64_type(), "pack_val");
-                (1, val_as_i64)
+                (layout::VAL_DISCRIM_FLOAT, val_as_i64)
             },
             ty::Primitive::String => {
                 let val_as_int = self.ctx.builder.build_bitcast(src_local, self.ctx.llvm_ctx.i64_type(), "pack_val").into_int_value();
-                (2, val_as_int)
+                (layout::VAL_DISCRIM_STRING, val_as_int)
             },
             ty::Primitive::Ref(_) => {
                 let val_as_int: IntValue = self.ctx.builder.build_ptr_to_int(src_local.into_pointer_value(), self.ctx.llvm_ctx.i64_type(), "pack_val");
-                (3, val_as_int)
+                (layout::VAL_DISCRIM_REF, val_as_int)
             },
             _ => unimplemented!(),
         };
 
         let disc_ptr = self.ctx.builder.build_bitcast(into, self.ctx.llvm_ctx.i32_type().ptr_type(into.get_type().get_address_space()), "disc_ptr").into_pointer_value();
-        self.ctx.builder.build_store(disc_ptr, self.ctx.llvm_ctx.i32_type().const_int(disc, false));
+        self.ctx.builder.build_store(disc_ptr, self.ctx.llvm_ctx.i32_type().const_int(disc as u64, false));
 
         let val_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(into, &[self.ctx.llvm_ctx.i32_type().const_zero(), self.ctx.llvm_ctx.i32_type().const_int(1, false)], "val_ptr") };
         self.ctx.builder.build_store(val_ptr, llval);
