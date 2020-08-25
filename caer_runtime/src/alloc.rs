@@ -45,4 +45,8 @@ impl Alloc {
     pub fn iter_allocations(&self) -> impl Iterator<Item = NonNull<u8>> + ExactSizeIterator + '_ {
         self.allocations.iter().map(|(p, _)| *p)
     }
+
+    pub fn contains(&self, ptr: NonNull<u8>) -> bool {
+        self.allocations.contains_key(&ptr)
+    }
 }

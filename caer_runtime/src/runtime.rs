@@ -100,9 +100,13 @@ impl Runtime {
         match spec {
             Specialization::Datum => {
                 unsafe {
-                    // TODO: init vars instead of zeroing
                     let mut ptr: NonNull<Datum> = self.alloc.alloc(ventry.size as usize).cast();
                     ptr.as_mut().ty = ty;
+
+                    // TODO: init vars instead of nulling
+                    for val in ptr.as_mut().get_vars(self) {
+                        *val = crate::val::Val::Null;
+                    }
 
                     ptr
                 }

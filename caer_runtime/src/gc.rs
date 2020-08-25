@@ -74,6 +74,7 @@ impl<'a> Gc<'a> {
         //println!("DISC: {:x}", disc);
 
         println!("handling root at {:?}", root);
+        println!("disc is {:x}", disc);
 
         if disc >= layout::VAL_DISCRIM_NULL {
             // ptr points to a stack value
@@ -86,7 +87,6 @@ impl<'a> Gc<'a> {
     }
 
     fn scan_val(&mut self, val: &Val) {
-        println!("found val at {:?}, {:?}", val as *const Val, val);
         match val {
             // TODO: string GC
             Val::String(_) => {}
@@ -99,6 +99,12 @@ impl<'a> Gc<'a> {
 
     // TODO: the name "datum" is overloaded, as is "type". split it up.
     fn scan_gdatum(&mut self, mut datum_ptr: NonNull<Datum>) {
+        assert!(
+            self.runtime.alloc.contains(datum_ptr.cast()),
+            "pointer {:?} is not tracked by runtime",
+            datum_ptr
+        );
+
         let gc_marker = unsafe { &mut datum_ptr.as_mut().gc_marker };
         // TODO: incremental, use grey
         match *gc_marker {
@@ -140,6 +146,14 @@ impl<'a> Gc<'a> {
             datum_ptr.as_ptr(),
             dty_id
         );
+
+        let vars = unsafe {
+            datum_ptr.as_mut().get_vars(self.runtime)
+        };
+        println!("datum has {:?} vars", vars.len());
+        for val in vars {
+            self.scan_val(val);
+        }
     }
 
     fn scan_list(&mut self, list: &mut List) {

@@ -112,7 +112,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         // TODO: Bring Back SSAValue
         let ret_ty = &self.proc.vars[0].ty;
         if ret_ty.is_any() {
-            unsafe { self.gep_insertvalue(self.var_allocs[0].val.unwrap(), &[0, 0], self.ctx.llvm_ctx.i32_type().const_zero().into()) };
+            unsafe { self.gep_insertvalue(self.var_allocs[0].val.unwrap(), &[0, 0], self.ctx.llvm_ctx.i32_type().const_int(layout::VAL_DISCRIM_NULL as _, false).into()) };
         } else {
             let ret_zero = self.get_zero_value(&self.proc.vars[0].ty);
             self.ctx.builder.build_store(self.var_allocs[0].val.unwrap(), self.build_literal(&ret_zero));
