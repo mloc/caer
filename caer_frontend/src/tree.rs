@@ -67,8 +67,9 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
         let dty = type_tree::DType {
             id,
             path_str: self.env.intern_string(&oty.path),
+            path_string: oty.path.clone(),
             path,
-            type_path: type_path,
+            type_path,
             parent: parent_ty,
             specialization,
             vars: Vec::new(),

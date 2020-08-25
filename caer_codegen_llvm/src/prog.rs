@@ -2,16 +2,16 @@ use super::proc::ProcEmit;
 use super::context::Context;
 use caer_ir::cfg::*;
 use caer_ir::env::Env;
+use caer_types::ty;
 use caer_types::rt_env::RtEnv;
 use caer_types::layout;
 use caer_types::type_tree::{DType, Specialization};
 use caer_types::id::{StringId, TypeId, ProcId};
 use index_vec::IndexVec;
 use std::fs::{self, File};
-use inkwell::values::AnyValueEnum;
+use inkwell::values::{AnyValueEnum, PointerValue};
 use crate::context::GC_ADDRESS_SPACE;
 use caer_ir::walker::CFGWalker;
-use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct ProgEmit<'a, 'ctx> {
@@ -122,6 +122,19 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         ], "");
 
         block
+    }
+
+    pub(crate) fn copy_val(&self, src: PointerValue<'ctx>, dest: PointerValue<'ctx>) {
+        let i8_ptr = self.ctx.llvm_ctx.i8_type().ptr_type(GC_ADDRESS_SPACE);
+
+        let src_i8 = self.ctx.builder.build_bitcast(src, i8_ptr, "");
+        let dest_i8 = self.ctx.builder.build_bitcast(dest, i8_ptr, "");
+
+        let memcpy_intrinsic = unsafe {
+            self.ctx.module.get_intrinsic("llvm.memcpy", &[i8_ptr.into(), i8_ptr.into(), self.ctx.llvm_ctx.i64_type().into()]).unwrap()
+        };
+
+        self.ctx.builder.build_call(memcpy_intrinsic, &[dest_i8.into(), src_i8.into(), self.ctx.llvm_ctx.i64_type().const_int(ty::Complex::Any.get_store_size(), false).into(), self.ctx.llvm_ctx.bool_type().const_zero().into()], "");
     }
 
     fn finalize_main(&self, block: inkwell::basic_block::BasicBlock, entry_func: inkwell::values::FunctionValue) {
@@ -254,15 +267,16 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 
     fn make_get_var_func(&self, ty: &DType, index_func: inkwell::values::FunctionValue<'ctx>) -> inkwell::values::FunctionValue<'ctx> {
         let datum_type_ptr = self.datum_types[ty.id].ptr_type(GC_ADDRESS_SPACE);
-        let func_ty = self.ctx.rt.ty.val_type.fn_type(&[datum_type_ptr.into(), self.ctx.llvm_ctx.i64_type().into()], false);
+        let func_ty = self.ctx.llvm_ctx.void_type().fn_type(&[datum_type_ptr.into(), self.ctx.llvm_ctx.i64_type().into(), self.ctx.rt.ty.val_type_ptr.into()], false);
         // TODO: MANGLE
         let func = self.ctx.module.add_function(&format!("ty_{}_var_get", ty.id.index()), func_ty, None);
 
         let entry_block = self.ctx.llvm_ctx.append_basic_block(func, "entry");
         self.ctx.builder.position_at_end(entry_block);
 
-        let datum_ptr = func.get_first_param().unwrap().into_pointer_value();
-        let var_name = func.get_last_param().unwrap().into_int_value();
+        let datum_ptr = func.get_params()[0].into_pointer_value();
+        let var_name = func.get_params()[1].into_int_value();
+        let dest_ptr = func.get_params()[2].into_pointer_value();
 
         let var_index = self.ctx.builder.build_call(index_func, &[var_name.into()], "var_index").try_as_basic_value().left().unwrap().into_int_value();
         let var_val_ptr = unsafe {self.ctx.builder.build_in_bounds_gep(datum_ptr, &[
@@ -271,14 +285,15 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             var_index,
         ], "var_val_ptr")};
         let var_val = self.ctx.builder.build_load(var_val_ptr, "var_val");
-        self.ctx.builder.build_return(Some(&var_val));
+        self.ctx.builder.build_store(dest_ptr, var_val);
+        self.ctx.builder.build_return(None);
 
         func
     }
 
     fn make_set_var_func(&self, ty: &DType, index_func: inkwell::values::FunctionValue<'ctx>) -> inkwell::values::FunctionValue<'ctx> {
         let datum_type_ptr = self.datum_types[ty.id].ptr_type(GC_ADDRESS_SPACE);
-        let func_ty = self.ctx.llvm_ctx.void_type().fn_type(&[datum_type_ptr.into(), self.ctx.llvm_ctx.i64_type().into(), self.ctx.rt.ty.val_type.into()], false);
+        let func_ty = self.ctx.llvm_ctx.void_type().fn_type(&[datum_type_ptr.into(), self.ctx.llvm_ctx.i64_type().into(), self.ctx.rt.ty.val_type_ptr.into()], false);
         // TODO: MANGLE
         let func = self.ctx.module.add_function(&format!("ty_{}_var_set", ty.id.index()), func_ty, None);
 
@@ -287,7 +302,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 
         let datum_ptr = func.get_params()[0].into_pointer_value();
         let var_name = func.get_params()[1].into_int_value();
-        let asg_val = func.get_params()[2].into_struct_value();
+        let asg_val = func.get_params()[2].into_pointer_value();
 
         let var_index = self.ctx.builder.build_call(index_func, &[var_name.into()], "var_index").try_as_basic_value().left().unwrap().into_int_value();
         let var_val_ptr = unsafe {self.ctx.builder.build_in_bounds_gep(datum_ptr, &[
@@ -295,7 +310,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             self.ctx.llvm_ctx.i32_type().const_int(layout::DATUM_VARS_FIELD_OFFSET, false),
             var_index,
         ], "var_val_ptr")};
-        self.ctx.builder.build_store(var_val_ptr, asg_val);
+        self.copy_val(asg_val, var_val_ptr);
         self.ctx.builder.build_return(None);
 
         func

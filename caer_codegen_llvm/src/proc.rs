@@ -260,11 +260,12 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
     }
 
     fn var_die(&self, var_id: VarId) {
+        /*
         let stackptr = self.var_allocs[var_id].val.unwrap();
         let lte_intrinsic = unsafe {
             self.ctx.module.get_intrinsic("llvm.lifetime.end", &[stackptr.get_type().into()]).unwrap()
         };
-        self.build_call(lte_intrinsic, &[self.ctx.llvm_ctx.i64_type().const_int(self.var_allocs[var_id].ty.get_store_size(), false).into(), stackptr.into()]);
+        self.build_call(lte_intrinsic, &[self.ctx.llvm_ctx.i64_type().const_int(self.var_allocs[var_id].ty.get_store_size(), false).into(), stackptr.into()]);*/
     }
 
     /*
@@ -344,16 +345,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
     */
 
     fn copy_val(&self, src: PointerValue<'ctx>, dest: PointerValue<'ctx>) {
-        let i8_ptr = self.ctx.llvm_ctx.i8_type().ptr_type(GC_ADDRESS_SPACE);
-
-        let src_i8 = self.ctx.builder.build_bitcast(src, i8_ptr, "");
-        let dest_i8 = self.ctx.builder.build_bitcast(dest, i8_ptr, "");
-
-        let memcpy_intrinsic = unsafe {
-            self.ctx.module.get_intrinsic("llvm.memcpy", &[i8_ptr.into(), i8_ptr.into(), self.ctx.llvm_ctx.i64_type().into()]).unwrap()
-        };
-
-        self.ctx.builder.build_call(memcpy_intrinsic, &[dest_i8.into(), src_i8.into(), self.ctx.llvm_ctx.i64_type().const_int(ty::Complex::Any.get_store_size(), false).into(), self.ctx.llvm_ctx.bool_type().const_zero().into()], "");
+        self.prog_emit.copy_val(src, dest);
     }
 
     fn build_call_internal<F>(&self, func: F, args: &[BVEWrapper<'ctx>]) -> Option<BasicValueEnum<'ctx>> where F: Into<either::Either<FunctionValue<'ctx>, PointerValue<'ctx>>> {
@@ -400,9 +392,11 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         sp_args.extend(args_ll.into_iter());
         sp_args.extend([
             self.ctx.llvm_ctx.i32_type().const_zero().into(), // # transition args
-            self.ctx.llvm_ctx.i32_type().const_zero().into(), // # deopt args
+            //self.ctx.llvm_ctx.i32_type().const_zero().into(), // # deopt args
+            self.ctx.llvm_ctx.i32_type().const_int(stack_ptrs.len() as u64, false).into(), // # deopt args
         ].iter());
         sp_args.extend(stack_ptrs.into_iter());
+
 
         let statepoint_token;
         if let Some(pad) = self.proc.scopes[block.scope].landingpad {
@@ -558,8 +552,8 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
             },
 
             Op::DatumStoreVar(dst, var_id, src) => {
-                let rval_ptr = self.get_local_any_ro(*src);
-                let ref_ptr = self.build_extract_ref_ptr(rval_ptr);
+                let lval_ptr = self.get_local_any_ro(*dst);
+                let ref_ptr = self.build_extract_ref_ptr(lval_ptr);
                 let var_set_ptr = self.build_vtable_lookup(block, ref_ptr, layout::VTABLE_VAR_SET_FIELD_OFFSET).into_pointer_value();
 
                 let src_val = self.get_local_any_ro(*src);

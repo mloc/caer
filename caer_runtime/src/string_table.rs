@@ -120,7 +120,7 @@ mod tests {
         assert_ne!(id1, id3);
     }
 
-    #[test]
+    /*#[test]
     fn serde() {
         let mut src_table = StringTable::new();
         src_table.put("hello");
@@ -135,5 +135,5 @@ mod tests {
         assert_eq!(src_table.strings, dest_table.strings);
         assert_eq!(src_table.ids, dest_table.ids);
         assert_eq!(src_table.next_id, dest_table.next_id);
-    }
+    }*/
 }

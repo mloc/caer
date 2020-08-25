@@ -34,6 +34,7 @@ pub enum Specialization {
 pub struct DType {
     pub id: TypeId,
     pub path_str: StringId,
+    pub path_string: String,
     pub path: Vec<StringId>,
     pub type_path: Vec<StringId>,
     pub parent: Option<TypeId>,

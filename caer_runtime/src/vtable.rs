@@ -29,14 +29,14 @@ impl Index<TypeId> for Vtable {
     }
 }
 
-pub type ProcPtr = extern "C" fn(arg_pack: *const ArgPack, rt: NonNull<Runtime>) -> Val;
+pub type ProcPtr = extern "C" fn(arg_pack: *const ArgPack, rt: NonNull<Runtime>, out: *mut Val);
 
 /// A single vtable entry for a type
 /// **MUST BE KEPT IN SYNC WITH LLVM TYPE**; if not, Bad Things will happen
 #[derive(Debug)]
 pub struct Entry {
     pub size: i64,
-    pub var_get: extern "C" fn(datum: *mut Datum, var: u64) -> Val,
-    pub var_set: extern "C" fn(datum: *mut Datum, var: u64, val: Val),
+    pub var_get: extern "C" fn(datum: *mut Datum, var: u64, out: *mut Val),
+    pub var_set: extern "C" fn(datum: *mut Datum, var: u64, val: *const Val),
     pub proc_lookup: extern "C" fn(var: StringId, rt: NonNull<Runtime>) -> ProcPtr,
 }

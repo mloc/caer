@@ -97,7 +97,7 @@ pub extern "C" fn rt_val_drop(val: &Val) {
 
 #[no_mangle]
 pub extern "C" fn rt_val_call_proc(val: &Val, proc_name: StringId, args: &ArgPack, rt: &mut Runtime, out: &mut Val) {
-    *out = val.call_proc(proc_name, args, rt)
+    val.call_proc(proc_name, args, rt, out)
 }
 
 //this whole block is an awful mess, TODO: fix at some point
@@ -137,14 +137,14 @@ impl Val {
         }
     }
 
-    pub fn call_proc(self, proc_name: StringId, args: &ArgPack, rt: &mut Runtime) -> Val {
+    pub fn call_proc(self, proc_name: StringId, args: &ArgPack, rt: &mut Runtime, out: &mut Val) {
         match self {
             Val::Ref(Some(mut ptr)) => {
                 let datum_ref = unsafe { ptr.as_mut() };
                 let rt_ptr = NonNull::new(rt as _).unwrap();
                 let lookup_fn = rt.vtable[datum_ref.ty].proc_lookup;
                 let proc_fn = lookup_fn(proc_name, rt_ptr);
-                proc_fn(args, rt_ptr)
+                proc_fn(args, rt_ptr, out)
             }
             _ => panic!("RTE can't call proc on val {:?}", self),
         }

@@ -36,6 +36,13 @@
 	world << band
 	world << bitmess(band)
 	*/
+
+	var/datum/container/c = null
+	c = new /datum/container
+	c.obj = new /obj
+
+	var/obj/o = new /obj
+
 	var/y = 0
 	y = "foo"
 
@@ -45,6 +52,8 @@
 
 	var/x = 3
 	x = "hey"
+
+	world << o
 
 	world << x
 

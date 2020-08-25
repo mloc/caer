@@ -108,9 +108,9 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             // size
             ctx.i64_type().into(),
             // var_get fn ptr
-            val_type.fn_type(&[datum_common_type_ptr.into(), ctx.i64_type().into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
+            ctx.void_type().fn_type(&[datum_common_type_ptr.into(), ctx.i64_type().into(), val_type_ptr.into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
             // var_set fn ptr
-            ctx.void_type().fn_type(&[datum_common_type_ptr.into(), ctx.i64_type().into(), val_type.into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
+            ctx.void_type().fn_type(&[datum_common_type_ptr.into(), ctx.i64_type().into(), val_type_ptr.into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
             // proc_lookup fn ptr
             proc_type.ptr_type(inkwell::AddressSpace::Generic).fn_type(&[ctx.i64_type().into(), rt_type.ptr_type(inkwell::AddressSpace::Generic).into()], false).ptr_type(inkwell::AddressSpace::Generic).into(),
         ], false);

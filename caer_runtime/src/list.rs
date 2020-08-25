@@ -205,7 +205,7 @@ impl List {
         unimplemented!("list var set")
     }
 
-    extern "C" fn proc_add(args: *const ArgPack, mut rt: NonNull<Runtime>) -> Val {
+    extern "C" fn proc_add(args: *const ArgPack, mut rt: NonNull<Runtime>, out: *mut Val) {
         let args = unsafe { &*args };
         let mut list_ptr = unsafe { ensure_list(args.src, rt.as_mut()) };
         let list = unsafe { list_ptr.as_mut() };
@@ -248,10 +248,10 @@ impl List {
                 o @ _ => list.push(*o),
             }
         }
-        Val::Null
+        unsafe { *out = Val::Null };
     }
 
-    extern "C" fn proc_copy(args: *const ArgPack, mut rt: NonNull<Runtime>) -> Val {
+    extern "C" fn proc_copy(args: *const ArgPack, mut rt: NonNull<Runtime>, out: *mut Val) {
         let args = unsafe { &*args };
         let mut list_ptr = unsafe { ensure_list(args.src, rt.as_mut()) };
         let list = unsafe { list_ptr.as_mut() };
@@ -264,7 +264,8 @@ impl List {
         if start == 1 && end == 0 {
             // easy case, clone the entire list
             let newlist_ptr = Box::into_raw(Box::new(list.clone()));
-            return Val::Ref(NonNull::new(newlist_ptr as _));
+            unsafe { *out = Val::Ref(NonNull::new(newlist_ptr as _)) };
+            return;
         }
 
         let mut newlist = List::new(list.datum.ty);
@@ -288,10 +289,10 @@ impl List {
         }
 
         let newlist_ptr = Box::into_raw(Box::new(newlist));
-        Val::Ref(NonNull::new(newlist_ptr as _))
+        unsafe { *out = Val::Ref(NonNull::new(newlist_ptr as _)) };
     }
 
-    extern "C" fn proc_cut(args: *const ArgPack, mut rt: NonNull<Runtime>) -> Val {
+    extern "C" fn proc_cut(args: *const ArgPack, mut rt: NonNull<Runtime>, out: *mut Val) {
         let args = unsafe { &*args };
         let mut list_ptr = unsafe { ensure_list(args.src, rt.as_mut()) };
         let list = unsafe { list_ptr.as_mut() };
@@ -318,7 +319,7 @@ impl List {
             }
         }
 
-        Val::Null
+        unsafe { *out = Val::Null };
     }
 }
 
@@ -360,7 +361,7 @@ fn ensure_list(val: Val, rt: &Runtime) -> NonNull<List> {
 #[cfg(test)]
 mod tests {
     use super::List;
-    use crate::string_table::StringId;
+    use caer_types::id::StringId;
     use crate::val::Val;
 
     #[test]
