@@ -163,6 +163,7 @@ dependencies = [
 name = "caer_runtime"
 version = "0.1.0"
 dependencies = [
+ "aco",
  "bincode",
  "caer_types",
  "cstub_bindgen_macro",
@@ -170,6 +171,7 @@ dependencies = [
  "leb128",
  "libc",
  "llvm_stackmaps",
+ "num-traits",
  "ordered-float",
  "rustc_dwarf",
  "rustc_unwind",

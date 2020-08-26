@@ -1,17 +1,13 @@
 use crate::context::Context;
 use crate::stack::Stack;
-use aco_sys;
-use std::marker::PhantomData;
 
-pub struct Coro<'a, A> {
+#[derive(Debug)]
+pub struct Coro {
     pub(crate) handle: *mut aco_sys::aco_t,
-    pub stack: &'a Stack,
-
-    arg_type: PhantomData<A>,
 }
 
-impl<'a, A> Coro<'a, A> {
-    pub fn new<F>(ctx: &'a Context, stack: &'a Stack, entry: F, arg: A) -> Coro<'a, A>
+impl Coro {
+    pub fn new<A, F>(ctx: &Context, stack: &Stack, entry: F, arg: A) -> Coro
     where
         F: FnOnce(A),
     {
@@ -24,13 +20,17 @@ impl<'a, A> Coro<'a, A> {
 
         Coro {
             handle,
-            stack,
-            arg_type: PhantomData,
+        }
+    }
+
+    pub fn is_end(&self) -> bool {
+        unsafe {
+            (*self.handle).is_end != 0
         }
     }
 }
 
-impl<'a, A> Drop for Coro<'a, A> {
+impl Drop for Coro {
     fn drop(&mut self) {
         unsafe { aco_sys::aco_destroy(self.handle) };
     }

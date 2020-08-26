@@ -1,17 +1,6 @@
-use aco_sys;
-
+#[derive(Debug)]
 pub struct Stack {
     pub(crate) handle: *mut aco_sys::aco_share_stack_t,
-}
-
-impl Stack {
-    pub fn new() -> Stack {
-        let handle = unsafe { aco_sys::aco_share_stack_new(0) };
-
-        Stack {
-            handle,
-        }
-    }
 }
 
 impl Drop for Stack {

@@ -1,12 +1,13 @@
 use crate::coro::Coro;
-use aco_sys;
+use crate::stack::Stack;
 
+#[derive(Debug)]
 pub struct Context {
     pub(crate) main_coro: *mut aco_sys::aco_t,
 }
 
 impl Context {
-    pub fn new() -> Context {
+    pub fn create() -> Self {
         unsafe { aco_sys::aco_thread_init(None) };
         let main_coro = unsafe {
             aco_sys::aco_create(
@@ -23,7 +24,15 @@ impl Context {
         }
     }
 
-    pub unsafe fn resume<A>(&self, coro: &Coro<A>) {
+    pub fn make_stack(&self) -> Stack {
+        let handle = unsafe { aco_sys::aco_share_stack_new(0) };
+
+        Stack { handle }
+    }
+
+    /// # Safety
+    /// `coro` must belong to this context.
+    pub unsafe fn resume(&self, coro: &Coro) -> bool {
         assert!(
             (*coro.handle).main_co == self.main_coro,
             "attempted to resume coroutine in wrong context"
@@ -33,5 +42,7 @@ impl Context {
             "attemped to resume finished coroutine"
         );
         aco_sys::aco_resume(coro.handle);
+
+        coro.is_end()
     }
 }

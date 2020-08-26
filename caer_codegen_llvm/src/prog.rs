@@ -91,6 +91,24 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         let func = self.ctx.module.add_function("main", func_type, None);
 
         let block = self.ctx.llvm_ctx.append_basic_block(func, "entry");
+
+        block
+    }
+
+    pub(crate) fn copy_val(&self, src: PointerValue<'ctx>, dest: PointerValue<'ctx>) {
+        let i8_ptr = self.ctx.llvm_ctx.i8_type().ptr_type(GC_ADDRESS_SPACE);
+
+        let src_i8 = self.ctx.builder.build_bitcast(src, i8_ptr, "");
+        let dest_i8 = self.ctx.builder.build_bitcast(dest, i8_ptr, "");
+
+        let memcpy_intrinsic = unsafe {
+            self.ctx.module.get_intrinsic("llvm.memcpy", &[i8_ptr.into(), i8_ptr.into(), self.ctx.llvm_ctx.i64_type().into()]).unwrap()
+        };
+
+        self.ctx.builder.build_call(memcpy_intrinsic, &[dest_i8.into(), src_i8.into(), self.ctx.llvm_ctx.i64_type().const_int(ty::Complex::Any.get_store_size(), false).into(), self.ctx.llvm_ctx.bool_type().const_zero().into()], "");
+    }
+
+    fn finalize_main(&self, block: inkwell::basic_block::BasicBlock, entry_func: inkwell::values::FunctionValue) {
         self.ctx.builder.position_at_end(block);
 
         // TODO: move file emit to a better place
@@ -119,32 +137,9 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             stackmap_start.as_pointer_value().into(),
             stackmap_end.as_pointer_value().into(),
             vt_ptr.into(),
+            entry_func.as_global_value().as_pointer_value().into(),
         ], "");
 
-        block
-    }
-
-    pub(crate) fn copy_val(&self, src: PointerValue<'ctx>, dest: PointerValue<'ctx>) {
-        let i8_ptr = self.ctx.llvm_ctx.i8_type().ptr_type(GC_ADDRESS_SPACE);
-
-        let src_i8 = self.ctx.builder.build_bitcast(src, i8_ptr, "");
-        let dest_i8 = self.ctx.builder.build_bitcast(dest, i8_ptr, "");
-
-        let memcpy_intrinsic = unsafe {
-            self.ctx.module.get_intrinsic("llvm.memcpy", &[i8_ptr.into(), i8_ptr.into(), self.ctx.llvm_ctx.i64_type().into()]).unwrap()
-        };
-
-        self.ctx.builder.build_call(memcpy_intrinsic, &[dest_i8.into(), src_i8.into(), self.ctx.llvm_ctx.i64_type().const_int(ty::Complex::Any.get_store_size(), false).into(), self.ctx.llvm_ctx.bool_type().const_zero().into()], "");
-    }
-
-    fn finalize_main(&self, block: inkwell::basic_block::BasicBlock, entry_func: inkwell::values::FunctionValue) {
-        self.ctx.builder.position_at_end(block);
-        let argpack_alloca = self.ctx.builder.build_alloca(self.ctx.rt.ty.arg_pack_type, "argpack_ptr");
-        let argpack = self.ctx.rt.ty.arg_pack_type.const_zero();
-        self.ctx.builder.build_store(argpack_alloca, argpack);
-        let ret_val = self.ctx.builder.build_alloca(self.ctx.rt.ty.val_type, "ret_val");
-        let ret_val_gc = self.ctx.builder.build_address_space_cast(ret_val, self.ctx.rt.ty.val_type_ptr, "");
-        self.ctx.builder.build_call(entry_func, &[argpack_alloca.into(), self.rt_global.as_pointer_value().into(), ret_val_gc.into()], "");
         self.ctx.builder.build_return(None);
     }
 

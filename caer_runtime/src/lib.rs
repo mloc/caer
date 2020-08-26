@@ -6,6 +6,7 @@ pub mod arg_pack;
 pub mod datum;
 mod eh;
 pub mod environment;
+mod exec;
 pub mod ffi;
 mod gc;
 mod gc_stackmap;

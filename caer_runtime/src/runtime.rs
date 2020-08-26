@@ -1,16 +1,16 @@
 use crate::alloc::Alloc;
 use crate::datum::Datum;
 use crate::environment::Environment;
+use crate::exec;
 use crate::list::List;
 use crate::string_table::StringTable;
-use crate::vtable;
+use crate::vtable::{self, ProcPtr};
 use crate::gc_stackmap::GcStackmap;
 use caer_types::id::{StringId, TypeId};
 use caer_types::type_tree::Specialization;
 
 use cstub_bindgen_macro::expose_c_stubs;
 
-use std::alloc;
 use std::fs::File;
 use std::mem;
 use std::ptr::NonNull;
@@ -24,41 +24,76 @@ pub struct Runtime {
     pub(crate) alloc: Alloc,
 }
 
-#[expose_c_stubs(rt_runtime)]
-impl Runtime {
-    // TODO: ERRH
-    pub fn init(
-        &mut self,
-        stackmap_start: *const u8,
-        stackmap_end: *const u8,
-        vtable_ptr: *const vtable::Entry,
-    ) {
-        let init_st = StringTable::deserialize(File::open("stringtable.bincode").unwrap());
-        let init_env =
-            bincode::deserialize_from(File::open("environment.bincode").unwrap()).unwrap();
-        let env = Environment::from_rt_env(init_env);
-        let vtable = vtable::Vtable::from_static(vtable_ptr, env.type_tree.types.len());
+// what a name
+// stuff that only the main fibre needs to worry about
+// dark and ephemeral
+// runs the show
+#[derive(Debug)]
+pub struct MetaRuntime<'rt> {
+    executor: exec::Executor,
+    // this lifetime is bad
+    // deal with it
+    dmrt: &'rt mut Runtime,
+}
 
-        let stackmaps_raw = unsafe {
-            let len = stackmap_end.offset_from(stackmap_start);
-            if len < 0 {
-                panic!("bad stackmap, len is {}", len);
+// TODO: ERRH
+/// # Safety
+/// Should only be called by generated code that knows what it's doing; in particular, the
+/// stackmap pointers need to be safe.
+#[no_mangle]
+pub unsafe extern "C" fn rt_runtime_init(
+    global_rt: &mut Runtime,
+    stackmap_start: *const u8,
+    stackmap_end: *const u8,
+    vtable_ptr: *const vtable::Entry,
+    entry_proc: ProcPtr,
+) {
+    let init_st = StringTable::deserialize(File::open("stringtable.bincode").unwrap());
+    let init_env =
+        bincode::deserialize_from(File::open("environment.bincode").unwrap()).unwrap();
+    let env = Environment::from_rt_env(init_env);
+    let vtable = vtable::Vtable::from_static(vtable_ptr, env.type_tree.types.len());
+
+    let stackmaps_raw = {
+        let len = stackmap_end.offset_from(stackmap_start);
+        if len < 0 {
+            panic!("bad stackmap, len is {}", len);
+        }
+        std::slice::from_raw_parts(stackmap_start, len as usize)
+    };
+
+    let gc_stackmap = GcStackmap::parse(stackmaps_raw);
+
+    let new = Runtime {
+        string_table: init_st,
+        vtable,
+        env,
+        gc_stackmap,
+        alloc: Alloc::new(),
+    };
+
+    // update the global runtime seen by user code
+    mem::forget(mem::replace(global_rt, new));
+
+    let mut meta = MetaRuntime {
+        executor: exec::Executor::setup(),
+        dmrt: global_rt,
+    };
+    meta.start(entry_proc);
+}
+
+impl MetaRuntime<'_> {
+    fn start(&mut self, entry_proc: ProcPtr) {
+        println!("runtime starting");
+        self.executor.queue_proc(entry_proc, crate::arg_pack::ArgPack::empty());
+        loop {
+            println!("running next proc");
+            if !self.executor.run_next(self.dmrt) {
+                println!("no procs left in queue, finishing");
+                break
             }
-            std::slice::from_raw_parts(stackmap_start, len as usize)
-        };
-
-        let gc_stackmap = GcStackmap::parse(stackmaps_raw);
-
-        let new = Runtime {
-            string_table: init_st,
-            vtable,
-            env,
-            gc_stackmap,
-            alloc: Alloc::new(),
-        };
-
-        // this fn should only be called by init on a zeroed-out Runtime, which we need to ignore
-        mem::forget(mem::replace(self, new));
+        }
+        println!("runtime finished");
     }
 }
 

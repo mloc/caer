@@ -100,7 +100,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
             let name = &if var.name.index() != 0 {
                 format!("var_{}", self.prog_emit.env.string_table.get(var.name))
             } else {
-                format!("ret_var")
+                "ret_var".to_string()
             };
 
             let alloca = self.build_val_alloca(&var.ty);
@@ -373,7 +373,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         let mut stack_ptrs: Vec<BasicValueEnum> = Vec::new();
         for live_local in live.local.iter().copied() {
             if self.locals[live_local].unwrap().is_pointer_value() {
-                stack_ptrs.push(self.locals[live_local].unwrap().into());
+                stack_ptrs.push(self.locals[live_local].unwrap());
             }
         }
         for live_var in live.var.iter().copied() {
@@ -409,7 +409,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         let return_type = func.get_type().get_element_type().into_function_type().get_return_type();
         if let Some(return_type) = return_type {
             let result_intrinsic =  unsafe {
-                self.ctx.module.get_intrinsic("llvm.experimental.gc.result", &[return_type.into()]).unwrap()
+                self.ctx.module.get_intrinsic("llvm.experimental.gc.result", &[return_type]).unwrap()
             };
             self.ctx.builder.build_call(result_intrinsic, &[statepoint_token], "").try_as_basic_value().left()
         } else {
@@ -831,8 +831,8 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         // TODO: cast val struct instead of int2ptr
         let val_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(rval_ptr, &[self.ctx.llvm_ctx.i32_type().const_zero(), self.ctx.llvm_ctx.i32_type().const_int(1, false)], "val_ptr") };
         let ref_ptr_int = self.ctx.builder.build_load(val_ptr, "ref_ptr_int").into_int_value();
-        let ref_ptr = self.ctx.builder.build_int_to_ptr(ref_ptr_int, self.ctx.rt.ty.datum_common_type_ptr, "ref_ptr");
-        ref_ptr
+
+        self.ctx.builder.build_int_to_ptr(ref_ptr_int, self.ctx.rt.ty.datum_common_type_ptr, "ref_ptr")
     }
 
     fn build_extract_ty_id(&self, datum_ptr: PointerValue<'ctx>) -> IntValue<'ctx> {
@@ -850,8 +850,8 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
             ty_id,
             self.ctx.llvm_ctx.i32_type().const_int(offset, false),
         ], &format!("vtable_field_{}_ptr", offset)) };
-        let field = self.ctx.builder.build_load(field_ptr, &format!("vtable_field_{}", offset));
-        field
+
+        self.ctx.builder.build_load(field_ptr, &format!("vtable_field_{}", offset))
     }
 
     fn build_vtable_lookup(&self, block: &Block, datum_ptr: PointerValue<'ctx>, offset: u64) -> BasicValueEnum<'ctx> {
@@ -871,7 +871,6 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                 self.local_die(*local_id);
             }
             for var_id in self.proc.scopes[block.scope].destruct_vars.iter() {
-                let var = &self.proc.vars[*var_id];
                 self.var_die(*var_id);
             }
         }
