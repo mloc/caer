@@ -20,9 +20,6 @@ aco = { path = "../aco" }
 unwind = "0.3.0"
 num-traits = "0.2.12"
 
-[dependencies.cstub_bindgen_macro]
-path = "../cstub_bindgen_macro"
-
 [dependencies.llvm_stackmaps]
 path = "../llvm_stackmaps"
 

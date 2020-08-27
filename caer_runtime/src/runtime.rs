@@ -9,8 +9,6 @@ use crate::gc_stackmap::GcStackmap;
 use caer_types::id::{StringId, TypeId};
 use caer_types::type_tree::Specialization;
 
-use cstub_bindgen_macro::expose_c_stubs;
-
 use std::fs::File;
 use std::mem;
 use std::ptr::NonNull;
