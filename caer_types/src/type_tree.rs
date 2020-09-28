@@ -1,7 +1,7 @@
 use serde::{Serialize, Deserialize};
 use index_vec::IndexVec;
 use std::collections::HashMap;
-use crate::id::{TypeId, StringId, ProcId};
+use crate::id::{TypeId, StringId, FuncId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypeTree {
@@ -57,5 +57,5 @@ pub struct VarInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcInfo {
     pub name: StringId,
-    pub top_proc: ProcId,
+    pub top_proc: FuncId,
 }

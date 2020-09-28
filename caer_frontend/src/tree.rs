@@ -1,6 +1,6 @@
-use super::cfg_builder::CfgBuilder;
+use super::ir_builder::IrBuilder;
 use caer_types::type_tree::{self, Specialization};
-use caer_types::id::{StringId, ProcId, TypeId};
+use caer_types::id::{StringId, FuncId, TypeId};
 use dreammaker::objtree;
 use index_vec::IndexVec;
 use std::collections::HashMap;
@@ -10,7 +10,7 @@ use caer_ir as ir;
 pub struct TreeBuilder<'a, 'ot> {
     objtree: &'ot objtree::ObjectTree,
     env: &'a mut ir::env::Env,
-    procs: IndexVec<ProcId, objtree::ProcValue>,
+    procs: IndexVec<FuncId, objtree::ProcValue>,
 }
 
 impl<'a, 'ot> TreeBuilder<'a, 'ot> {
@@ -33,7 +33,7 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
             self.populate_procs(*dty_id, *oty);
         }
 
-        let mut cfg_builder = CfgBuilder::new(self.env, &self.procs, self.objtree);
+        let mut cfg_builder = IrBuilder::new(self.env, &self.procs, self.objtree);
         cfg_builder.build();
     }
 

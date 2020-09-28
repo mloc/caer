@@ -19,7 +19,7 @@ pub struct CFGWalker<'a> {
 }
 
 impl<'a> CFGWalker<'a> {
-    pub fn build(proc: &'a cfg::Proc) -> Self {
+    pub fn build(proc: &'a cfg::Function) -> Self {
         let (postorder, preds) = Self::build_postorder(proc);
         let rev_postorder = {
             let mut v = postorder.clone();
@@ -34,14 +34,14 @@ impl<'a> CFGWalker<'a> {
         }
     }
 
-    fn build_postorder(proc: &'a cfg::Proc) -> (Vec<BlockId>, IndexVec<BlockId, Option<BlockId>>) {
+    fn build_postorder(proc: &'a cfg::Function) -> (Vec<BlockId>, IndexVec<BlockId, Option<BlockId>>) {
         let mut postorder = Vec::new();
         let mut preds = IndexVec::new();
         preds.resize(proc.blocks.len(), None);
 
         let mut visited: IndexVec<BlockId, _> = IndexVec::new();
         visited.resize(proc.blocks.len(), false);
-        fn rec(cur: BlockId, pred: Option<BlockId>, proc: &cfg::Proc, postorder: &mut Vec<BlockId>, preds: &mut IndexVec<BlockId, Option<BlockId>>, visited: &mut IndexVec<BlockId, bool>) {
+        fn rec(cur: BlockId, pred: Option<BlockId>, proc: &cfg::Function, postorder: &mut Vec<BlockId>, preds: &mut IndexVec<BlockId, Option<BlockId>>, visited: &mut IndexVec<BlockId, bool>) {
             if visited[cur] {
                 return;
             }
@@ -58,7 +58,7 @@ impl<'a> CFGWalker<'a> {
         (postorder, preds)
     }
 
-    pub fn walk(mut self, proc: &'a cfg::Proc, actor: &mut impl WalkActor) {
+    pub fn walk(mut self, proc: &'a cfg::Function, actor: &mut impl WalkActor) {
         actor.pre_start(&mut self);
         for id in self.rev_postorder.clone().iter().copied() {
             let block = &proc.blocks[id];
@@ -94,7 +94,7 @@ pub struct Lifetimes<'a> {
 
 #[derive(Debug)]
 struct LifetimeTracker<'a> {
-    proc: &'a cfg::Proc,
+    proc: &'a cfg::Function,
     block_end: IndexVec<BlockId, Option<(Vec<LocalId>, Vec<VarId>)>>,
     cur_lifetimes: Option<(Vec<LocalId>, Vec<VarId>)>,
     scope_jb: IndexVec<ScopeId, Option<(usize, usize)>>,
@@ -102,7 +102,7 @@ struct LifetimeTracker<'a> {
 }
 
 impl<'a> LifetimeTracker<'a> {
-    fn new(proc: &'a cfg::Proc) -> Self {
+    fn new(proc: &'a cfg::Function) -> Self {
         let mut block_end = IndexVec::new();
         block_end.resize(proc.blocks.len(), None);
         let mut scope_jb = IndexVec::new();

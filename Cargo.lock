@@ -485,9 +485,9 @@ source = "git+https://github.com/SpaceManiac/linked-hash-map?branch=get-key-valu
 
 [[package]]
 name = "llvm-sys"
-version = "100.1.1"
+version = "100.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31069d5023e1a4789900ae3dde23dc3c71bfa5a49d7927d33a528c2b08dca036"
+checksum = "9109e19fbfac3458f2970189719fa19f1007c6fd4e08c44fdebf4be0ddbe261d"
 dependencies = [
  "cc",
  "lazy_static",

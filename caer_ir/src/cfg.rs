@@ -1,6 +1,6 @@
 use super::id::*;
+use caer_types::id::{FuncId, StringId, TypeId};
 use caer_types::ty;
-use caer_types::id::{StringId, TypeId, ProcId};
 use dot;
 use index_vec::IndexVec;
 use std::collections::{HashMap, HashSet};
@@ -49,51 +49,68 @@ impl LocalFlow {
     }
 }
 
+// TODO: move, along with proc. this is more meta than cfg
 #[derive(Debug, Clone)]
-pub struct Proc {
-    pub name: StringId,
-    pub id: ProcId,
+pub struct Closure {
+    over: FuncId,
+    // vars in *the closure* that are captured from the environment
+    captured: Vec<VarId>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub id: FuncId,
+
+    pub blocks: IndexVec<BlockId, Block>,
+    pub scopes: IndexVec<ScopeId, Scope>,
+    pub global_scope: ScopeId,
 
     pub locals: IndexVec<LocalId, Local>,
     pub vars: IndexVec<VarId, Var>,
     pub vars_by_name: HashMap<StringId, VarId>,
+
     pub params: Vec<VarId>,
-    pub blocks: IndexVec<BlockId, Block>,
-    pub scopes: IndexVec<ScopeId, Scope>,
-
-    pub global_scope: ScopeId,
-
-    pub next_block_id: usize,
+    pub closure: Option<Closure>,
 }
 
-impl<'a> Proc {
-    pub fn new(id: ProcId) -> Self {
+impl<'a> Function {
+    pub fn new(id: FuncId) -> Self {
         // ids map to indices in the scopes list; we can assume this scope will have id 0
         // TODO sounder way to handle this + locals?
         let mut scopes = IndexVec::new();
-        let global_scope_id = scopes.next_idx();
-        scopes.push(Scope::new(global_scope_id, None));
+        let global_scope = scopes.next_idx();
+        scopes.push(Scope::new(global_scope, None));
 
         let mut new = Self {
-            // awful, TODO: fetch a better name, MANGLE?
-            name: StringId::new(0),
             id,
+
+            blocks: IndexVec::new(),
+            scopes,
+            global_scope,
 
             locals: IndexVec::new(),
             vars: IndexVec::new(),
             vars_by_name: HashMap::new(),
+
             params: Vec::new(),
-            blocks: IndexVec::new(),
-            scopes,
-
-            global_scope: global_scope_id,
-
-            next_block_id: 0,
+            closure: None,
         };
 
         // TODO: compile time intern, "."
         new.add_var(new.global_scope, ty::Complex::Any, StringId::new(0)); // return var
         new
+    }
+
+    pub fn set_closure(&mut self, over: FuncId) {
+        assert!(
+            self.closure.is_none(),
+            "proc is already marked as a closure, {:?}",
+            self.closure
+        );
+        self.closure = Some(Closure {
+            over,
+            captured: Vec::new(),
+        });
     }
 
     pub fn add_local(&mut self, scope: ScopeId, ty: ty::Complex) -> LocalId {
@@ -142,15 +159,21 @@ impl<'a> Proc {
         id
     }
 
-    pub fn new_block(&mut self, scope: ScopeId) -> Block {
-        let id = BlockId::new(self.next_block_id);
-        self.next_block_id += 1;
-        self.scopes[scope].blocks.push(id);
-        Block::new(id, scope)
+    pub fn add_captured_var(&mut self, name: StringId) -> VarId {
+        // captured vars exist at the global scope, are always soft (for now)
+        let id = self.add_var(self.global_scope, ty::Complex::Any, name);
+
+        match &mut self.closure {
+            None => panic!("can only capture variables if proc is marked as a closure"),
+            Some(closure) => closure.captured.push(id),
+        }
+
+        id
     }
 
     pub fn add_block(&mut self, block: Block) {
-        assert!(block.id == self.blocks.next_idx());
+        assert_eq!(block.id, self.blocks.next_idx(), "must add blocks in sequential ID order; got {:?} but expected {:?}", block.id, self.blocks.next_idx());
+        self.scopes[block.scope].blocks.push(block.id);
         self.blocks.push(block);
     }
 
@@ -159,6 +182,7 @@ impl<'a> Proc {
         let mut cur_scope = root_scope;
         loop {
             let scope = &self.scopes[cur_scope];
+            println!("{:?}", scope.vars_by_name);
             match scope.vars_by_name.get(&var) {
                 Some(local) => return Some(*local),
                 None => match scope.parent {
@@ -177,26 +201,6 @@ impl<'a> Proc {
         let scope = Scope::new(id, Some((parent, self.scopes[parent].depth)));
         self.scopes.push(scope);
         id
-    }
-
-    pub fn set_landingpad(&mut self, scope_id: ScopeId, landingpad: BlockId) {
-        let scope = self.scopes.get_mut(scope_id).unwrap();
-        if scope.landingpad.is_some() {
-            panic!("landingpad already set");
-        }
-        self.set_landingpad_rec(scope_id, landingpad);
-    }
-
-    fn set_landingpad_rec(&mut self, scope_id: ScopeId, landingpad: BlockId) {
-        let scope = self.scopes.get_mut(scope_id).unwrap();
-        if scope.landingpad.is_some() {
-            return;
-        }
-        scope.landingpad = Some(landingpad);
-        let scope_children = scope.children.clone();
-        for child_scope_id in scope_children {
-            self.set_landingpad_rec(child_scope_id, landingpad);
-        }
     }
 
     // analysis procs
@@ -379,7 +383,7 @@ impl<'a> Proc {
     }
 }
 
-impl<'a> dot::Labeller<'a, BlockId, (BlockId, BlockId, String)> for Proc {
+impl<'a> dot::Labeller<'a, BlockId, (BlockId, BlockId, String)> for Function {
     fn node_id(&'a self, n: &BlockId) -> dot::Id<'a> {
         dot::Id::new(format!("block{}", n.index())).unwrap()
     }
@@ -424,11 +428,11 @@ impl<'a> dot::Labeller<'a, BlockId, (BlockId, BlockId, String)> for Proc {
 
     fn graph_id(&'a self) -> dot::Id<'a> {
         // TODO: extract actual name
-        dot::Id::new(format!("block_{}", self.name.index().to_string())).unwrap()
+        dot::Id::new(format!("block_{}", self.id.index().to_string())).unwrap()
     }
 }
 
-impl<'a> dot::GraphWalk<'a, BlockId, (BlockId, BlockId, String)> for Proc {
+impl<'a> dot::GraphWalk<'a, BlockId, (BlockId, BlockId, String)> for Function {
     fn nodes(&self) -> dot::Nodes<'a, BlockId> {
         self.blocks.iter().map(|b| b.id).collect()
     }
@@ -457,7 +461,11 @@ impl<'a> dot::GraphWalk<'a, BlockId, (BlockId, BlockId, String)> for Proc {
                     catch_block,
                 } => vec![
                     (block.id, *try_block, "try".into()),
-                    (block.id, *catch_block, format!("catch ({})", catch_block.index())),
+                    (
+                        block.id,
+                        *catch_block,
+                        format!("catch ({})", catch_block.index()),
+                    ),
                 ],
             })
             .collect::<Vec<_>>()
@@ -493,6 +501,11 @@ impl Block {
             scope_begin: false,
             scope_end: false,
         }
+    }
+
+    // uhh
+    pub fn push_op(&mut self, op: Op) {
+        self.ops.push(op)
     }
 
     // bad

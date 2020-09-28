@@ -1,6 +1,7 @@
-mod cfg_builder;
-mod proc_builder;
 mod block_builder;
+mod func_builder;
+mod ir_builder;
+mod proc_builder;
 mod tree;
 
 use std::path::Path;

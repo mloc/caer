@@ -3,7 +3,7 @@ use crate::const_val::ConstVal;
 use crate::env::Env;
 use crate::id::{BlockId, LocalId, ScopeId, VarId};
 use caer_infer as infer;
-use caer_types::id::ProcId;
+use caer_types::id::FuncId;
 use caer_types::op::BinaryOp;
 use caer_types::ty;
 use index_vec::IndexVec;
@@ -12,14 +12,14 @@ use std::collections::{HashMap, HashSet};
 // modifies a clone of the proc, for now. proc-level cfg opts
 pub struct ProcAnalysis<'a> {
     env: &'a mut Env,
-    proc: cfg::Proc,
+    proc: cfg::Function,
     local_info: IndexVec<LocalId, LocalInfo>,
     var_info: IndexVec<VarId, VarInfo>,
 }
 
 impl<'a> ProcAnalysis<'a> {
-    pub fn analyse_proc(env: &'a mut Env, proc_id: ProcId) -> IndexVec<LocalId, LocalInfo> {
-        let proc = env.procs[proc_id].clone();
+    pub fn analyse_proc(env: &'a mut Env, proc_id: FuncId) -> IndexVec<LocalId, LocalInfo> {
+        let proc = env.funcs[proc_id].clone();
         let initial_local_info = proc.locals.indices().map(|id| LocalInfo::new(id)).collect();
         let initial_var_info = proc.vars.indices().map(|id| VarInfo::new(id)).collect();
 
@@ -32,7 +32,7 @@ impl<'a> ProcAnalysis<'a> {
 
         pa.do_analyse();
 
-        pa.env.procs[proc_id] = pa.proc;
+        pa.env.funcs[proc_id] = pa.proc;
 
         pa.local_info
     }
@@ -408,7 +408,7 @@ struct InferRunner {
 }
 
 impl InferRunner {
-    fn create(proc: &mut cfg::Proc, block_order: Vec<BlockId>) -> Self {
+    fn create(proc: &mut cfg::Function, block_order: Vec<BlockId>) -> Self {
         let mut engine = infer::InferEngine::new();
 
         let local_ikey: IndexVec<_, _> = proc.locals.indices().map(|_| engine.add_var()).collect();
@@ -438,7 +438,7 @@ impl InferRunner {
         }
     }
 
-    fn build_subs(&mut self, proc: &cfg::Proc) {
+    fn build_subs(&mut self, proc: &cfg::Function) {
         let mut subs = Vec::new();
 
         // order doesn't matter
@@ -489,7 +489,7 @@ impl InferRunner {
         }
     }
 
-    fn run(&mut self, proc: &mut cfg::Proc) {
+    fn run(&mut self, proc: &mut cfg::Function) {
         self.build_subs(proc);
         let mut start_block = 0;
         let mut start_op = 0;
@@ -523,7 +523,7 @@ impl InferRunner {
 
     fn run_types_from(
         &mut self,
-        proc: &mut cfg::Proc,
+        proc: &mut cfg::Function,
         start_block: usize,
         start_op: usize,
     ) -> Result<(), infer::InferUnifyError> {
@@ -688,7 +688,7 @@ impl InferRunner {
 #[derive(Debug, Clone)]
 struct ProcPatch {
     // redundant, here for sanity check
-    proc: ProcId,
+    proc: FuncId,
 
     remove_ops: IndexVec<BlockId, Vec<usize>>,
     add_ops: IndexVec<BlockId, Vec<(usize, cfg::Op)>>,
@@ -698,7 +698,7 @@ struct ProcPatch {
 }
 
 impl ProcPatch {
-    fn new(id: ProcId, n_blocks: usize) -> Self {
+    fn new(id: FuncId, n_blocks: usize) -> Self {
         Self {
             proc: id,
             remove_ops: (0..n_blocks).map(|_| Vec::new()).collect(),
@@ -729,7 +729,7 @@ impl ProcPatch {
         self.subst_locals.insert(old, new);
     }
 
-    fn resolve_ops(&self, proc: &mut cfg::Proc) {
+    fn resolve_ops(&self, proc: &mut cfg::Function) {
         for block in proc.blocks.iter_mut() {
             // TODO: can do this efficiently without hashing collections
             // very inefficent, loads of allocs and clones
@@ -764,7 +764,7 @@ impl ProcPatch {
         }
     }
 
-    fn gc_locals(&self, proc: &mut cfg::Proc) {
+    fn gc_locals(&self, proc: &mut cfg::Function) {
         let mut unused_locals: IndexVec<_, _> = proc.locals.iter().map(|_| true).collect();
         let mut visit_fn = |id: &mut _| {
             unused_locals[*id] = false;
@@ -788,7 +788,7 @@ impl ProcPatch {
         self.rewrite_locals(proc, &remap);
     }
 
-    fn gc_vars(&self, proc: &mut cfg::Proc) {
+    fn gc_vars(&self, proc: &mut cfg::Function) {
         let mut unused_vars: IndexVec<_, _> = proc.vars.iter().map(|_| true).collect();
         // TODO: better handling for ret var
         unused_vars[0] = false;
@@ -815,7 +815,7 @@ impl ProcPatch {
 
     fn rewrite_locals(
         &self,
-        proc: &mut cfg::Proc,
+        proc: &mut cfg::Function,
         map: impl caer_util::traits::Map<LocalId, LocalId>,
     ) {
         let map_fn = |old: &_| {
@@ -847,7 +847,7 @@ impl ProcPatch {
     }
 
     // bad copypaste, TODO: nicer visitor
-    fn rewrite_vars(&self, proc: &mut cfg::Proc, map: impl caer_util::traits::Map<VarId, VarId>) {
+    fn rewrite_vars(&self, proc: &mut cfg::Function, map: impl caer_util::traits::Map<VarId, VarId>) {
         let map_fn = |old: &_| {
             if let Some(new) = map.map_get(old) {
                 *new

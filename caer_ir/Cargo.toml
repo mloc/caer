@@ -3,6 +3,7 @@ name = "caer_ir"
 version = "0.1.0"
 authors = ["Colm Ó hIcí <git@ohici.ie>"]
 edition = "2018"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 index_vec = "0.1.2"

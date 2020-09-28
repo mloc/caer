@@ -1,7 +1,7 @@
 use crate::ffi::FFIArray;
 use crate::runtime::Runtime;
 use crate::val::Val;
-use caer_types::id::{ProcId, StringId};
+use caer_types::id::{FuncId, StringId};
 use std::cmp::Ordering;
 use std::ptr::NonNull;
 
@@ -27,7 +27,7 @@ impl ArgPack {
     // unpacking probably shouldn't be done in libcode, probably shouldn't be copying vals
     // TODO: rework unpacking
     // TODO: support passing in proc_id as primitive idx
-    fn unpack_into(&self, target_ptrs: NonNull<*mut Val>, proc_id: ProcId, rt: &mut Runtime) {
+    fn unpack_into(&self, target_ptrs: NonNull<*mut Val>, proc_id: FuncId, rt: &mut Runtime) {
         let spec = &rt.env.proc_specs[proc_id];
         // compiler should ensure that targets is an array with the same sizes as the spec
         let targets_arr = unsafe { FFIArray::with_len(target_ptrs, spec.params.len()) };
@@ -70,7 +70,7 @@ impl ArgPack {
 pub extern "C" fn rt_arg_pack_unpack_into(
     argpack: &mut ArgPack,
     target_ptrs: NonNull<*mut Val>,
-    proc_id: ProcId,
+    proc_id: FuncId,
     rt: &mut Runtime,
 ) {
     argpack.unpack_into(target_ptrs, proc_id, rt)

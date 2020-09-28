@@ -1,76 +1,73 @@
-use super::cfg_builder::CfgBuilder; use super::block_builder::BlockBuilder;
+use super::ir_builder::IrBuilder;
+use super::block_builder::BlockBuilder;
+use super::func_builder::FuncBuilder;
 use std::collections::HashMap;
 use caer_ir::cfg;
 use caer_ir::id::{ScopeId, BlockId, VarId, LocalId};
 use dreammaker::{ast, objtree};
-use caer_types::id::{StringId, ProcId};
+use caer_types::id::{StringId, FuncId};
+use caer_ir::env::Env;
 use caer_types::ty;
 
-pub struct ProcBuilder<'a, 'cb, 'ot> {
-    pub builder: &'a mut CfgBuilder<'cb, 'ot>,
-    pub ast_proc: &'ot objtree::ProcValue,
+pub struct ProcBuilder<'a> {
+    id: FuncId,
+    pub env: &'a mut Env,
+    pub objtree: &'a objtree::ObjectTree,
+    pub ast_proc: &'a objtree::ProcValue,
     pub vars: HashMap<String, LocalId>,
-    pub proc: cfg::Proc,
-
-    finished_blocks: Vec<cfg::Block>,
 }
 
-impl<'a, 'cb, 'ot> ProcBuilder<'a, 'cb, 'ot> {
-    pub fn build(builder: &'a mut CfgBuilder<'cb, 'ot>, id: ProcId, ast_proc: &'ot objtree::ProcValue) -> cfg::Proc {
-        let mut proc = cfg::Proc::new(id);
-        let scope = proc.new_scope(proc.global_scope);
-
+impl<'a> ProcBuilder<'a> {
+    pub fn build(env: &'a mut Env, objtree: &'a objtree::ObjectTree, id: FuncId, ast_proc: &'a objtree::ProcValue) -> cfg::Function {
         let pb = Self {
-            builder: builder,
-            ast_proc: ast_proc,
+            id,
+            env,
+            objtree,
+            ast_proc,
             vars: HashMap::new(),
-            proc: proc,
-
-            finished_blocks: Vec::new(),
         };
 
         pb.build_proc()
     }
 
-    pub fn finalize_block(&mut self, block: cfg::Block) {
-        self.finished_blocks.push(block);
-    }
+    fn build_proc(mut self) -> cfg::Function {
+        let mut proc = cfg::Function::new(self.id);
+        proc.new_scope(proc.global_scope);
 
-    fn build_proc(mut self) -> cfg::Proc {
         for (i, param) in self.ast_proc.parameters.iter().enumerate() {
             // TODO: need to record name separately for keyword args?
-            let name_id = self.builder.add_string(&param.name);
-            let var_id = self.add_var(self.proc.global_scope, name_id);
-            self.proc.params.push(var_id);
+            let name_id = self.env.intern_string(&param.name);
+            let var_id = proc.add_var(proc.global_scope, ty::Complex::Any, name_id);
+            proc.params.push(var_id);
 
-            let spec = self.builder.env.get_proc_mut(self.proc.id);
+            let spec = self.env.get_proc_mut(self.id);
             spec.params.push(name_id);
             spec.names.push((name_id, i as u32));
         }
-        let spec = self.builder.env.get_proc_mut(self.proc.id);
+        let spec = self.env.get_proc_mut(self.id);
         spec.names.sort_unstable_by_key(|(ref s, _)| {*s});
+
+        let gs = proc.global_scope;
+        let mut func_builder = FuncBuilder::for_proc(&mut self.env, &mut self.objtree, proc);
 
         let body = if let objtree::Code::Present(ref b) = self.ast_proc.code {
             b
         } else {
             panic!("not present")
         };
-        self.build_block(body.as_slice(), self.proc.global_scope, None);
+        func_builder.build_block(body.as_slice(), gs, None);
 
-        self.finished_blocks.sort_by_key(|b| b.id);
-        for block in self.finished_blocks.drain(..) {
-            self.proc.add_block(block);
-        }
+        let mut proc = func_builder.finalize();
 
-        self.proc.analyze();
+        proc.analyze();
 
         //self.proc.dot(self.builder.env.string_table.get(self.proc.name));
-        self.proc.dot(&format!("proc_{}", self.proc.id.index()));
+        proc.dot(&format!("proc_{}", self.id.index()));
 
-        self.proc
+        proc
     }
 
-    pub fn build_block(&mut self, stmts: &[ast::Spanned<ast::Statement>], parent_scope: ScopeId, next_block: Option<BlockId>) -> (BlockId, ScopeId) {
+    /*pub fn build_block(&mut self, stmts: &[ast::Spanned<ast::Statement>], parent_scope: ScopeId, next_block: Option<BlockId>) -> (BlockId, ScopeId) {
         self.build_within_scope(parent_scope, |bb| {
             bb.build_stmts(stmts.iter());
 
@@ -78,9 +75,9 @@ impl<'a, 'cb, 'ot> ProcBuilder<'a, 'cb, 'ot> {
                 bb.block.terminator = cfg::Terminator::Jump(next);
             }
         })
-    }
+    }*/
 
-    pub fn build_within_scope(&mut self, parent_scope: ScopeId, f: impl FnOnce(&mut BlockBuilder)) -> (BlockId, ScopeId) {
+    /*pub fn build_within_scope(&mut self, parent_scope: ScopeId, f: impl FnOnce(&mut BlockBuilder)) -> (BlockId, ScopeId) {
         let scope = self.proc.new_scope(parent_scope);
 
         let mut builder = BlockBuilder::new(self, scope);
@@ -93,10 +90,5 @@ impl<'a, 'cb, 'ot> ProcBuilder<'a, 'cb, 'ot> {
 
         self.finalize_block(block);
         (root_block_id, scope)
-    }
-
-    // maybe make helper in BlBu which infers scope
-    pub fn add_var(&mut self, scope: ScopeId, name: StringId) -> VarId {
-        self.proc.add_var(scope, ty::Complex::Any, name)
-    }
+    }*/
 }

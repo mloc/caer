@@ -6,7 +6,7 @@ use caer_types::ty;
 use caer_types::rt_env::RtEnv;
 use caer_types::layout;
 use caer_types::type_tree::{DType, Specialization};
-use caer_types::id::{StringId, TypeId, ProcId};
+use caer_types::id::{StringId, TypeId, FuncId};
 use index_vec::IndexVec;
 use std::fs::{self, File};
 use inkwell::values::{AnyValueEnum, PointerValue};
@@ -17,12 +17,12 @@ use caer_ir::walker::CFGWalker;
 pub struct ProgEmit<'a, 'ctx> {
     pub ctx: &'a Context<'a, 'ctx>,
     pub env: &'a Env,
-    pub procs: Vec<(&'a Proc, inkwell::values::FunctionValue<'ctx>)>,
+    pub procs: Vec<(&'a Function, inkwell::values::FunctionValue<'ctx>)>,
     pub rt_global: inkwell::values::GlobalValue<'ctx>,
     pub vt_global: inkwell::values::GlobalValue<'ctx>,
     pub vt_lookup: Vec<inkwell::values::FunctionValue<'ctx>>,
     pub datum_types: IndexVec<TypeId, inkwell::types::StructType<'ctx>>,
-    pub sym: IndexVec<ProcId, inkwell::values::FunctionValue<'ctx>>,
+    pub sym: IndexVec<FuncId, inkwell::values::FunctionValue<'ctx>>,
 }
 
 impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
@@ -48,7 +48,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     pub fn build_procs(&mut self) {
-        for proc in self.env.procs.iter() {
+        for proc in self.env.funcs.iter() {
             self.add_proc(proc);
         }
     }
@@ -59,7 +59,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         self.sym[proc_id]
     }
 
-    fn add_proc(&mut self, proc: &'a Proc) {
+    fn add_proc(&mut self, proc: &'a Function) {
         //let mut proc_emit = ProcEmit::new(self.ctx, proc, name);
         let func = self.ctx.module.add_function(&format!("proc_{}", proc.id.index()), self.ctx.rt.ty.proc_type, None);
         func.set_personality_function(self.ctx.rt.dm_eh_personality);

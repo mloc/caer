@@ -16,7 +16,7 @@ use caer_types::op;
 #[derive(Debug)]
 pub struct ProcEmit<'a, 'p, 'ctx> {
     ctx: &'a Context<'a, 'ctx>,
-    proc: &'a Proc,
+    proc: &'a Function,
     prog_emit: &'a ProgEmit<'p, 'ctx>,
 
     var_allocs: IndexVec<VarId, StackValue<'ctx>>,
@@ -26,7 +26,7 @@ pub struct ProcEmit<'a, 'p, 'ctx> {
 }
 
 impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
-    pub fn new(ctx: &'a Context<'a, 'ctx>, prog_emit: &'a ProgEmit<'p, 'ctx>, proc: &'a Proc, func: FunctionValue<'ctx>) -> Self {
+    pub fn new(ctx: &'a Context<'a, 'ctx>, prog_emit: &'a ProgEmit<'p, 'ctx>, proc: &'a Function, func: FunctionValue<'ctx>) -> Self {
         Self {
             ctx,
             proc,
