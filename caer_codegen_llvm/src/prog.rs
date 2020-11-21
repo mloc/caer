@@ -48,7 +48,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     pub fn build_procs(&mut self) {
-        for proc in self.env.funcs.iter() {
+        for (_, proc) in self.env.funcs.iter() {
             self.add_proc(proc);
         }
     }

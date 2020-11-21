@@ -10,6 +10,7 @@ pub struct IrBuilder<'a> {
     procs: &'a IndexVec<FuncId, objtree::ProcValue>,
     pub objtree: &'a objtree::ObjectTree,
 }
+
 impl<'a> IrBuilder<'a> {
     pub fn new(
         env: &'a mut Env,
@@ -34,15 +35,15 @@ impl<'a> IrBuilder<'a> {
         self.env.funcs = Default::default();
         for (i, proc) in self.procs.iter_enumerated() {
             println!("building {:?}", proc.location);
-            let pb = ProcBuilder::build(self.env, self.objtree, i, proc);
-            self.env.funcs.push(pb);
+            let func = ProcBuilder::build(self.env, self.objtree, proc);
+            self.env.add_func(func);
         }
 
         // wow ew
         for proc_id_n in 0..self.procs.len() {
             let proc_id = FuncId::new(proc_id_n);
             caer_ir::analysis::ProcAnalysis::analyse_proc(self.env, proc_id);
-            self.env.funcs[proc_id].dot(&format!("opt_proc_{}", proc_id.index()));
+            self.env.funcs[&proc_id].dot(&format!("opt_proc_{}", proc_id.index()));
         }
     }
 

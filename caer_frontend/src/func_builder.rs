@@ -15,7 +15,7 @@ pub struct FuncBuilder<'a> {
     // TODO: can we get rid of this?
     pub(crate) objtree: &'a objtree::ObjectTree,
     pub(crate) func: cfg::Function,
-    closure: Option<ClosureEnvironment<'a>>,
+    closure: Option<ClosureEnvironment<'a, 'a>>,
 
     next_block_id: usize,
     finished_blocks: Vec<cfg::Block>,
@@ -28,6 +28,18 @@ impl<'a> FuncBuilder<'a> {
             objtree,
             func,
             closure: None,
+            next_block_id: 0,
+            finished_blocks: Vec::new(),
+        }
+    }
+
+    pub(crate) fn for_closure(env: &'a mut Env, objtree: &'a objtree::ObjectTree, closure: ClosureEnvironment<'a, 'a>) -> Self {
+        let func = env.new_func();
+        Self {
+            env,
+            objtree,
+            func,
+            closure: Some(closure),
             next_block_id: 0,
             finished_blocks: Vec::new(),
         }
@@ -47,16 +59,12 @@ impl<'a> FuncBuilder<'a> {
             return var_in_proc
         }
 
-        if self.closure.is_some() {
-            let binding_var = self.add_var(self.func.global_scope, name);
-            if let Some(closure) = &mut self.closure {
-                let parent_var = closure.parent_builder.lookup_var(closure.capture_scope, name);
-                closure.captured.push((parent_var, binding_var));
+        if let Some(closure) = &mut self.closure {
+            let parent_var = closure.parent_builder.lookup_var(closure.capture_scope, name);
+            let binding_var = self.func.add_captured_var(name);
+            closure.captured.push((parent_var, binding_var));
 
-                return binding_var
-            } else {
-                unreachable!();
-            }
+            return binding_var
         }
 
         panic!("can't find var: {:?}", name);
@@ -110,8 +118,8 @@ impl<'a> FuncBuilder<'a> {
         self.func.vars[var].assoc_dty = Some(dty)
     }
 
-    pub fn build_block(&mut self, stmts: &[ast::Spanned<ast::Statement>], parent_scope: ScopeId, next_block: Option<BlockId>) -> (BlockId, ScopeId) {
-        let scope = self.func.new_scope(parent_scope);
+    pub fn build_block(&mut self, stmts: &[ast::Spanned<ast::Statement>], parent_scope: Option<ScopeId>, next_block: Option<BlockId>) -> (BlockId, ScopeId) {
+        let scope = self.func.new_scope(parent_scope.unwrap_or(self.func.global_scope));
         let block = self.new_block(scope);
 
         let mut bb = BlockBuilder::new(block);
@@ -144,15 +152,15 @@ impl<'a> FuncBuilder<'a> {
     }
 }
 
-pub struct ClosureEnvironment<'a> {
-    parent_builder: &'a mut FuncBuilder<'a>,
+pub struct ClosureEnvironment<'a, 'fb> {
+    parent_builder: &'a mut FuncBuilder<'fb>,
     capture_scope: ScopeId,
     // var in parent -> var in closure
     captured: Vec<(VarId, VarId)>,
 }
 
-impl<'a> ClosureEnvironment<'a> {
-    fn new(parent_builder: &'a mut FuncBuilder<'a>, capture_scope: ScopeId) -> Self {
+impl<'a, 'fb> ClosureEnvironment<'a, 'fb> {
+    pub fn new(parent_builder: &'a mut FuncBuilder<'fb>, capture_scope: ScopeId) -> Self {
         Self {
             parent_builder,
             capture_scope,

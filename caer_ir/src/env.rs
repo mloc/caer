@@ -1,6 +1,7 @@
 use super::cfg::*;
 use crate::string::StringTable;
 use caer_types::id::{FuncId, StringId};
+use std::collections::HashMap;
 use caer_types::proc::ProcSpec;
 use caer_types::type_tree::TypeTree;
 use index_vec::IndexVec;
@@ -13,7 +14,8 @@ pub struct Env {
     pub string_table: StringTable,
     pub proc_specs: IndexVec<FuncId, ProcSpec>,
     pub type_tree: TypeTree,
-    pub funcs: IndexVec<FuncId, Function>,
+    pub funcs: HashMap<FuncId, Function>,
+    next_func_id: FuncId,
 }
 
 impl Env {
@@ -23,19 +25,34 @@ impl Env {
             string_table,
             proc_specs: IndexVec::new(),
             type_tree: TypeTree::new(),
-            funcs: IndexVec::new(),
+            funcs: HashMap::new(),
+            next_func_id: 0.into(),
         }
     }
 
+    // proc/func creation is problematic & ugly
+    // we hand out IDs and just sorta trust that they'll be given back
     pub fn add_proc(&mut self, name: StringId) -> FuncId {
         let spec = ProcSpec {
             name,
             params: vec![],
             names: vec![],
         };
-        let id = FuncId::new(self.proc_specs.len());
+        let id = self.next_func_id;
+        self.next_func_id += 1;
         self.proc_specs.push(spec);
         id
+    }
+
+    pub fn new_func(&mut self) -> Function {
+        let id = self.next_func_id;
+        self.next_func_id += 1;
+        Function::new(id)
+    }
+
+    pub fn add_func(&mut self, func: Function) {
+        assert!(!self.funcs.contains_key(&func.id));
+        self.funcs.insert(func.id, func);
     }
 
     // TODO: ERRH

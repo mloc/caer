@@ -272,6 +272,8 @@ impl<'a> Function {
                     Op::CatchException(_) => {}
 
                     Op::Suspend => {}
+
+                    Op::Spawn(_) => {}
                 }
             }
 
@@ -603,6 +605,7 @@ pub enum Op {
     CatchException(Option<VarId>),
 
     Suspend, // temporary
+    Spawn(FuncId),
 }
 
 impl Op {
@@ -625,6 +628,7 @@ impl Op {
             Op::Throw(_) => None,
             Op::CatchException(_) => None,
             Op::Suspend => None,
+            Op::Spawn(_) => None,
         }
     }
 
@@ -652,6 +656,8 @@ impl Op {
             Op::Throw(src) => vec![*src],
             Op::CatchException(_) => vec![],
             Op::Suspend => vec![],
+            // hm, this should probably source all the captured vars..
+            Op::Spawn(_) => vec![],
         }
     }
 
@@ -675,6 +681,7 @@ impl Op {
             Op::Throw(_) => {}
             Op::CatchException(_) => {}
             Op::Suspend => {}
+            Op::Spawn(_) => {}
         }
     }
 
@@ -709,6 +716,8 @@ impl Op {
             Op::AllocDatum(_, _) => {}
             Op::CatchException(_) => {}
             Op::Suspend => {}
+            // ditto
+            Op::Spawn(_) => {}
         }
     }
 

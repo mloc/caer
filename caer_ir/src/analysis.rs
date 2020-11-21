@@ -1,7 +1,7 @@
 use crate::cfg::{self, Op};
 use crate::const_val::ConstVal;
 use crate::env::Env;
-use crate::id::{BlockId, LocalId, ScopeId, VarId};
+use crate::id::{BlockId, LocalId, VarId};
 use caer_infer as infer;
 use caer_types::id::FuncId;
 use caer_types::op::BinaryOp;
@@ -19,9 +19,9 @@ pub struct ProcAnalysis<'a> {
 
 impl<'a> ProcAnalysis<'a> {
     pub fn analyse_proc(env: &'a mut Env, proc_id: FuncId) -> IndexVec<LocalId, LocalInfo> {
-        let proc = env.funcs[proc_id].clone();
-        let initial_local_info = proc.locals.indices().map(|id| LocalInfo::new(id)).collect();
-        let initial_var_info = proc.vars.indices().map(|id| VarInfo::new(id)).collect();
+        let proc = env.funcs[&proc_id].clone();
+        let initial_local_info = proc.locals.indices().map(LocalInfo::new).collect();
+        let initial_var_info = proc.vars.indices().map(VarInfo::new).collect();
 
         let mut pa = ProcAnalysis {
             env,
@@ -32,7 +32,7 @@ impl<'a> ProcAnalysis<'a> {
 
         pa.do_analyse();
 
-        pa.env.funcs[proc_id] = pa.proc;
+        pa.env.funcs.insert(proc_id, pa.proc);
 
         pa.local_info
     }
@@ -174,7 +174,7 @@ impl<'a> ProcAnalysis<'a> {
 
         let mut to_demote = Vec::new();
         for var_info in self.var_info.iter() {
-            if var_info.stores.len() > 0 {
+            if !var_info.stores.is_empty() {
                 // shouldn't be here
                 // TODO: move into own pass or something
                 if self.proc.vars[var_info.id].ty == ty::Complex::Any {
@@ -368,7 +368,7 @@ pub struct VarInfo {
 impl VarInfo {
     fn new(id: VarId) -> Self {
         Self {
-            id: id,
+            id,
             decl_op: None,
 
             loads: Vec::new(),
@@ -415,8 +415,8 @@ impl InferRunner {
         let var_ikey: IndexVec<_, _> = proc.vars.indices().map(|_| engine.add_var()).collect();
         let key_to_ref: IndexVec<_, _> = local_ikey
             .indices()
-            .map(|id| InferRef::Local(id))
-            .chain(var_ikey.indices().map(|id| InferRef::Var(id)))
+            .map(InferRef::Local)
+            .chain(var_ikey.indices().map(InferRef::Var))
             .collect();
 
         for (lid, k) in local_ikey.iter_enumerated() {
@@ -753,7 +753,7 @@ impl ProcPatch {
 
                     let rest: Box<dyn Iterator<Item = cfg::Op>> =
                         if let Some(ops) = add_ops.get(&index) {
-                            Box::new(ops.iter().map(|r| r.clone()))
+                            Box::new(ops.iter().cloned())
                         } else {
                             Box::new(std::iter::empty())
                         };

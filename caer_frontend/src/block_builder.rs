@@ -1,11 +1,13 @@
 use super::proc_builder::ProcBuilder;
-use super::func_builder::FuncBuilder;
+use super::func_builder::{FuncBuilder, ClosureEnvironment};
 use caer_ir::cfg;
 use caer_ir::id::{BlockId, LocalId, ScopeId, VarId};
 use caer_types::id::{StringId, TypeId};
 use caer_types::op::BinaryOp;
 use caer_types::ty;
 use dreammaker::ast;
+
+// TODO: split this up! somehow
 
 struct EnsureFinalize(bool);
 
@@ -69,7 +71,7 @@ impl<'f> BlockBuilder {
         }
     }
 
-    pub fn build_stmt(&mut self, fb: &mut FuncBuilder<'f>, stmt: &ast::Statement) {
+    pub fn build_stmt<'a>(&mut self, fb: &'a mut FuncBuilder<'f>, stmt: &ast::Statement) {
         match stmt {
             ast::Statement::Var(v) => {
                 let var = self.add_var(fb, &v.var_type, &v.name);
@@ -133,7 +135,7 @@ impl<'f> BlockBuilder {
 
                     let (body_block_id, _) =
                         fb
-                            .build_block(&body[..], self.block.scope, Some(if_end.id));
+                            .build_block(&body[..], Some(self.block.scope), Some(if_end.id));
 
                     let continuation = fb.new_block(self.block.scope);
 
@@ -151,7 +153,7 @@ impl<'f> BlockBuilder {
                 let mut next = if_end.id;
                 if let Some(body) = else_arm {
                     next =fb
-                        .build_block(&body[..], self.block.scope, Some(if_end.id))
+                        .build_block(&body[..], Some(self.block.scope), Some(if_end.id))
                         .0;
                 }
 
@@ -170,7 +172,7 @@ impl<'f> BlockBuilder {
 
                 let (body_block_id, _) =
                     fb
-                        .build_block(&block[..], self.block.scope, Some(cond_bb.root_block_id));
+                        .build_block(&block[..], Some(self.block.scope), Some(cond_bb.root_block_id));
 
                 let cond_expr = cond_bb.build_expr(fb, condition);
 
@@ -203,7 +205,7 @@ impl<'f> BlockBuilder {
                     init_bb.build_stmt(fb, init_stmt);
                 }
 
-                let (body_id, _) = fb.build_block(block, loop_scope, Some(inc_bb.root_block_id));
+                let (body_id, _) = fb.build_block(block, Some(loop_scope), Some(inc_bb.root_block_id));
 
                 if let Some(ref test_expr) = test {
                     let cond_expr = cond_bb.build_expr(fb, test_expr);
@@ -242,7 +244,7 @@ impl<'f> BlockBuilder {
                 let continuation = fb.new_block(self.block.scope);
                 let (try_id, try_scope) =
                     fb
-                        .build_block(try_block, self.block.scope, Some(continuation.id));
+                        .build_block(try_block, Some(self.block.scope), Some(continuation.id));
 
                 let mut catch_bb = fb.builder_within_scope(self.block.scope);
                 let catch_var;
@@ -272,8 +274,15 @@ impl<'f> BlockBuilder {
                 self.block.push_op(cfg::Op::Throw(throw_val));
             }
 
-            ast::Statement::Spawn { .. } => {
-                self.block.push_op(cfg::Op::Suspend);
+            ast::Statement::Spawn { delay, block } => {
+                /*let closure = ClosureEnvironment::new(fb, self.block.scope);
+                let closure_builder = FuncBuilder::for_closure(env, objtree, closure);
+
+                // TODO: dedup
+                let func = closure_builder.finalize();
+                let id = func.id;
+                fb.env.add_func(func);
+                self.block.push_op(cfg::Op::Spawn(id));*/
             }
 
             _ => unimplemented!(),
@@ -700,8 +709,4 @@ impl<'f> BlockBuilder {
             _ => unimplemented!("{:?}", term),
         }
     }
-}
-
-struct Cursor<'cfg> {
-    cur_block: &'cfg cfg::Block,
 }

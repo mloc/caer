@@ -10,7 +10,6 @@ use caer_ir::env::Env;
 use caer_types::ty;
 
 pub struct ProcBuilder<'a> {
-    id: FuncId,
     pub env: &'a mut Env,
     pub objtree: &'a objtree::ObjectTree,
     pub ast_proc: &'a objtree::ProcValue,
@@ -18,9 +17,8 @@ pub struct ProcBuilder<'a> {
 }
 
 impl<'a> ProcBuilder<'a> {
-    pub fn build(env: &'a mut Env, objtree: &'a objtree::ObjectTree, id: FuncId, ast_proc: &'a objtree::ProcValue) -> cfg::Function {
+    pub fn build(env: &'a mut Env, objtree: &'a objtree::ObjectTree, ast_proc: &'a objtree::ProcValue) -> cfg::Function {
         let pb = Self {
-            id,
             env,
             objtree,
             ast_proc,
@@ -31,7 +29,7 @@ impl<'a> ProcBuilder<'a> {
     }
 
     fn build_proc(mut self) -> cfg::Function {
-        let mut proc = cfg::Function::new(self.id);
+        let mut proc = self.env.new_func();
         proc.new_scope(proc.global_scope);
 
         for (i, param) in self.ast_proc.parameters.iter().enumerate() {
@@ -40,29 +38,29 @@ impl<'a> ProcBuilder<'a> {
             let var_id = proc.add_var(proc.global_scope, ty::Complex::Any, name_id);
             proc.params.push(var_id);
 
-            let spec = self.env.get_proc_mut(self.id);
+            let spec = self.env.get_proc_mut(proc.id);
             spec.params.push(name_id);
             spec.names.push((name_id, i as u32));
         }
-        let spec = self.env.get_proc_mut(self.id);
+        let spec = self.env.get_proc_mut(proc.id);
         spec.names.sort_unstable_by_key(|(ref s, _)| {*s});
 
         let gs = proc.global_scope;
-        let mut func_builder = FuncBuilder::for_proc(&mut self.env, &mut self.objtree, proc);
+        let mut func_builder = FuncBuilder::for_proc(&mut self.env, &self.objtree, proc);
 
         let body = if let objtree::Code::Present(ref b) = self.ast_proc.code {
             b
         } else {
             panic!("not present")
         };
-        func_builder.build_block(body.as_slice(), gs, None);
+        func_builder.build_block(body.as_slice(), None, None);
 
         let mut proc = func_builder.finalize();
 
         proc.analyze();
 
         //self.proc.dot(self.builder.env.string_table.get(self.proc.name));
-        proc.dot(&format!("proc_{}", self.id.index()));
+        proc.dot(&format!("proc_{}", proc.id.index()));
 
         proc
     }
