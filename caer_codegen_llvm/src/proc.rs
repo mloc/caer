@@ -627,8 +627,9 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                 self.build_call(self.ctx.rt.rt_runtime_suspend.as_global_value().as_pointer_value(), &[self.prog_emit.rt_global.as_pointer_value().into()]);
             },
 
-            Op::Spawn(func) => {
-                unimplemented!()
+            Op::Spawn(func, delay) => {
+                println!("HIT SPAWN");
+                //unimplemented!()
             }
 
             //_ => unimplemented!("{:?}", op),

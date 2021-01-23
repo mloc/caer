@@ -273,7 +273,10 @@ impl<'a> Function {
 
                     Op::Suspend => {}
 
-                    Op::Spawn(_) => {}
+                    Op::Spawn(_, Some(src)) => {
+                        flow[*src].reads += 1;
+                    }
+                    Op::Spawn(_, None) => {}
                 }
             }
 
@@ -605,7 +608,7 @@ pub enum Op {
     CatchException(Option<VarId>),
 
     Suspend, // temporary
-    Spawn(FuncId),
+    Spawn(ClosureSlotId, Option<LocalId>),
 }
 
 impl Op {
@@ -628,7 +631,7 @@ impl Op {
             Op::Throw(_) => None,
             Op::CatchException(_) => None,
             Op::Suspend => None,
-            Op::Spawn(_) => None,
+            Op::Spawn(_, _) => None,
         }
     }
 
@@ -657,7 +660,8 @@ impl Op {
             Op::CatchException(_) => vec![],
             Op::Suspend => vec![],
             // hm, this should probably source all the captured vars..
-            Op::Spawn(_) => vec![],
+            Op::Spawn(_, Some(delay)) => vec![*delay],
+            Op::Spawn(_, None) => vec![],
         }
     }
 
@@ -681,7 +685,7 @@ impl Op {
             Op::Throw(_) => {}
             Op::CatchException(_) => {}
             Op::Suspend => {}
-            Op::Spawn(_) => {}
+            Op::Spawn(_, _) => {}
         }
     }
 
@@ -717,7 +721,8 @@ impl Op {
             Op::CatchException(_) => {}
             Op::Suspend => {}
             // ditto
-            Op::Spawn(_) => {}
+            Op::Spawn(_, Some(delay)) => {f(delay);}
+            Op::Spawn(_, None) => {}
         }
     }
 

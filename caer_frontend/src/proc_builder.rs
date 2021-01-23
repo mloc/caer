@@ -1,15 +1,18 @@
-use super::ir_builder::IrBuilder;
 use super::block_builder::BlockBuilder;
 use super::func_builder::FuncBuilder;
-use std::collections::HashMap;
+use super::ir_builder::IrBuilder;
 use caer_ir::cfg;
-use caer_ir::id::{ScopeId, BlockId, VarId, LocalId};
-use dreammaker::{ast, objtree};
-use caer_types::id::{StringId, FuncId};
+use caer_ir::cfg::Function;
 use caer_ir::env::Env;
+use caer_ir::id::{BlockId, LocalId, ScopeId, VarId};
+use caer_types::id::{FuncId, StringId};
 use caer_types::ty;
+use dreammaker::{ast, objtree};
+use std::collections::HashMap;
 
 pub struct ProcBuilder<'a> {
+    // should be ProcId, eventually
+    pub id: FuncId,
     pub env: &'a mut Env,
     pub objtree: &'a objtree::ObjectTree,
     pub ast_proc: &'a objtree::ProcValue,
@@ -17,8 +20,14 @@ pub struct ProcBuilder<'a> {
 }
 
 impl<'a> ProcBuilder<'a> {
-    pub fn build(env: &'a mut Env, objtree: &'a objtree::ObjectTree, ast_proc: &'a objtree::ProcValue) -> cfg::Function {
+    pub fn build(
+        id: FuncId,
+        env: &'a mut Env,
+        objtree: &'a objtree::ObjectTree,
+        ast_proc: &'a objtree::ProcValue,
+    ) -> cfg::Function {
         let pb = Self {
+            id,
             env,
             objtree,
             ast_proc,
@@ -29,7 +38,7 @@ impl<'a> ProcBuilder<'a> {
     }
 
     fn build_proc(mut self) -> cfg::Function {
-        let mut proc = self.env.new_func();
+        let mut proc = Function::new(self.id);
         proc.new_scope(proc.global_scope);
 
         for (i, param) in self.ast_proc.parameters.iter().enumerate() {
@@ -43,7 +52,7 @@ impl<'a> ProcBuilder<'a> {
             spec.names.push((name_id, i as u32));
         }
         let spec = self.env.get_proc_mut(proc.id);
-        spec.names.sort_unstable_by_key(|(ref s, _)| {*s});
+        spec.names.sort_unstable_by_key(|(ref s, _)| *s);
 
         let gs = proc.global_scope;
         let mut func_builder = FuncBuilder::for_proc(&mut self.env, &self.objtree, proc);

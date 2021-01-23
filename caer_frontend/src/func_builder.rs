@@ -5,9 +5,10 @@ use crate::block_builder::BlockBuilder;
 use caer_ir::env::Env;
 use std::collections::{BTreeMap, HashMap};
 use caer_ir::cfg;
-use caer_ir::id::{ScopeId, BlockId, VarId, LocalId};
+use caer_ir::id::{ScopeId, BlockId, VarId, LocalId, ClosureSlotId};
 use dreammaker::{ast, objtree};
 use caer_types::id::{StringId, FuncId, TypeId};
+use index_vec::IndexVec;
 use caer_types::ty;
 
 pub struct FuncBuilder<'a> {
@@ -18,6 +19,7 @@ pub struct FuncBuilder<'a> {
     closure: Option<ClosureEnvironment<'a, 'a>>,
 
     next_block_id: usize,
+    closure_slots: IndexVec<ClosureSlotId, &'a ast::Block>,
     finished_blocks: Vec<cfg::Block>,
 }
 
@@ -29,6 +31,7 @@ impl<'a> FuncBuilder<'a> {
             func,
             closure: None,
             next_block_id: 0,
+            closure_slots: IndexVec::new(),
             finished_blocks: Vec::new(),
         }
     }
@@ -41,6 +44,7 @@ impl<'a> FuncBuilder<'a> {
             func,
             closure: Some(closure),
             next_block_id: 0,
+            closure_slots: IndexVec::new(),
             finished_blocks: Vec::new(),
         }
     }
@@ -100,7 +104,6 @@ impl<'a> FuncBuilder<'a> {
         }
     }
 
-
     pub(crate) fn finalize_block(&mut self, block: cfg::Block) {
         self.finished_blocks.push(block);
     }
@@ -118,7 +121,13 @@ impl<'a> FuncBuilder<'a> {
         self.func.vars[var].assoc_dty = Some(dty)
     }
 
-    pub fn build_block(&mut self, stmts: &[ast::Spanned<ast::Statement>], parent_scope: Option<ScopeId>, next_block: Option<BlockId>) -> (BlockId, ScopeId) {
+    pub(crate) fn add_closure_slot(&mut self, block: &'a ast::Block) -> ClosureSlotId {
+        let ret = self.closure_slots.next_idx();
+        self.closure_slots.push(block);
+        ret
+    }
+
+    pub fn build_block(&mut self, stmts: &'a [ast::Spanned<ast::Statement>], parent_scope: Option<ScopeId>, next_block: Option<BlockId>) -> (BlockId, ScopeId) {
         let scope = self.func.new_scope(parent_scope.unwrap_or(self.func.global_scope));
         let block = self.new_block(scope);
 

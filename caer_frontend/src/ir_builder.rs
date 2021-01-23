@@ -34,8 +34,8 @@ impl<'a> IrBuilder<'a> {
 
         self.env.funcs = Default::default();
         for (i, proc) in self.procs.iter_enumerated() {
-            println!("building {:?}", proc.location);
-            let func = ProcBuilder::build(self.env, self.objtree, proc);
+            println!("building {:?} @ {:?}", i, proc.location);
+            let func = ProcBuilder::build(i, self.env, self.objtree, proc);
             self.env.add_func(func);
         }
 

@@ -1,8 +1,9 @@
+use super::func_builder::{ClosureEnvironment, FuncBuilder};
 use super::proc_builder::ProcBuilder;
-use super::func_builder::{FuncBuilder, ClosureEnvironment};
 use caer_ir::cfg;
-use caer_ir::id::{BlockId, LocalId, ScopeId, VarId};
+use caer_ir::id::{BlockId, LocalId, ScopeId, VarId, ClosureSlotId};
 use caer_types::id::{StringId, TypeId};
+use std::marker::PhantomData;
 use caer_types::op::BinaryOp;
 use caer_types::ty;
 use dreammaker::ast;
@@ -44,7 +45,7 @@ impl<'f> BlockBuilder {
         self.block.terminator = terminator;
     }
 
-    pub fn done(mut self, fb: &mut FuncBuilder<'f>) -> BlockId {
+    pub fn done(self, fb: &mut FuncBuilder<'f>) -> BlockId {
         let id = self.root_block_id;
         self.finalize(fb);
         id
@@ -61,17 +62,26 @@ impl<'f> BlockBuilder {
         fb.finalize_block(swp);
     }
 
-    pub fn build_stmts<'s>(
+    pub fn build_stmts(
         &mut self,
         fb: &mut FuncBuilder<'f>,
-        stmts: impl Iterator<Item = &'s ast::Spanned<ast::Statement>>,
+        stmts: impl Iterator<Item = &'f ast::Spanned<ast::Statement>>,
     ) {
+        //let mut closure_points = Vec::new();
         for stmt in stmts {
             self.build_stmt(fb, &stmt.elem);
+            //if let Some(p) = self.build_stmt(fb, &stmt.elem) {
+                //closure_points.push(p)
+            //}
         }
+        //closure_points
     }
 
-    pub fn build_stmt<'a>(&mut self, fb: &'a mut FuncBuilder<'f>, stmt: &ast::Statement) {
+    pub fn build_stmt(
+        &mut self,
+        fb: &mut FuncBuilder<'f>,
+        stmt: &'f ast::Statement,
+    ) {
         match stmt {
             ast::Statement::Var(v) => {
                 let var = self.add_var(fb, &v.var_type, &v.name);
@@ -118,7 +128,7 @@ impl<'f> BlockBuilder {
                     self.block.push_op(cfg::Op::Store(VarId::new(0), val_expr));
                     // TODO make sure we check the rest of the ops somehow?
                     // create an unreachable block and continue? need a more robust builder
-                    return;
+                    return
                 }
             }
 
@@ -134,8 +144,7 @@ impl<'f> BlockBuilder {
                     let cond_expr = cond_bb.build_expr(fb, &condition.elem);
 
                     let (body_block_id, _) =
-                        fb
-                            .build_block(&body[..], Some(self.block.scope), Some(if_end.id));
+                        fb.build_block(&body[..], Some(self.block.scope), Some(if_end.id));
 
                     let continuation = fb.new_block(self.block.scope);
 
@@ -152,7 +161,7 @@ impl<'f> BlockBuilder {
 
                 let mut next = if_end.id;
                 if let Some(body) = else_arm {
-                    next =fb
+                    next = fb
                         .build_block(&body[..], Some(self.block.scope), Some(if_end.id))
                         .0;
                 }
@@ -170,9 +179,11 @@ impl<'f> BlockBuilder {
                 cond_bb.block.scope_end = true;
                 let while_end = fb.new_block(self.block.scope);
 
-                let (body_block_id, _) =
-                    fb
-                        .build_block(&block[..], Some(self.block.scope), Some(cond_bb.root_block_id));
+                let (body_block_id, _) = fb.build_block(
+                    &block[..],
+                    Some(self.block.scope),
+                    Some(cond_bb.root_block_id),
+                );
 
                 let cond_expr = cond_bb.build_expr(fb, condition);
 
@@ -205,7 +216,8 @@ impl<'f> BlockBuilder {
                     init_bb.build_stmt(fb, init_stmt);
                 }
 
-                let (body_id, _) = fb.build_block(block, Some(loop_scope), Some(inc_bb.root_block_id));
+                let (body_id, _) =
+                    fb.build_block(block, Some(loop_scope), Some(inc_bb.root_block_id));
 
                 if let Some(ref test_expr) = test {
                     let cond_expr = cond_bb.build_expr(fb, test_expr);
@@ -243,8 +255,7 @@ impl<'f> BlockBuilder {
             } => {
                 let continuation = fb.new_block(self.block.scope);
                 let (try_id, try_scope) =
-                    fb
-                        .build_block(try_block, Some(self.block.scope), Some(continuation.id));
+                    fb.build_block(try_block, Some(self.block.scope), Some(continuation.id));
 
                 let mut catch_bb = fb.builder_within_scope(self.block.scope);
                 let catch_var;
@@ -283,13 +294,22 @@ impl<'f> BlockBuilder {
                 let id = func.id;
                 fb.env.add_func(func);
                 self.block.push_op(cfg::Op::Spawn(id));*/
+                let slot = fb.add_closure_slot(block);
+                let delay_val = delay.as_ref().map(|d| self.build_expr(fb, d));
+                self.block.push_op(cfg::Op::Spawn(slot, delay_val));
+                //return Some((slot, block));
             }
 
             _ => unimplemented!(),
         }
     }
 
-    fn add_var(&mut self, fb: &mut FuncBuilder<'f>, var_type: &ast::VarType, var_name: &str) -> VarId {
+    fn add_var(
+        &mut self,
+        fb: &mut FuncBuilder<'f>,
+        var_type: &ast::VarType,
+        var_name: &str,
+    ) -> VarId {
         // TODO: care about var flags?
         let name_id = fb.env.intern_string(var_name);
         let var = fb.add_var(self.block.scope, name_id);
@@ -305,8 +325,7 @@ impl<'f> BlockBuilder {
             };
 
             // TODO: encapsulate type_tree
-            let dty_id =
-                fb.env.type_tree.type_by_node_id[&(var_ty.index().index() as u64)];
+            let dty_id = fb.env.type_tree.type_by_node_id[&(var_ty.index().index() as u64)];
             fb.set_var_dty(var, dty_id);
         }
 
@@ -330,7 +349,12 @@ impl<'f> BlockBuilder {
         local
     }
 
-    fn build_follow(&mut self, fb: &mut FuncBuilder<'f>, local: LocalId, follow: &ast::Spanned<ast::Follow>) -> LocalId {
+    fn build_follow(
+        &mut self,
+        fb: &mut FuncBuilder<'f>,
+        local: LocalId,
+        follow: &ast::Spanned<ast::Follow>,
+    ) -> LocalId {
         match &follow.elem {
             ast::Follow::Field(kind, field) => {
                 let field_id = fb.env.intern_string(field);
@@ -345,7 +369,11 @@ impl<'f> BlockBuilder {
         }
     }
 
-    fn build_expr_lhs(&mut self, fb: &mut FuncBuilder<'f>, expr: &ast::Expression) -> (Option<LocalId>, StringId) {
+    fn build_expr_lhs(
+        &mut self,
+        fb: &mut FuncBuilder<'f>,
+        expr: &ast::Expression,
+    ) -> (Option<LocalId>, StringId) {
         match expr {
             ast::Expression::Base {
                 unary,
@@ -384,7 +412,13 @@ impl<'f> BlockBuilder {
         }
     }
 
-    fn build_assign(&mut self, fb: &mut FuncBuilder<'f>, base: Option<LocalId>, var: StringId, expr: &ast::Expression) {
+    fn build_assign(
+        &mut self,
+        fb: &mut FuncBuilder<'f>,
+        base: Option<LocalId>,
+        var: StringId,
+        expr: &ast::Expression,
+    ) {
         let asg_expr = self.build_expr(fb, expr);
         match base {
             None => {
@@ -392,7 +426,8 @@ impl<'f> BlockBuilder {
                 self.block.push_op(cfg::Op::Store(var_id, asg_expr));
             }
             Some(datum_id) => {
-                self.block.push_op(cfg::Op::DatumStoreVar(datum_id, var, asg_expr));
+                self.block
+                    .push_op(cfg::Op::DatumStoreVar(datum_id, var, asg_expr));
             }
         }
     }
@@ -421,7 +456,8 @@ impl<'f> BlockBuilder {
         if let Some(dty_id) = field_dty_id {
             fb.func.set_assoc_dty(loaded_local, dty_id);
         }
-        self.block.push_op(cfg::Op::DatumLoadVar(loaded_local, datum_local, var));
+        self.block
+            .push_op(cfg::Op::DatumLoadVar(loaded_local, datum_local, var));
         loaded_local
     }
 
@@ -541,7 +577,8 @@ impl<'f> BlockBuilder {
                     _ => unimplemented!("binary op {:?}", op),
                 };
 
-                self.block.push_op(cfg::Op::Binary(res_local, l_op, lhs_expr, rhs_expr));
+                self.block
+                    .push_op(cfg::Op::Binary(res_local, l_op, lhs_expr, rhs_expr));
 
                 res_local
             }
@@ -649,10 +686,9 @@ impl<'f> BlockBuilder {
                         .as_ref()
                         .expect("postfix formatting not supported currently");
                     let expr_l = self.build_expr(fb, expr);
-                    let expr_cast_l =
-                        fb
-                        .add_local(self.block.scope, ty::Primitive::String.into());
-                    self.block.push_op(cfg::Op::Cast(expr_cast_l, expr_l, ty::Primitive::String));
+                    let expr_cast_l = fb.add_local(self.block.scope, ty::Primitive::String.into());
+                    self.block
+                        .push_op(cfg::Op::Cast(expr_cast_l, expr_l, ty::Primitive::String));
 
                     // TODO: we know this is a string, but Binary doesn't
                     let new_built = fb.add_local(self.block.scope, ty::Complex::Any);
@@ -670,7 +706,8 @@ impl<'f> BlockBuilder {
                         let new_built = fb.add_local(self.block.scope, ty::Complex::Any);
                         let lit = cfg::Literal::String(fb.env.intern_string(sep));
                         let lit_l = self.build_literal(fb, lit);
-                        self.block.push_op(cfg::Op::Binary(new_built, BinaryOp::Add, built, lit_l));
+                        self.block
+                            .push_op(cfg::Op::Binary(new_built, BinaryOp::Add, built, lit_l));
                         built = new_built
                     }
                 }
@@ -684,23 +721,15 @@ impl<'f> BlockBuilder {
                     ast::NewType::Prefab(pf) => {
                         assert!(pf.vars.is_empty());
                         // TODO: ughhhh, move path resolving into a helper, better encapsulation
-                        let pf_ty =
-                            fb
-                            .objtree
-                            .root()
-                            .navigate_path(&pf.path)
-                            .unwrap()
-                            .ty();
+                        let pf_ty = fb.objtree.root().navigate_path(&pf.path).unwrap().ty();
 
-                        fb.env.type_tree.type_by_node_id
-                            [&(pf_ty.index().index() as u64)]
+                        fb.env.type_tree.type_by_node_id[&(pf_ty.index().index() as u64)]
                     }
                     _ => unimplemented!("new with newty {:?}", newty),
                 };
 
                 let ref_local =
-                    fb
-                    .add_local(self.block.scope, ty::Primitive::Ref(Some(ty_id)).into());
+                    fb.add_local(self.block.scope, ty::Primitive::Ref(Some(ty_id)).into());
 
                 self.block.push_op(cfg::Op::AllocDatum(ref_local, ty_id));
 
