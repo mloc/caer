@@ -52,9 +52,11 @@ impl LocalFlow {
 // TODO: move, along with proc. this is more meta than cfg
 #[derive(Debug, Clone)]
 pub struct Closure {
-    over: FuncId,
-    // vars in *the closure* that are captured from the environment
-    captured: Vec<VarId>,
+    pub over: FuncId,
+    // scope in the parent
+    pub scope: ScopeId,
+    // maps a var in THIS func to the var in the PARENT func that's captured
+    pub captured: Vec<(VarId, VarId)>,
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +73,7 @@ pub struct Function {
 
     pub params: Vec<VarId>,
     pub closure: Option<Closure>,
+    pub child_closures: IndexVec<ClosureSlotId, FuncId>,
 }
 
 impl<'a> Function {
@@ -94,6 +97,7 @@ impl<'a> Function {
 
             params: Vec::new(),
             closure: None,
+            child_closures: IndexVec::new(),
         };
 
         // TODO: compile time intern, "."
@@ -101,7 +105,7 @@ impl<'a> Function {
         new
     }
 
-    pub fn set_closure(&mut self, over: FuncId) {
+    pub fn set_closure(&mut self, over: FuncId, over_scope: ScopeId) {
         assert!(
             self.closure.is_none(),
             "proc is already marked as a closure, {:?}",
@@ -109,6 +113,7 @@ impl<'a> Function {
         );
         self.closure = Some(Closure {
             over,
+            scope: over_scope,
             captured: Vec::new(),
         });
     }
@@ -159,13 +164,13 @@ impl<'a> Function {
         id
     }
 
-    pub fn add_captured_var(&mut self, name: StringId) -> VarId {
+    pub fn add_captured_var(&mut self, name: StringId, to_cap: VarId) -> VarId {
         // captured vars exist at the global scope, are always soft (for now)
         let id = self.add_var(self.global_scope, ty::Complex::Any, name);
 
         match &mut self.closure {
             None => panic!("can only capture variables if proc is marked as a closure"),
-            Some(closure) => closure.captured.push(id),
+            Some(closure) => closure.captured.push((id, to_cap)),
         }
 
         id

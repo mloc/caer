@@ -120,6 +120,8 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         self.env.string_table.serialize_runtime(File::create("stringtable.bincode").unwrap());
         bincode::serialize_into(File::create("environment.bincode").unwrap(), &rt_env).unwrap();
 
+        // not used by runtime, just for debugging / aux tooling
+        serde_json::to_writer_pretty(File::create("stringtable.json").unwrap(), &self.env.string_table).unwrap();
         serde_json::to_writer_pretty(File::create("environment.json").unwrap(), &rt_env).unwrap();
 
         let vt_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(self.vt_global.as_pointer_value(), &[

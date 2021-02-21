@@ -294,7 +294,7 @@ impl<'f> BlockBuilder {
                 let id = func.id;
                 fb.env.add_func(func);
                 self.block.push_op(cfg::Op::Spawn(id));*/
-                let slot = fb.add_closure_slot(block);
+                let slot = fb.add_closure_slot(self.block.scope, block);
                 let delay_val = delay.as_ref().map(|d| self.build_expr(fb, d));
                 self.block.push_op(cfg::Op::Spawn(slot, delay_val));
                 //return Some((slot, block));

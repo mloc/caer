@@ -148,5 +148,11 @@
 
 /proc/SUSPEND()
 	spawn
+		world.log << "woop"
+
+/proc/closure()
+	var/x = 8
+	spawn
+		world.log << x
 
 //#include "badty.dm"

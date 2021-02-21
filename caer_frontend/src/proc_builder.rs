@@ -25,7 +25,7 @@ impl<'a> ProcBuilder<'a> {
         env: &'a mut Env,
         objtree: &'a objtree::ObjectTree,
         ast_proc: &'a objtree::ProcValue,
-    ) -> cfg::Function {
+    ) -> FuncId {
         let pb = Self {
             id,
             env,
@@ -37,7 +37,7 @@ impl<'a> ProcBuilder<'a> {
         pb.build_proc()
     }
 
-    fn build_proc(mut self) -> cfg::Function {
+    fn build_proc(mut self) -> FuncId {
         let mut proc = Function::new(self.id);
         proc.new_scope(proc.global_scope);
 
@@ -63,15 +63,7 @@ impl<'a> ProcBuilder<'a> {
             panic!("not present")
         };
         func_builder.build_block(body.as_slice(), None, None);
-
-        let mut proc = func_builder.finalize();
-
-        proc.analyze();
-
-        //self.proc.dot(self.builder.env.string_table.get(self.proc.name));
-        proc.dot(&format!("proc_{}", proc.id.index()));
-
-        proc
+        func_builder.finalize()
     }
 
     /*pub fn build_block(&mut self, stmts: &[ast::Spanned<ast::Statement>], parent_scope: ScopeId, next_block: Option<BlockId>) -> (BlockId, ScopeId) {
