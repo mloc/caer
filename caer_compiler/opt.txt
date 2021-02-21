@@ -1,5 +1,8 @@
 scratchpad
 
+want to eliminate sequential loads
+    x+x produces two loads of x
+
 scoping issues
     stuff can be descoped before we use it in a terminator
     fixed by cloning everywhere - we should have been doing this anyway

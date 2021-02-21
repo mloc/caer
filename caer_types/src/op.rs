@@ -1,6 +1,7 @@
 use crate::ty::{Complex, Primitive};
+use serde::Serialize;
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Serialize)]
 #[repr(u32)]
 pub enum BinaryOp {
     Add,
@@ -24,7 +25,7 @@ pub enum BinaryOp {
     NotEquiv,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub enum BitOp {
     And,
     Or,
@@ -33,7 +34,7 @@ pub enum BitOp {
     Shr,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub enum HardBinary {
     StringConcat,
 
@@ -121,7 +122,7 @@ impl HardBinary {
 }
 
 // lifted from inkwell for now, TODO: move, reexpose?
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub enum FloatPredicate {
     OEQ,
     OGE,

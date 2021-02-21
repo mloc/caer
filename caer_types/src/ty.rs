@@ -1,6 +1,7 @@
 use crate::id::TypeId;
 use index_vec::define_index_type;
 use std::collections::BTreeSet;
+use serde::Serialize;
 
 define_index_type! {pub struct TyId = u32;}
 
@@ -10,7 +11,7 @@ pub trait Ty {
     fn is_primitive(&self, prim: Primitive) -> bool;
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize)]
 pub enum Primitive {
     Null,
     Float,
@@ -20,7 +21,7 @@ pub enum Primitive {
     Ref(Option<TypeId>),
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Serialize)]
 pub enum Complex {
     Any,
     Pointer(Box<Complex>),

@@ -38,8 +38,8 @@ impl<'a> IrBuilder<'a> {
             ProcBuilder::build(i, self.env, self.objtree, proc);
         }
 
-        // wow ew
-        for proc_id_n in 0..self.procs.len() {
+        // wow ewww
+        for proc_id_n in 0..self.env.funcs.len() {
             let proc_id = FuncId::new(proc_id_n);
             caer_ir::analysis::ProcAnalysis::analyse_proc(self.env, proc_id);
             self.env.funcs[&proc_id].dot(&format!("opt_proc_{}", proc_id.index()));

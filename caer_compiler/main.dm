@@ -152,7 +152,8 @@
 
 /proc/closure()
 	var/x = 8
+	var/y = 9
 	spawn
-		world.log << x
+		world.log << x+x+y
 
 //#include "badty.dm"

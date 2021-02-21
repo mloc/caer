@@ -1,12 +1,12 @@
-use super::func_builder::{ClosureEnvironment, FuncBuilder};
+use super::func_builder::FuncBuilder;
 use super::proc_builder::ProcBuilder;
 use caer_ir::cfg;
-use caer_ir::id::{BlockId, LocalId, ScopeId, VarId, ClosureSlotId};
+use caer_ir::id::{BlockId, ClosureSlotId, LocalId, ScopeId, VarId};
 use caer_types::id::{StringId, TypeId};
-use std::marker::PhantomData;
 use caer_types::op::BinaryOp;
 use caer_types::ty;
 use dreammaker::ast;
+use std::marker::PhantomData;
 
 // TODO: split this up! somehow
 
@@ -67,21 +67,12 @@ impl<'f> BlockBuilder {
         fb: &mut FuncBuilder<'f>,
         stmts: impl Iterator<Item = &'f ast::Spanned<ast::Statement>>,
     ) {
-        //let mut closure_points = Vec::new();
         for stmt in stmts {
             self.build_stmt(fb, &stmt.elem);
-            //if let Some(p) = self.build_stmt(fb, &stmt.elem) {
-                //closure_points.push(p)
-            //}
         }
-        //closure_points
     }
 
-    pub fn build_stmt(
-        &mut self,
-        fb: &mut FuncBuilder<'f>,
-        stmt: &'f ast::Statement,
-    ) {
+    pub fn build_stmt(&mut self, fb: &mut FuncBuilder<'f>, stmt: &'f ast::Statement) {
         match stmt {
             ast::Statement::Var(v) => {
                 let var = self.add_var(fb, &v.var_type, &v.name);
@@ -128,7 +119,7 @@ impl<'f> BlockBuilder {
                     self.block.push_op(cfg::Op::Store(VarId::new(0), val_expr));
                     // TODO make sure we check the rest of the ops somehow?
                     // create an unreachable block and continue? need a more robust builder
-                    return
+                    return;
                 }
             }
 

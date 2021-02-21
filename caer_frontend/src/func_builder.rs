@@ -223,21 +223,3 @@ impl<'a> FuncBuilder<'a> {
         (root_block_id, scope)
     }
 }
-
-// TODO: replace with ir::cfg::Closure
-pub struct ClosureEnvironment {
-    parent: FuncId,
-    capture_scope: ScopeId,
-    // var in parent -> var in closure
-    captured: Vec<(VarId, VarId)>,
-}
-
-impl ClosureEnvironment {
-    pub fn new(parent: FuncId, capture_scope: ScopeId) -> Self {
-        Self {
-            parent,
-            capture_scope,
-            captured: Vec::new(),
-        }
-    }
-}

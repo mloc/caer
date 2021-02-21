@@ -6,8 +6,9 @@ use index_vec::IndexVec;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{Seek, SeekFrom, Write};
+use serde::Serialize;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Local {
     pub id: LocalId,
     pub ty: ty::Complex,
@@ -19,7 +20,7 @@ pub struct Local {
     pub assoc_dty: Option<TypeId>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Var {
     pub id: VarId,
     pub name: StringId,
@@ -50,7 +51,7 @@ impl LocalFlow {
 }
 
 // TODO: move, along with proc. this is more meta than cfg
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Closure {
     pub over: FuncId,
     // scope in the parent
@@ -59,7 +60,7 @@ pub struct Closure {
     pub captured: Vec<(VarId, VarId)>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Function {
     pub id: FuncId,
 
@@ -315,6 +316,9 @@ impl<'a> Function {
     pub fn dot(&self, name: &str) {
         // TODO bad, for now we assume procs have unique names
         fs::create_dir_all("dbgout/dot/tino_cfg/").unwrap();
+        fs::create_dir_all("dbgout/ir/").unwrap();
+        // TODO: better string format for CFG
+        serde_json::to_writer_pretty(File::create(format!("dbgout/ir/cfg_{}.json", name)).unwrap(), self).unwrap();
         // TODO: replace proc-name here with some better repr
         let mut f = File::create(format!("dbgout/dot/tino_cfg/cfg_{}.dot", name)).unwrap();
         dot::render(self, &mut f).unwrap();
@@ -491,7 +495,7 @@ impl<'a> dot::GraphWalk<'a, BlockId, (BlockId, BlockId, String)> for Function {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Block {
     pub id: BlockId,
     pub ops: Vec<Op>,
@@ -542,7 +546,7 @@ impl Block {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Scope {
     pub id: ScopeId,
     pub parent: Option<ScopeId>,
@@ -575,7 +579,7 @@ impl Scope {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum Op {
     Noop,
 
@@ -742,7 +746,7 @@ impl Op {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub enum Literal {
     Null,
     Num(f32),
@@ -761,7 +765,7 @@ impl Literal {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum Terminator {
     Return,
     Jump(BlockId),
