@@ -54,7 +54,6 @@ impl<'a> ProcBuilder<'a> {
         let spec = self.env.get_proc_mut(proc.id);
         spec.names.sort_unstable_by_key(|(ref s, _)| *s);
 
-        let gs = proc.global_scope;
         let mut func_builder = FuncBuilder::for_proc(&mut self.env, &self.objtree, proc);
 
         let body = if let objtree::Code::Present(ref b) = self.ast_proc.code {

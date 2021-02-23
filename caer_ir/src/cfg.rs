@@ -29,6 +29,8 @@ pub struct Var {
     // DM-style "compile-time" typepath, only used for error checking safe deref ops
     // TODO: maybe fold into ty?
     pub assoc_dty: Option<TypeId>,
+
+    pub captures: Vec<(FuncId, VarId)>,
 }
 
 #[derive(Debug)]
@@ -156,6 +158,7 @@ impl<'a> Function {
             name,
             ty,
             assoc_dty: None,
+            captures: Vec::new(),
         };
 
         self.vars.push(var_info);
@@ -175,6 +178,10 @@ impl<'a> Function {
         }
 
         id
+    }
+
+    pub fn mark_var_captured(&mut self, my_var: VarId, closure: FuncId, closure_var: VarId) {
+        self.vars[my_var].captures.push((closure, closure_var));
     }
 
     pub fn add_block(&mut self, block: Block) {
@@ -353,21 +360,21 @@ impl<'a> Function {
             })
             .collect::<Vec<_>>()
             .join("\\l");
-        write!(
+        writeln!(
             f,
-            "llegend[label=\"{{Locals\\l|{{{}\\l}}}}\"][shape=\"record\"];\n",
+            "llegend[label=\"{{Locals\\l|{{{}\\l}}}}\"][shape=\"record\"];",
             locals
         )
         .unwrap();
-        write!(
+        writeln!(
             f,
-            "vlegend[label=\"{{Vars\\l|{{{}\\l}}}}\"][shape=\"record\"];\n",
+            "vlegend[label=\"{{Vars\\l|{{{}\\l}}}}\"][shape=\"record\"];",
             vars
         )
         .unwrap();
 
         self.dot_scope_cluster(&mut f, self.global_scope);
-        write!(&mut f, "}}\n").unwrap();
+        writeln!(&mut f, "}}").unwrap();
     }
 
     fn dot_scope_cluster(&self, f: &mut File, scope_id: ScopeId) {
@@ -378,22 +385,22 @@ impl<'a> Function {
             .map(|l| l.index().to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        write!(f, "subgraph cluster_scope{} {{\n", scope_id.index()).unwrap();
-        write!(
+        writeln!(f, "subgraph cluster_scope{} {{", scope_id.index()).unwrap();
+        writeln!(
             f,
-            "label=\"scope {} [{}] LP: {:?}\";\n",
+            "label=\"scope {} [{}] LP: {:?}\";",
             scope.id.index(),
             locals,
             scope.landingpad
         )
         .unwrap();
         for block_id in scope.blocks.iter() {
-            write!(f, "block{};\n", block_id.index()).unwrap();
+            writeln!(f, "block{};", block_id.index()).unwrap();
         }
         for child in scope.children.iter() {
             self.dot_scope_cluster(f, *child);
         }
-        write!(f, "graph[style=dotted];}}\n").unwrap();
+        writeln!(f, "graph[style=dotted];}}").unwrap();
     }
 }
 

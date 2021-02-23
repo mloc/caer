@@ -34,9 +34,9 @@ impl<'a> FuncBuilder<'a> {
         }
     }
 
-    pub(crate) fn for_closure(env: &'a mut Env, objtree: &'a objtree::ObjectTree, closure: cfg::Closure) -> Self {
+    pub(crate) fn for_closure(env: &'a mut Env, objtree: &'a objtree::ObjectTree, over: FuncId, scope: ScopeId) -> Self {
         let mut func = env.new_func();
-        func.closure = Some(closure);
+        func.set_closure(over, scope);
         Self {
             env,
             objtree,
@@ -54,24 +54,18 @@ impl<'a> FuncBuilder<'a> {
         }
         println!("final {:?}: {:?}", self.func.id, self.closure_slots);
         self.func.analyze();
-        self.func.dot(&format!("proc_{}", self.func.id.index()));
         let id = self.func.id;
         self.env.add_func(self.func);
 
         println!("{:?} has {} closures", id, self.closure_slots.len());
         let mut closure_funcs = IndexVec::new();
         for (scope, block) in self.closure_slots {
-            // TODO: cleanup cfg interface
-            let closure = cfg::Closure {
-                over: id,
-                scope,
-                captured: Vec::new(),
-            };
-            let mut closure_builder = FuncBuilder::for_closure(self.env, self.objtree, closure);
+            let mut closure_builder = FuncBuilder::for_closure(self.env, self.objtree, id, scope);
             println!("building closure {:?}", closure_builder.func.id);
             closure_builder.build_block(block, None, None);
             closure_funcs.push(closure_builder.finalize());
         }
+        println!("{} children", closure_funcs.len());
 
         self.env.funcs.get_mut(&id).unwrap().child_closures = closure_funcs;
 
@@ -127,10 +121,14 @@ impl<'a> FuncBuilder<'a> {
 
         // At this point, top_var references a variable in cur_func_id.
         // We now need to unwind capture_stack and add capturing vars.
+        let mut cur_parent = cur_func_id;
         for func_id in capture_stack.into_iter().rev() {
             println!("!! {:?}", func_id);
             let func = self.env.funcs.get_mut(&func_id).unwrap();
-            top_var = func.add_captured_var(name, top_var);
+            let new_top_var = func.add_captured_var(name, top_var);
+            let parent_func = self.env.funcs.get_mut(&func_id).unwrap();
+            parent_func.mark_var_captured(top_var, func_id, new_top_var);
+            top_var = new_top_var;
         }
 
         // top_var is now a var in this func's parent.

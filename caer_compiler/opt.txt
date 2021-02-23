@@ -1,5 +1,14 @@
 scratchpad
 
+idea: fat IDs!
+    a debugging aid
+    basically, instead of something like VarId being just an int, it's an (int, FuncId)
+    gated by a flag, kinda like a sanitizer
+
+    alternative:
+        weird lifetimes
+        would get messy fast though
+
 want to eliminate sequential loads
     x+x produces two loads of x
 
