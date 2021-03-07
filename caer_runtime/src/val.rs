@@ -207,8 +207,12 @@ impl Val {
             op::BinaryOp::Div => f32::div(l, r),
             op::BinaryOp::Mod => f32::rem(l, r),
             op::BinaryOp::Pow => f32::powf(l, r),
+
+            #[allow(clippy::float_cmp)]
             op::BinaryOp::Eq => (l == r) as u8 as f32,
+            #[allow(clippy::float_cmp)]
             op::BinaryOp::Ne => (l != r) as u8 as f32,
+
             op::BinaryOp::Gt => (l > r) as u8 as f32,
             op::BinaryOp::Ge => (l >= r) as u8 as f32,
             op::BinaryOp::Lt => (l < r) as u8 as f32,

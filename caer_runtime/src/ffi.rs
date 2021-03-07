@@ -5,12 +5,12 @@ use num_traits::Zero;
 
 #[repr(C)]
 #[derive(Debug)]
-pub struct FFIArray<T, I = u64> {
+pub struct FfiArray<T, I = u64> {
     len: I,
     data: NonNull<T>,
 }
 
-impl<T, I> FFIArray<T, I> where I: Zero {
+impl<T, I> FfiArray<T, I> where I: Zero {
     pub fn empty() -> Self {
         Self {
             len: I::zero(),
@@ -19,7 +19,9 @@ impl<T, I> FFIArray<T, I> where I: Zero {
     }
 }
 
-impl<T, I> FFIArray<T, I> {
+impl<T, I> FfiArray<T, I> {
+    /// # Safety
+    /// lol
     pub unsafe fn with_len(data: NonNull<T>, len: I) -> Self {
         Self {
             len,
@@ -28,7 +30,7 @@ impl<T, I> FFIArray<T, I> {
     }
 }
 
-impl<T, I> FFIArray<T, I>
+impl<T, I> FfiArray<T, I>
 where
     I: Copy + TryInto<usize>,
     <I as TryInto<usize>>::Error: std::fmt::Debug, // meh

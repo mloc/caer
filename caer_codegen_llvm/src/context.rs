@@ -94,7 +94,16 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
         let arg_pack_tuple_type = ctx.struct_type(&[ctx.i64_type().into(), val_type.into()], false);
         let arg_pack_tuple_type_ptr = arg_pack_tuple_type.ptr_type(inkwell::AddressSpace::Generic);
 
-        let arg_pack_type = ctx.struct_type(&[ctx.i64_type().into(), val_type.ptr_type(inkwell::AddressSpace::Generic).into(), ctx.i64_type().into(), arg_pack_tuple_type_ptr.into(), val_type.into()], false);
+        let arg_pack_type = ctx.struct_type(
+            &[
+                ctx.i64_type().into(),
+                val_type.ptr_type(inkwell::AddressSpace::Generic).into(),
+                ctx.i64_type().into(),
+                arg_pack_tuple_type_ptr.into(),
+                val_type.into(),
+            ],
+            false,
+        );
 
         let proc_type = ctx.void_type().fn_type(&[arg_pack_type.ptr_type(inkwell::AddressSpace::Generic).into(), rt_type.ptr_type(inkwell::AddressSpace::Generic).into(), val_type_ptr.into()], false);
 
@@ -217,7 +226,7 @@ macro_rules! rt_funcs {
     );
 }
 
-rt_funcs!{
+rt_funcs! {
     RtFuncs,
     [
         (rt_val_binary_op, void_type~val, [rt_type~gptr, i32_type~val, val_type~ptr, val_type~ptr, val_type~ptr]),
@@ -232,6 +241,15 @@ rt_funcs!{
         (rt_runtime_alloc_datum, datum_common_type~ptr, [rt_type~gptr, i32_type~val]),
         (rt_runtime_concat_strings, i64_type~val, [rt_type~gptr, i64_type~val, i64_type~val]),
         (rt_runtime_suspend, void_type~val, [rt_type~gptr]),
+        (rt_runtime_spawn_closure, void_type~val, [
+            rt_type~gptr,
+            // func id of closure
+            i64_type~val,
+            // # of vals in env, mostly for sanity
+            i64_type~val,
+            // ptr to env array
+            val_type~ptr,
+        ]),
 
         (rt_arg_pack_unpack_into, void_type~val, [arg_pack_type~gptr, val_type_ptr~gptr, i64_type~val, rt_type~gptr]),
 

@@ -5,6 +5,7 @@ use caer_ir::cfg;
 use caer_ir::cfg::Function;
 use caer_ir::env::Env;
 use caer_ir::id::{BlockId, LocalId, ScopeId, VarId};
+use caer_types::func::{CallingSpec, ProcSpec};
 use caer_types::id::{FuncId, StringId};
 use caer_types::ty;
 use dreammaker::{ast, objtree};
@@ -16,45 +17,43 @@ pub struct ProcBuilder<'a> {
     pub env: &'a mut Env,
     pub objtree: &'a objtree::ObjectTree,
     pub ast_proc: &'a objtree::ProcValue,
-    pub vars: HashMap<String, LocalId>,
 }
 
 impl<'a> ProcBuilder<'a> {
     pub fn build(
-        id: FuncId,
+        func: Function,
         env: &'a mut Env,
         objtree: &'a objtree::ObjectTree,
         ast_proc: &'a objtree::ProcValue,
     ) -> FuncId {
         let pb = Self {
-            id,
+            id: func.id,
             env,
             objtree,
             ast_proc,
-            vars: HashMap::new(),
         };
 
-        pb.build_proc()
+        pb.build_proc(func)
     }
 
-    fn build_proc(mut self) -> FuncId {
-        let mut proc = Function::new(self.id);
-        proc.new_scope(proc.global_scope);
+    fn build_proc(mut self, mut func: Function) -> FuncId {
+        func.new_scope(func.global_scope);
+
+        let mut proc_spec = ProcSpec::default();
 
         for (i, param) in self.ast_proc.parameters.iter().enumerate() {
             // TODO: need to record name separately for keyword args?
             let name_id = self.env.intern_string(&param.name);
-            let var_id = proc.add_var(proc.global_scope, ty::Complex::Any, name_id);
-            proc.params.push(var_id);
+            let var_id = func.add_var(func.global_scope, ty::Complex::Any, name_id);
+            func.params.push(var_id);
 
-            let spec = self.env.get_proc_mut(proc.id);
-            spec.params.push(name_id);
-            spec.names.push((name_id, i as u32));
+            proc_spec.params.push(name_id);
+            proc_spec.names.push((name_id, i as u32));
         }
-        let spec = self.env.get_proc_mut(proc.id);
-        spec.names.sort_unstable_by_key(|(ref s, _)| *s);
+        proc_spec.names.sort_unstable_by_key(|(ref s, _)| *s);
+        func.calling_spec = Some(CallingSpec::Proc(proc_spec));
 
-        let mut func_builder = FuncBuilder::for_proc(&mut self.env, &self.objtree, proc);
+        let mut func_builder = FuncBuilder::for_proc(&mut self.env, &self.objtree, func);
 
         let body = if let objtree::Code::Present(ref b) = self.ast_proc.code {
             b

@@ -2,7 +2,7 @@
 
 set -ex
 
-RUST_BACKTRACE=1 cargo run
+RUST_BACKTRACE=1 cargo run -- $1
 
 llvm-as-10 -o /dev/null out/unopt.ll
 llc-10 -o out/unopt.s out/unopt.bc

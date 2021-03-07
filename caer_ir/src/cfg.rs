@@ -1,5 +1,5 @@
 use super::id::*;
-use caer_types::id::{FuncId, StringId, TypeId};
+use caer_types::{func::{CallingSpec, FuncInfo}, id::{FuncId, StringId, TypeId}};
 use caer_types::ty;
 use dot;
 use index_vec::IndexVec;
@@ -30,7 +30,7 @@ pub struct Var {
     // TODO: maybe fold into ty?
     pub assoc_dty: Option<TypeId>,
 
-    pub captures: Vec<(FuncId, VarId)>,
+    pub captures: HashMap<FuncId, VarId>,
 }
 
 #[derive(Debug)]
@@ -77,6 +77,8 @@ pub struct Function {
     pub params: Vec<VarId>,
     pub closure: Option<Closure>,
     pub child_closures: IndexVec<ClosureSlotId, FuncId>,
+
+    pub calling_spec: Option<CallingSpec>,
 }
 
 impl<'a> Function {
@@ -101,6 +103,8 @@ impl<'a> Function {
             params: Vec::new(),
             closure: None,
             child_closures: IndexVec::new(),
+
+            calling_spec: None,
         };
 
         // TODO: compile time intern, "."
@@ -158,7 +162,7 @@ impl<'a> Function {
             name,
             ty,
             assoc_dty: None,
-            captures: Vec::new(),
+            captures: HashMap::new(),
         };
 
         self.vars.push(var_info);
@@ -181,7 +185,7 @@ impl<'a> Function {
     }
 
     pub fn mark_var_captured(&mut self, my_var: VarId, closure: FuncId, closure_var: VarId) {
-        self.vars[my_var].captures.push((closure, closure_var));
+        self.vars[my_var].captures.insert(closure, closure_var);
     }
 
     pub fn add_block(&mut self, block: Block) {
@@ -317,6 +321,13 @@ impl<'a> Function {
                 local.movable = true;
                 local.destruct_scope = None;
             }
+        }
+    }
+
+    pub fn get_spec(&self) -> FuncInfo {
+        let calling_spec = self.calling_spec.as_ref().expect("func has no calling spec, but func spec was requested").clone();
+        FuncInfo {
+            calling_spec,
         }
     }
 

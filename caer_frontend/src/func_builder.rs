@@ -52,20 +52,16 @@ impl<'a> FuncBuilder<'a> {
         for block in self.finished_blocks.drain(..) {
             self.func.add_block(block);
         }
-        println!("final {:?}: {:?}", self.func.id, self.closure_slots);
         self.func.analyze();
         let id = self.func.id;
-        self.env.add_func(self.func);
+        self.env.assimilate_func(self.func);
 
-        println!("{:?} has {} closures", id, self.closure_slots.len());
         let mut closure_funcs = IndexVec::new();
         for (scope, block) in self.closure_slots {
             let mut closure_builder = FuncBuilder::for_closure(self.env, self.objtree, id, scope);
-            println!("building closure {:?}", closure_builder.func.id);
             closure_builder.build_block(block, None, None);
             closure_funcs.push(closure_builder.finalize());
         }
-        println!("{} children", closure_funcs.len());
 
         self.env.funcs.get_mut(&id).unwrap().child_closures = closure_funcs;
 

@@ -54,6 +54,11 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         }
     }
 
+    // TODO: ERRH
+    pub fn resolve_func(&self, id: FuncId) -> inkwell::values::FunctionValue<'ctx> {
+        self.sym[id]
+    }
+
     pub fn lookup_global_proc(&self, name: StringId) -> inkwell::values::FunctionValue<'ctx> {
         let global_dty = self.env.type_tree.global_type();
         let proc_id = global_dty.proc_lookup[&name].top_proc;
@@ -112,10 +117,15 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     fn finalize_main(&self, block: inkwell::basic_block::BasicBlock, entry_func: inkwell::values::FunctionValue) {
         self.ctx.builder.position_at_end(block);
 
+        let mut func_specs = IndexVec::with_capacity(self.env.funcs.len());
+        for i in 0..self.env.funcs.len() {
+            func_specs.push(self.env.funcs[&i.into()].get_spec());
+        }
+
         // TODO: move file emit to a better place
         let rt_env = RtEnv {
             type_tree: self.env.type_tree.clone(),
-            proc_specs: self.env.proc_specs.clone(),
+            func_specs: func_specs,
         };
         self.env.string_table.serialize_runtime(File::create("stringtable.bincode").unwrap());
         bincode::serialize_into(File::create("environment.bincode").unwrap(), &rt_env).unwrap();

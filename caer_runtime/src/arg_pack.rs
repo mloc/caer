@@ -1,4 +1,4 @@
-use crate::ffi::FFIArray;
+use crate::ffi::FfiArray;
 use crate::runtime::Runtime;
 use crate::val::Val;
 use caer_types::id::{FuncId, StringId};
@@ -8,8 +8,8 @@ use std::ptr::NonNull;
 #[repr(C)]
 #[derive(Debug)]
 pub struct ArgPack {
-    pub unnamed: FFIArray<Val>,
-    pub named: FFIArray<(StringId, Val)>,
+    pub unnamed: FfiArray<Val>,
+    pub named: FfiArray<(StringId, Val)>,
 
     pub src: Val,
 }
@@ -17,8 +17,8 @@ pub struct ArgPack {
 impl ArgPack {
     pub fn empty() -> Self {
         Self {
-            unnamed: FFIArray::empty(),
-            named: FFIArray::empty(),
+            unnamed: FfiArray::empty(),
+            named: FfiArray::empty(),
             src: Val::Null,
         }
     }
@@ -27,10 +27,10 @@ impl ArgPack {
     // unpacking probably shouldn't be done in libcode, probably shouldn't be copying vals
     // TODO: rework unpacking
     // TODO: support passing in proc_id as primitive idx
-    fn unpack_into(&self, target_ptrs: NonNull<*mut Val>, proc_id: FuncId, rt: &mut Runtime) {
-        let spec = &rt.env.proc_specs[proc_id];
+    fn unpack_into(&self, target_ptrs: NonNull<*mut Val>, func_id: FuncId, rt: &mut Runtime) {
+        let spec = rt.env.func_specs[func_id].calling_spec.get_proc_spec().expect(&format!("{:?} cannot be called as a proc", func_id));
         // compiler should ensure that targets is an array with the same sizes as the spec
-        let targets_arr = unsafe { FFIArray::with_len(target_ptrs, spec.params.len()) };
+        let targets_arr = unsafe { FfiArray::with_len(target_ptrs, spec.params.len()) };
         let targets = targets_arr.as_slice();
 
         for (i, arg) in self.unnamed.as_slice().iter().enumerate() {

@@ -2,19 +2,19 @@ use super::proc_builder::ProcBuilder;
 use caer_ir::env::Env;
 use caer_types::id::{FuncId, StringId};
 use dreammaker::objtree;
-use index_vec::IndexVec;
+use caer_ir::cfg;
 use std::borrow::Cow;
 
 pub struct IrBuilder<'a> {
     pub env: &'a mut Env,
-    procs: &'a IndexVec<FuncId, objtree::ProcValue>,
+    procs: Vec<(cfg::Function, objtree::ProcValue)>,
     pub objtree: &'a objtree::ObjectTree,
 }
 
 impl<'a> IrBuilder<'a> {
     pub fn new(
         env: &'a mut Env,
-        procs: &'a IndexVec<FuncId, objtree::ProcValue>,
+        procs: Vec<(cfg::Function, objtree::ProcValue)>,
         objtree: &'a objtree::ObjectTree,
     ) -> Self {
         Self {
@@ -25,7 +25,7 @@ impl<'a> IrBuilder<'a> {
     }
 
     // TODO: ERRH(fe)
-    pub fn build<'s: 'a>(&'s mut self) {
+    pub fn build(mut self) {
         /*self.env.procs = self
             .procs
             .iter_enumerated()
@@ -33,9 +33,9 @@ impl<'a> IrBuilder<'a> {
             .collect();*/
 
         self.env.funcs = Default::default();
-        for (i, proc) in self.procs.iter_enumerated() {
-            println!("building {:?} @ {:?}", i, proc.location);
-            ProcBuilder::build(i, self.env, self.objtree, proc);
+        for (func, pv) in self.procs {
+            println!("building {:?} @ {:?}", func, pv.location);
+            ProcBuilder::build(func, self.env, self.objtree, &pv);
         }
 
         // wow ewww

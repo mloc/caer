@@ -10,7 +10,7 @@ use caer_ir as ir;
 pub struct TreeBuilder<'a, 'ot> {
     objtree: &'ot objtree::ObjectTree,
     env: &'a mut ir::env::Env,
-    procs: IndexVec<FuncId, objtree::ProcValue>,
+    funcs: Vec<(ir::cfg::Function, objtree::ProcValue)>,
 }
 
 impl<'a, 'ot> TreeBuilder<'a, 'ot> {
@@ -18,11 +18,11 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
         Self {
             objtree,
             env,
-            procs: IndexVec::new(),
+            funcs: Vec::new(),
         }
     }
 
-    pub fn build(&mut self) {
+    pub fn build(mut self) {
         let mut types_topsort = Vec::new();
         self.populate_ty(self.objtree.root(), &mut types_topsort);
         for ty_ref in self.objtree.iter_types() {
@@ -33,7 +33,7 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
             self.populate_procs(*dty_id, *oty);
         }
 
-        let mut cfg_builder = IrBuilder::new(self.env, &self.procs, self.objtree);
+        let cfg_builder = IrBuilder::new(self.env, self.funcs, self.objtree);
         cfg_builder.build();
     }
 
@@ -154,7 +154,7 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
             let name_id = self.env.intern_string(name);
             assert!(!tp.value.is_empty());
 
-            let mut top_proc = None;
+            let mut top_func = None;
             for pv in tp.value.iter() {
                 match &pv.code {
                     objtree::Code::Present(_) => {},
@@ -162,13 +162,13 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
                     objtree::Code::Builtin => continue,
                     objtree::Code::Disabled => panic!("woop woop procs disabled"),
                 }
-                let proc_id = self.env.add_proc(name_id);
-                top_proc = Some(proc_id);
-                assert_eq!(proc_id.index(), self.procs.len());
-                self.procs.push(pv.clone());
+                let func = self.env.new_func();
+                top_func = Some(func.id);
+                assert_eq!(func.id, self.funcs.len());
+                self.funcs.push((func, pv.clone()));
             }
 
-            if let Some(top) = top_proc {
+            if let Some(top) = top_func {
                 match proc_lookup.get_mut(&name_id) {
                     Some(pi) => {
                         if tp.declaration.is_some() {

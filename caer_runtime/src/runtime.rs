@@ -2,11 +2,12 @@ use crate::alloc::Alloc;
 use crate::datum::Datum;
 use crate::environment::Environment;
 use crate::exec;
+use crate::gc_stackmap::GcStackmap;
 use crate::list::List;
 use crate::string_table::StringTable;
+use crate::val::Val;
 use crate::vtable::{self, ProcPtr};
-use crate::gc_stackmap::GcStackmap;
-use caer_types::id::{StringId, TypeId};
+use caer_types::{id::{FuncId, StringId, TypeId}, rt_env::RtEnv};
 use caer_types::type_tree::Specialization;
 
 use std::fs::File;
@@ -17,7 +18,7 @@ use std::ptr::NonNull;
 pub struct Runtime {
     pub(crate) string_table: StringTable,
     pub(crate) vtable: vtable::Vtable,
-    pub(crate) env: Environment,
+    pub(crate) env: RtEnv,
     pub(crate) gc_stackmap: GcStackmap,
     pub(crate) alloc: Alloc,
 }
@@ -47,9 +48,7 @@ pub unsafe extern "C" fn rt_runtime_init(
     entry_proc: ProcPtr,
 ) {
     let init_st = StringTable::deserialize(File::open("stringtable.bincode").unwrap());
-    let init_env =
-        bincode::deserialize_from(File::open("environment.bincode").unwrap()).unwrap();
-    let env = Environment::from_rt_env(init_env);
+    let env: RtEnv = bincode::deserialize_from(File::open("environment.bincode").unwrap()).unwrap();
     let vtable = vtable::Vtable::from_static(vtable_ptr, env.type_tree.types.len());
 
     let stackmaps_raw = {
@@ -83,12 +82,13 @@ pub unsafe extern "C" fn rt_runtime_init(
 impl MetaRuntime<'_> {
     fn start(&mut self, entry_proc: ProcPtr) {
         println!("runtime starting");
-        self.executor.queue_proc(entry_proc, crate::arg_pack::ArgPack::empty());
+        self.executor
+            .queue_proc(entry_proc, crate::arg_pack::ArgPack::empty());
         loop {
             println!("running next proc");
             if !self.executor.run_next(self.dmrt) {
                 println!("no procs left in queue, finishing");
-                break
+                break;
             }
         }
         println!("runtime finished");
@@ -124,7 +124,7 @@ impl Runtime {
     }
 
     #[no_mangle]
-    pub extern fn rt_runtime_alloc_datum(&mut self, ty: u32) -> NonNull<Datum> {
+    pub extern "C" fn rt_runtime_alloc_datum(&mut self, ty: u32) -> NonNull<Datum> {
         let ty = TypeId::new(ty as usize);
         let ventry = &self.vtable[ty];
         // TODO: put spec in ventry?
@@ -152,5 +152,15 @@ impl Runtime {
                 ptr.cast()
             }
         }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn rt_runtime_spawn_closure(
+        &mut self,
+        closure_func: FuncId,
+        num_args: u64,
+        args: NonNull<Val>,
+    ) {
+        let spec = &self.env.func_specs[closure_func];
     }
 }

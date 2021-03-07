@@ -3,8 +3,8 @@ use inkwell::values::*;
 use inkwell::types::BasicType;
 use inkwell::basic_block::BasicBlock;
 use caer_types::layout;
-use caer_types::id::StringId;
-use crate::value::{StackValue, SSAValue, BVEWrapper};
+use caer_types::id::{FuncId, StringId};
+use crate::value::{StackValue, LocalValue, BveWrapper};
 use crate::prog::{ProgEmit, Intrinsic};
 use index_vec::IndexVec;
 use caer_ir::cfg::*;
@@ -90,9 +90,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         let block = self.ctx.llvm_ctx.append_basic_block(self.func, "entry");
         self.ctx.builder.position_at_end(block);
 
-        for (i, local) in self.proc.locals.iter().enumerate() {
-            let local_alloca = self.build_val_alloca(&local.ty);
-            local_alloca.set_name(&format!("local_{}", i));
+        for _ in 0..self.proc.locals.len() {
             self.locals.push(None);
         }
 
@@ -105,17 +103,17 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
 
             let alloca = self.build_val_alloca(&var.ty);
             alloca.set_name(name);
-            self.var_allocs.push(StackValue::new(Some(alloca), var.ty.clone()));
+            self.var_allocs.push(StackValue::new(alloca, var.ty.clone()));
         }
 
         // maybe just use zeroinitializer?
         // TODO: Bring Back SSAValue
         let ret_ty = &self.proc.vars[0].ty;
         if ret_ty.is_any() {
-            unsafe { self.gep_insertvalue(self.var_allocs[0].val.unwrap(), &[0, 0], self.ctx.llvm_ctx.i32_type().const_int(layout::VAL_DISCRIM_NULL as _, false).into()) };
+            unsafe { self.gep_insertvalue(self.var_allocs[0].val, &[0, 0], self.ctx.llvm_ctx.i32_type().const_int(layout::VAL_DISCRIM_NULL as _, false).into()) };
         } else {
             let ret_zero = self.get_zero_value(&self.proc.vars[0].ty);
-            self.ctx.builder.build_store(self.var_allocs[0].val.unwrap(), self.build_literal(&ret_zero));
+            self.ctx.builder.build_store(self.var_allocs[0].val, self.build_literal(&ret_zero));
         }
 
         let param_locals_arr = self.ctx.builder.build_array_alloca(self.ctx.rt.ty.val_type_ptr, self.ctx.llvm_ctx.i64_type().const_int(self.proc.params.len() as u64, false), "param_locals");
@@ -124,7 +122,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
             let alloc = &self.var_allocs[*var_id];
             // TODO: handle keyword args
             unsafe {
-                self.gep_insertvalue(param_locals_arr, &[i as u64], alloc.val.unwrap().into());
+                self.gep_insertvalue(param_locals_arr, &[i as u64], alloc.val.into());
             }
         }
 
@@ -245,6 +243,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         self.build_call(lts_intrinsic, &[self.ctx.llvm_ctx.i64_type().const_int(self.locals[local_id].ty.get_store_size(), false).into(), stackptr.into()]);
         */
 
+        val.set_name(&format!("local_{}", local_id.index()));
         self.locals[local_id] = Some(val);
     }
 
@@ -347,12 +346,12 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         self.prog_emit.copy_val(src, dest);
     }
 
-    fn build_call_internal<F>(&self, func: F, args: &[BVEWrapper<'ctx>]) -> Option<BasicValueEnum<'ctx>> where F: Into<either::Either<FunctionValue<'ctx>, PointerValue<'ctx>>> {
+    fn build_call_internal<F>(&self, func: F, args: &[BveWrapper<'ctx>]) -> Option<BasicValueEnum<'ctx>> where F: Into<either::Either<FunctionValue<'ctx>, PointerValue<'ctx>>> {
         let args_ll: Vec<_> = args.iter().map(|arg| arg.bve).collect();
         self.ctx.builder.build_call(func, &args_ll, "").try_as_basic_value().left()
     }
 
-    fn build_call<F>(&self, func: F, args: &[BVEWrapper<'ctx>]) -> Option<BasicValueEnum<'ctx>> where F: Into<either::Either<FunctionValue<'ctx>, PointerValue<'ctx>>> {
+    fn build_call<F>(&self, func: F, args: &[BveWrapper<'ctx>]) -> Option<BasicValueEnum<'ctx>> where F: Into<either::Either<FunctionValue<'ctx>, PointerValue<'ctx>>> {
         let fptr = match func.into() {
             either::Either::Left(func_val) => func_val.as_global_value().as_pointer_value(),
             either::Either::Right(pointer_val) => pointer_val,
@@ -362,7 +361,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         self.build_call_internal(fptr, &args)
     }
 
-    fn build_call_statepoint(&self, block: &Block, live: &Lifetimes, func: PointerValue<'ctx>, args: &[BVEWrapper<'ctx>]) -> Option<BasicValueEnum<'ctx>> {
+    fn build_call_statepoint(&self, block: &Block, live: &Lifetimes, func: PointerValue<'ctx>, args: &[BveWrapper<'ctx>]) -> Option<BasicValueEnum<'ctx>> {
         // TODO: NEEDS TO USE OP BUNDLES FOR LLVM 12+ (11?)
 
         let sp_intrinsic = unsafe {
@@ -377,7 +376,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
             }
         }
         for live_var in live.var.iter().copied() {
-            stack_ptrs.push(self.var_allocs[live_var].val.unwrap().into());
+            stack_ptrs.push(self.var_allocs[live_var].val.into());
         }
 
         let mut sp_args = Vec::with_capacity(7 + args.len() + stack_ptrs.len()*2);
@@ -417,12 +416,12 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         }
     }
 
-    fn build_call_intrinsic(&mut self, intrinsic: Intrinsic, args: &[BVEWrapper<'ctx>]) -> Option<BasicValueEnum<'ctx>> {
+    fn build_call_intrinsic(&mut self, intrinsic: Intrinsic, args: &[BveWrapper<'ctx>]) -> Option<BasicValueEnum<'ctx>> {
         let func = self.prog_emit.get_intrinsic(intrinsic);
         self.build_call_internal(func, args)
     }
 
-    fn build_call_catching<F>(&self, block: &Block, func: F, args: &[BVEWrapper<'ctx>]) -> Option<BasicValueEnum<'ctx>>  where F: Into<either::Either<FunctionValue<'ctx>, PointerValue<'ctx>>> {
+    fn build_call_catching<F>(&self, block: &Block, func: F, args: &[BveWrapper<'ctx>]) -> Option<BasicValueEnum<'ctx>>  where F: Into<either::Either<FunctionValue<'ctx>, PointerValue<'ctx>>> {
         if let Some(pad) = self.proc.scopes[block.scope].landingpad {
             let args_ll: Vec<_> = args.iter().map(|arg| arg.bve).collect();
             let continuation = self.ctx.llvm_ctx.append_basic_block(self.func, "");
@@ -454,11 +453,11 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                     }
                     // var points to reified val struct, so memcpy
                     let copied_alloca = self.build_gc_alloca(self.ctx.rt.ty.val_type, "");
-                    self.copy_val(self.var_allocs[*var].val.unwrap(), copied_alloca);
+                    self.copy_val(self.var_allocs[*var].val, copied_alloca);
                     copied_alloca.into()
                 } else {
                     assert!(!self.proc.locals[*local].ty.is_any());
-                    self.ctx.builder.build_load(self.var_allocs[*var].val.unwrap(), "")
+                    self.ctx.builder.build_load(self.var_allocs[*var].val, "")
                 };
                 self.set_local(*local, val);
             },
@@ -468,14 +467,14 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                 let local_ty = &self.proc.locals[*local].ty;
 
                 if var_ty.is_any() {
-                    self.conv_local_any_into(*local, self.var_allocs[*var].val.unwrap());
+                    self.conv_local_any_into(*local, self.var_allocs[*var].val);
                 } else {
                     // trust that types are compatible
                     // tyinfer wouldn't lie to us
                     assert!(local_ty == var_ty);
 
                     let val = self.get_local(*local);
-                    self.ctx.builder.build_store(self.var_allocs[*var].val.unwrap(), val);
+                    self.ctx.builder.build_store(self.var_allocs[*var].val, val);
                 };
             },
 
@@ -618,7 +617,7 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                 if let Some(except_var) = maybe_except_var {
                     let exception_container = self.ctx.builder.build_extract_value(landingpad.as_basic_value().into_struct_value(), 0, "").unwrap();
                     assert!(self.proc.vars[*except_var].ty.is_any());
-                    self.build_call(self.ctx.rt.rt_exception_get_val, &[exception_container.into(), self.var_allocs[*except_var].val.unwrap().into()]);
+                    self.build_call(self.ctx.rt.rt_exception_get_val, &[exception_container.into(), self.var_allocs[*except_var].val.into()]);
                 }
             },
 
@@ -627,9 +626,25 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                 self.build_call(self.ctx.rt.rt_runtime_suspend.as_global_value().as_pointer_value(), &[self.prog_emit.rt_global.as_pointer_value().into()]);
             },
 
-            Op::Spawn(func, delay) => {
+            Op::Spawn(closure_slot, delay) => {
                 println!("HIT SPAWN");
-                //unimplemented!()
+                let func_id = self.proc.child_closures[*closure_slot];
+                let func_val = self.prog_emit.resolve_func(func_id);
+                let cv = self.gather_captured_vars(func_id);
+
+                // For now, all closure vars are soft.
+                // TODO: support types on closure boundary
+                //et mut vals = Vec::new();
+
+                let cap_array = self.ctx.builder.build_array_alloca(self.ctx.rt.ty.val_type, self.ctx.llvm_ctx.i64_type().const_int(cv.len() as u64, false), "cap_array");
+
+                for(i, (my_var, closure_var)) in cv.iter().copied().enumerate() {
+                    let var_val = self.ctx.builder.build_load(self.var_allocs[my_var].val, "");
+                    let ptr = unsafe { self.gep(cap_array, &[i as u64]) };
+                    self.conv_any_into(var_val, &self.var_allocs[my_var].ty, ptr);
+                }
+
+                unimplemented!()
             }
 
             //_ => unimplemented!("{:?}", op),
@@ -645,9 +660,9 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
                 let ret_out = self.func.get_params()[2].into_pointer_value();
                 let ret_ty = &self.proc.vars[0].ty;
                 if ret_ty.is_any() {
-                    self.copy_val(self.var_allocs[0].val.unwrap(), ret_out);
+                    self.copy_val(self.var_allocs[0].val, ret_out);
                 } else {
-                    let ret = self.ctx.builder.build_load(self.var_allocs[0].val.unwrap(), "");
+                    let ret = self.ctx.builder.build_load(self.var_allocs[0].val, "");
                     self.conv_any_into(ret, ret_ty, ret_out);
                 }
                 self.ctx.builder.build_return(None);
@@ -808,7 +823,6 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
 
     fn build_argpack(&self, src: Option<LocalId>, args: &[LocalId]) -> PointerValue<'ctx> {
         let n_val = self.ctx.llvm_ctx.i64_type().const_int(args.len() as u64, false);
-        let array_type = self.ctx.rt.ty.val_type.array_type(args.len() as u32);
         let argpack_unnamed = self.ctx.builder.build_array_alloca(self.ctx.rt.ty.val_type, self.ctx.llvm_ctx.i64_type().const_int(args.len() as u64, false), "unnamed_args");
         for (i, arg) in args.iter().enumerate() {
             let ptr = unsafe { self.gep(argpack_unnamed, &[i as u64]) };
@@ -864,6 +878,19 @@ impl<'a, 'p, 'ctx> ProcEmit<'a, 'p, 'ctx> {
         let field = self.build_call_catching(block, lookup_fn, &[datum_ptr.into()]).unwrap();
         field.set_name(&format!("vtable_field_{}", offset));
         field
+    }
+
+    fn gather_captured_vars(&self, closure: FuncId) -> Vec<(VarId, VarId)> {
+        let mut vars = Vec::new();
+
+        for var in self.proc.vars.iter() {
+            if let Some(closure_var) = var.captures.get(&closure) {
+                vars.push((var.id, *closure_var));
+            }
+        }
+
+        vars.sort_unstable_by_key(|(_, id)| *id);
+        vars
     }
 
     fn finalize_block(&self, block: &Block) {
