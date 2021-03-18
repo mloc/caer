@@ -8,7 +8,7 @@ use caer_types::layout;
 use caer_types::type_tree::{DType, Specialization};
 use std::ptr::NonNull;
 
-pub fn run(rt: &mut crate::runtime::Runtime) {
+pub fn scan_stack(rt: &mut crate::runtime::Runtime) -> Vec<*mut u32> {
     use unwind::{Cursor, RegNum};
 
     let mut ptrs = Vec::new();
@@ -53,11 +53,16 @@ pub fn run(rt: &mut crate::runtime::Runtime) {
         Ok(())
     })
     .unwrap();
+    ptrs
+}
+
+pub fn run(rt: &mut crate::runtime::Runtime) {
+    let ptrs = scan_stack(rt);
 
     let mut gc = Gc { runtime: rt };
 
     for ptr in ptrs {
-        gc.scan_root(ptr);
+        gc.mark_root(ptr);
     }
     gc.sweep();
 }
@@ -67,11 +72,8 @@ struct Gc<'a> {
 }
 
 impl<'a> Gc<'a> {
-    fn scan_root(&mut self, root: *mut u32) {
+    fn mark_root(&mut self, root: *mut u32) {
         let disc = unsafe { *root };
-
-        //println!("ADDR: {:?}", root);
-        //println!("DISC: {:x}", disc);
 
         println!("handling root at {:?}", root);
         println!("disc is {:x}", disc);
@@ -79,26 +81,26 @@ impl<'a> Gc<'a> {
         if disc >= layout::VAL_DISCRIM_NULL {
             // ptr points to a stack value
             let val = unsafe { (root as *mut val::Val).as_ref().unwrap() };
-            self.scan_val(val);
+            self.mark_val(val);
         } else {
             // ptr points to a heap gdatum
-            self.scan_gdatum(NonNull::new(root as *mut Datum).unwrap());
+            self.mark_gdatum(NonNull::new(root as *mut Datum).unwrap());
         }
     }
 
-    fn scan_val(&mut self, val: &Val) {
+    fn mark_val(&mut self, val: &Val) {
         match val {
             // TODO: string GC
             Val::String(_) => {}
             Val::Ref(Some(datum_ptr)) => {
-                self.scan_gdatum(*datum_ptr);
+                self.mark_gdatum(*datum_ptr);
             }
             _ => {}
         }
     }
 
     // TODO: the name "datum" is overloaded, as is "type". split it up.
-    fn scan_gdatum(&mut self, mut datum_ptr: NonNull<Datum>) {
+    fn mark_gdatum(&mut self, mut datum_ptr: NonNull<Datum>) {
         assert!(
             self.runtime.alloc.contains(datum_ptr.cast()),
             "pointer {:?} is not tracked by runtime",
@@ -130,17 +132,17 @@ impl<'a> Gc<'a> {
 
         match dty.specialization {
             Specialization::Datum => {
-                self.scan_datum(datum_ptr, dty_id);
+                self.mark_datum(datum_ptr, dty_id);
             }
             Specialization::List => {
                 let mut list_ptr = datum_ptr.cast();
                 let list_ref = unsafe { list_ptr.as_mut() };
-                self.scan_list(list_ref);
+                self.mark_list(list_ref);
             }
         }
     }
 
-    fn scan_datum(&mut self, mut datum_ptr: NonNull<Datum>, dty_id: TypeId) {
+    fn mark_datum(&mut self, mut datum_ptr: NonNull<Datum>, dty_id: TypeId) {
         println!(
             "found datum at {:?} with dty {:?}",
             datum_ptr.as_ptr(),
@@ -152,14 +154,14 @@ impl<'a> Gc<'a> {
         };
         println!("datum has {:?} vars", vars.len());
         for val in vars {
-            self.scan_val(val);
+            self.mark_val(val);
         }
     }
 
-    fn scan_list(&mut self, list: &mut List) {
+    fn mark_list(&mut self, list: &mut List) {
         println!("found list at {:?}", list as *mut List);
         for val in list.gc_iter() {
-            self.scan_val(val);
+            self.mark_val(val);
         }
     }
 

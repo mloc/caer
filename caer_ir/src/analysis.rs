@@ -190,6 +190,11 @@ impl<'a> ProcAnalysis<'a> {
             }
 
             if var_info.stores.len() == 1 {
+                println!("{:?} {:?}", var_info.id, self.proc.vars[var_info.id].captures);
+                if !self.proc.vars[var_info.id].captures.is_empty() {
+                    // TODO: clean this way up
+                    continue
+                }
                 let decl_scope = if let Some(opidx) = var_info.decl_op {
                     self.proc.blocks[opidx.block].scope
                 } else {

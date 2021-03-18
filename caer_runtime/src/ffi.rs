@@ -1,4 +1,5 @@
 use std::convert::TryInto;
+use std::convert::TryFrom;
 use std::slice::from_raw_parts;
 use std::ptr::NonNull;
 use num_traits::Zero;
@@ -10,16 +11,14 @@ pub struct FfiArray<T, I = u64> {
     data: NonNull<T>,
 }
 
-impl<T, I> FfiArray<T, I> where I: Zero {
+impl<T, I> FfiArray<T, I> where I: Copy + Zero + Eq + TryFrom<usize> {
     pub fn empty() -> Self {
         Self {
             len: I::zero(),
             data: NonNull::dangling(),
         }
     }
-}
 
-impl<T, I> FfiArray<T, I> {
     /// # Safety
     /// lol
     pub unsafe fn with_len(data: NonNull<T>, len: I) -> Self {
@@ -27,6 +26,24 @@ impl<T, I> FfiArray<T, I> {
             len,
             data,
         }
+    }
+
+    // TODO: fix lifetimes, make into From or something
+    /// # Safety
+    /// lol
+    pub unsafe fn from_vec(vec: &Vec<T>) -> Self {
+        Self {
+            len: vec.len().try_into().unwrap_or_else(|_| panic!("oh no")),
+            data: NonNull::new(vec.as_ptr() as *mut _).unwrap(),
+        }
+    }
+
+    pub fn len(&self) -> I {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == I::zero()
     }
 }
 

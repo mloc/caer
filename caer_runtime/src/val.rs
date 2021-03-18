@@ -1,4 +1,4 @@
-use crate::arg_pack::ArgPack;
+use crate::arg_pack::ProcPack;
 use crate::datum::Datum;
 use crate::list::List;
 use crate::runtime::Runtime;
@@ -108,7 +108,7 @@ pub extern "C" fn rt_val_drop(val: &Val) {
 pub extern "C" fn rt_val_call_proc(
     val: &Val,
     proc_name: StringId,
-    args: &ArgPack,
+    args: &ProcPack,
     rt: &mut Runtime,
     out: &mut Val,
 ) {
@@ -152,7 +152,7 @@ impl Val {
         }
     }
 
-    pub fn call_proc(self, proc_name: StringId, args: &ArgPack, rt: &mut Runtime, out: &mut Val) {
+    pub fn call_proc(self, proc_name: StringId, args: &ProcPack, rt: &mut Runtime, out: &mut Val) {
         match self {
             Val::Ref(Some(mut ptr)) => {
                 let datum_ref = unsafe { ptr.as_mut() };

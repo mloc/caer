@@ -68,11 +68,13 @@ pub struct RtFuncTyBundle<'ctx> {
     pub val_type_ptr: inkwell::types::PointerType<'ctx>,
     //val_type: inkwell::types::IntType<'ctx>,
     pub opaque_type: inkwell::types::StructType<'ctx>,
+    pub opaque_type_ptr: inkwell::types::PointerType<'ctx>,
 
     pub arg_pack_type: inkwell::types::StructType<'ctx>,
     pub arg_pack_tuple_type: inkwell::types::StructType<'ctx>,
 
     pub proc_type: inkwell::types::FunctionType<'ctx>,
+    pub closure_type: inkwell::types::FunctionType<'ctx>,
 
     pub datum_common_type: inkwell::types::StructType<'ctx>,
     pub datum_common_type_ptr: inkwell::types::PointerType<'ctx>,
@@ -89,6 +91,8 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
         let val_type_ptr = val_type.ptr_type(GC_ADDRESS_SPACE);
 
         let opaque_type = ctx.opaque_struct_type("opaque");
+        let opaque_type_ptr = opaque_type.ptr_type(inkwell::AddressSpace::Generic);
+
         let rt_type = ctx.i8_type().array_type(size_of::<caer_runtime::runtime::Runtime>() as u32);
 
         let arg_pack_tuple_type = ctx.struct_type(&[ctx.i64_type().into(), val_type.into()], false);
@@ -106,6 +110,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
         );
 
         let proc_type = ctx.void_type().fn_type(&[arg_pack_type.ptr_type(inkwell::AddressSpace::Generic).into(), rt_type.ptr_type(inkwell::AddressSpace::Generic).into(), val_type_ptr.into()], false);
+        let closure_type = ctx.void_type().fn_type(&[val_type_ptr.into(), rt_type.ptr_type(inkwell::AddressSpace::Generic).into(), val_type_ptr.into()], false);
 
         let datum_common_type = ctx.struct_type(&[
             // ref
@@ -133,9 +138,11 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             val_type,
             val_type_ptr,
             opaque_type,
+            opaque_type_ptr,
             arg_pack_type,
             arg_pack_tuple_type,
             proc_type,
+            closure_type,
             datum_common_type,
             datum_common_type_ptr,
             rt_type,
@@ -189,6 +196,10 @@ macro_rules! rt_funcs {
         rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
     );
 
+    ( @genty $ctx:ident $spec:ident $tyb:ident opaque_type_ptr $ty:ident) => (
+        rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
+    );
+
     ( @genty $ctx:ident $spec:ident $tyb:ident rt_type $ty:ident) => (
         rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
     );
@@ -237,7 +248,7 @@ rt_funcs! {
         (rt_val_cast_string_val, i64_type~val, [val_type~ptr, rt_type~gptr]),
         (rt_val_call_proc, void_type~val, [val_type~ptr, i64_type~val, arg_pack_type~ptr, rt_type~gptr, val_type~ptr]),
 
-        (rt_runtime_init, void_type~val, [rt_type~gptr, i8_type~gptr, i8_type~gptr, vt_entry_type~gptr, proc_type~gptr]),
+        (rt_runtime_init, void_type~val, [rt_type~gptr, i8_type~gptr, i8_type~gptr, vt_entry_type~gptr, opaque_type_ptr~gptr, i64_type~val]),
         (rt_runtime_alloc_datum, datum_common_type~ptr, [rt_type~gptr, i32_type~val]),
         (rt_runtime_concat_strings, i64_type~val, [rt_type~gptr, i64_type~val, i64_type~val]),
         (rt_runtime_suspend, void_type~val, [rt_type~gptr]),

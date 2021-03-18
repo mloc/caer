@@ -1,6 +1,6 @@
 // TODO: maybe don't throw exceptions in methods, use result+unwrapper?
 
-use crate::arg_pack::ArgPack;
+use crate::arg_pack::ProcPack;
 use crate::datum::Datum;
 use std::collections::hash_map;
 use std::slice;
@@ -32,7 +32,7 @@ impl AssocValue {
         self.key_count += 1;
     }
 
-    /// returns true if key count is reduced to zero
+    /// Returns true if key count is reduced to zero
     fn dec_count(&mut self) -> bool {
         assert_ne!(self.key_count, 0);
         if self.key_count > 0 {
@@ -217,7 +217,7 @@ impl List {
         unimplemented!("list var set")
     }
 
-    extern "C" fn proc_add(args: *const ArgPack, mut rt: NonNull<Runtime>, out: *mut Val) {
+    extern "C" fn proc_add(args: *const ProcPack, mut rt: NonNull<Runtime>, out: *mut Val) {
         let args = unsafe { &*args };
         let mut list_ptr = unsafe { ensure_list(args.src, rt.as_mut()) };
         let list = unsafe { list_ptr.as_mut() };
@@ -257,13 +257,13 @@ impl List {
                         }
                     };
                 }
-                o @ _ => list.push(*o),
+                o => list.push(*o),
             }
         }
         unsafe { *out = Val::Null };
     }
 
-    extern "C" fn proc_copy(args: *const ArgPack, mut rt: NonNull<Runtime>, out: *mut Val) {
+    extern "C" fn proc_copy(args: *const ProcPack, mut rt: NonNull<Runtime>, out: *mut Val) {
         let rt = unsafe { rt.as_mut() };
 
         let args = unsafe { &*args };
@@ -306,7 +306,7 @@ impl List {
         unsafe { *out = Val::Ref(NonNull::new(newlist_ptr as _)) };
     }
 
-    extern "C" fn proc_cut(args: *const ArgPack, mut rt: NonNull<Runtime>, out: *mut Val) {
+    extern "C" fn proc_cut(args: *const ProcPack, mut rt: NonNull<Runtime>, out: *mut Val) {
         let args = unsafe { &*args };
         let mut list_ptr = unsafe { ensure_list(args.src, rt.as_mut()) };
         let list = unsafe { list_ptr.as_mut() };
@@ -336,7 +336,7 @@ impl List {
         unsafe { *out = Val::Null };
     }
 
-    pub fn gc_iter<'a>(&'a self) -> GcIterator<'a> {
+    pub fn gc_iter(&self) -> GcIterator {
         GcIterator {
             state: GcIterState::Array(self.vec.iter()),
             list: self,
@@ -360,7 +360,7 @@ pub extern "C" fn rt_list_proc_lookup(proc: StringId, rt: &mut Runtime) -> ProcP
         "Add" => List::proc_add,
         "Copy" => List::proc_copy,
         "Cut" => List::proc_cut,
-        s @ _ => panic!("RTE bad proc for list: {:?}", s),
+        s => panic!("RTE bad proc for list: {:?}", s),
     }
 }
 

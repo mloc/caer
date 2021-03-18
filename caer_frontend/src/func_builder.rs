@@ -122,13 +122,17 @@ impl<'a> FuncBuilder<'a> {
             println!("!! {:?}", func_id);
             let func = self.env.funcs.get_mut(&func_id).unwrap();
             let new_top_var = func.add_captured_var(name, top_var);
-            let parent_func = self.env.funcs.get_mut(&func_id).unwrap();
+            let parent_func = self.env.funcs.get_mut(&cur_parent).unwrap();
             parent_func.mark_var_captured(top_var, func_id, new_top_var);
             top_var = new_top_var;
+            cur_parent = func_id;
         }
 
-        // top_var is now a var in this func's parent.
-        Some(self.func.add_captured_var(name, top_var))
+        let final_var = self.func.add_captured_var(name, top_var);
+        let parent_func = self.env.funcs.get_mut(&cur_parent).unwrap();
+        parent_func.mark_var_captured(top_var, self.func.id, final_var);
+
+        Some(final_var)
     }
 
     pub(crate) fn new_block(&mut self, scope: ScopeId) -> cfg::Block {

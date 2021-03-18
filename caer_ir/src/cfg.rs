@@ -1,7 +1,6 @@
 use super::id::*;
-use caer_types::{func::{CallingSpec, FuncInfo}, id::{FuncId, StringId, TypeId}};
+use caer_types::{func::{CallingSpec, ClosureSpec, FuncInfo}, id::{FuncId, StringId, TypeId}};
 use caer_types::ty;
-use dot;
 use index_vec::IndexVec;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
@@ -325,7 +324,19 @@ impl<'a> Function {
     }
 
     pub fn get_spec(&self) -> FuncInfo {
-        let calling_spec = self.calling_spec.as_ref().expect("func has no calling spec, but func spec was requested").clone();
+        let calling_spec;
+        // TODO: fold closure var into calling spec?
+        // -> calling spec cannot ref var ids rn though. func var ids could become part of the rt
+        // info, though
+        if let Some(closure) = &self.closure {
+            calling_spec = CallingSpec::Closure(ClosureSpec {
+                closure_parent: closure.over,
+                env_size: closure.captured.len() as _,
+            })
+        } else {
+            calling_spec = self.calling_spec.as_ref().expect("func has no calling spec, but func spec was requested").clone();
+        }
+
         FuncInfo {
             calling_spec,
         }

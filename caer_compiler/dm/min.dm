@@ -1,2 +1,5 @@
 /proc/entry()
-	world.log << "hello, world"
+	hello("world")
+
+/proc/hello(var/target)
+	world.log << "hello, [target]"

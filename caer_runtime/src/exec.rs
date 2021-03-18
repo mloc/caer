@@ -1,4 +1,4 @@
-use crate::arg_pack::ArgPack;
+use crate::{arg_pack::{CallBundle, ClosureArgs, ProcArgs}, vtable::ClosurePtr};
 use crate::runtime::Runtime;
 use crate::vtable::ProcPtr;
 use std::collections::VecDeque;
@@ -28,13 +28,13 @@ impl Executor {
         }
     }
 
-    pub fn queue_proc(&mut self, proc: ProcPtr, args: ArgPack) {
+    pub fn queue_func(&mut self, bundle: CallBundle) {
         let fibre_id = self.next_fibre_id;
         self.next_fibre_id.0 += 1;
 
         let fibre = FibreRecord {
             id: fibre_id,
-            state: FibreState::Created(proc, args),
+            state: FibreState::Created(bundle),
         };
 
         self.fibres.insert(fibre_id, fibre);
@@ -51,8 +51,8 @@ impl Executor {
 
         let coro = match &next_fibre.state {
             FibreState::Running(coro) => coro,
-            FibreState::Created(proc, args) => {
-                let coro = self.coro_ctx.spawn_coro(rt, *proc, args as *const ArgPack);
+            FibreState::Created(bundle) => {
+                let coro = self.coro_ctx.spawn_coro(rt, bundle);
                 next_fibre.state = FibreState::Running(coro);
 
                 // TODO: is there a better way to do this?
@@ -87,7 +87,7 @@ pub struct FibreRecord {
 
 #[derive(Debug)]
 pub enum FibreState {
-    Created(ProcPtr, ArgPack),
+    Created(CallBundle),
     Running(aco::Coro),
     Finished,
 }
@@ -107,18 +107,38 @@ impl CoroCtx {
         }
     }
 
-    fn spawn_coro(&self, rt: &mut Runtime, proc: ProcPtr, args: *const ArgPack) -> aco::Coro {
-        fn proc_entry(cargs: (ProcPtr, *const ArgPack, NonNull<Runtime>)) {
+    fn spawn_coro(&self, rt: &mut Runtime, bundle: &CallBundle) -> aco::Coro {
+        fn proc_entry(cargs: (ProcPtr, ProcArgs, NonNull<Runtime>)) {
             let mut ret = Val::Null;
-            cargs.0(cargs.1, cargs.2, (&mut ret) as *mut _);
+            let pack = (&cargs.1.as_pack()) as *const _;
+            cargs.0(pack, cargs.2, (&mut ret) as *mut _);
+        }
+        fn closure_entry(cargs: (ClosurePtr, ClosureArgs, NonNull<Runtime>)) {
+            let mut ret = Val::Null;
+            let env = cargs.1.environment.as_ptr();
+            cargs.0(env, cargs.2, (&mut ret) as *mut _);
         }
 
-        aco::Coro::new(
-            &self.ctx,
-            &self.stack,
-            proc_entry,
-            (proc, args, NonNull::new(rt as *mut Runtime).unwrap()),
-        )
+        match bundle {
+            CallBundle::Proc((func, args)) => {
+                let ptr = unsafe { rt.vtable.lookup_func(*func).unwrap().as_proc() };
+                aco::Coro::new(
+                    &self.ctx,
+                    &self.stack,
+                    proc_entry,
+                    (ptr, args.clone(), NonNull::new(rt as *mut Runtime).unwrap()),
+                )
+            },
+            CallBundle::Closure((func, args)) => {
+                let ptr = unsafe { rt.vtable.lookup_func(*func).unwrap().as_closure() };
+                aco::Coro::new(
+                    &self.ctx,
+                    &self.stack,
+                    closure_entry,
+                    (ptr, args.clone(), NonNull::new(rt as *mut Runtime).unwrap()),
+                )
+            },
+        }
     }
 
     unsafe fn resume_coro(&self, coro: &aco::Coro) -> bool {

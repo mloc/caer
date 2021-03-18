@@ -1,4 +1,4 @@
-use super::proc::ProcEmit;
+use super::func::FuncEmit;
 use super::context::Context;
 use caer_ir::cfg::*;
 use caer_ir::env::Env;
@@ -17,9 +17,12 @@ use caer_ir::walker::CFGWalker;
 pub struct ProgEmit<'a, 'ctx> {
     pub ctx: &'a Context<'a, 'ctx>,
     pub env: &'a Env,
-    pub procs: Vec<(&'a Function, inkwell::values::FunctionValue<'ctx>)>,
+    pub funcs: Vec<(&'a Function, inkwell::values::FunctionValue<'ctx>)>,
     pub rt_global: inkwell::values::GlobalValue<'ctx>,
+    // vtable global
     pub vt_global: inkwell::values::GlobalValue<'ctx>,
+    // Func table global
+    pub ft_global: inkwell::values::GlobalValue<'ctx>,
     pub vt_lookup: Vec<inkwell::values::FunctionValue<'ctx>>,
     pub datum_types: IndexVec<TypeId, inkwell::types::StructType<'ctx>>,
     pub sym: IndexVec<FuncId, inkwell::values::FunctionValue<'ctx>>,
@@ -34,23 +37,27 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         let vt_global_ty = ctx.rt.ty.vt_entry_type.array_type(env.type_tree.types.len() as u32);
         let vt_global = ctx.module.add_global(vt_global_ty, Some(inkwell::AddressSpace::Generic), "vtable");
         vt_global.set_constant(true);
+        let ft_global_ty = ctx.rt.ty.opaque_type_ptr.array_type(env.funcs.len() as u32);
+        let ft_global = ctx.module.add_global(ft_global_ty, Some(inkwell::AddressSpace::Generic), "ftable");
+        ft_global.set_constant(true);
 
         Self {
             ctx,
             env,
-            procs: Vec::new(),
+            funcs: Vec::new(),
             rt_global,
             vt_global,
+            ft_global,
             vt_lookup: ctx.make_vtable_lookup(vt_global),
             datum_types: IndexVec::new(),
             sym: IndexVec::new(),
         }
     }
 
-    pub fn build_procs(&mut self) {
+    pub fn build_funcs(&mut self) {
         for i in 0..self.env.funcs.len() {
-            let proc = &self.env.funcs[&i.into()];
-            self.add_proc(proc);
+            let func = &self.env.funcs[&i.into()];
+            self.add_func(func);
         }
     }
 
@@ -59,33 +66,40 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         self.sym[id]
     }
 
-    pub fn lookup_global_proc(&self, name: StringId) -> inkwell::values::FunctionValue<'ctx> {
+    pub fn lookup_global_proc(&self, name: StringId) -> FuncId {
         let global_dty = self.env.type_tree.global_type();
-        let proc_id = global_dty.proc_lookup[&name].top_proc;
-        self.sym[proc_id]
+        global_dty.proc_lookup[&name].top_proc
     }
 
-    fn add_proc(&mut self, proc: &'a Function) {
+    fn add_func(&mut self, ir_func: &'a Function) {
         //let mut proc_emit = ProcEmit::new(self.ctx, proc, name);
-        let func = self.ctx.module.add_function(&format!("proc_{}", proc.id.index()), self.ctx.rt.ty.proc_type, None);
-        func.set_personality_function(self.ctx.rt.dm_eh_personality);
-        func.set_gc("statepoint-example");
+        let ty;
+        if ir_func.closure.is_some() {
+            ty = self.ctx.rt.ty.closure_type;
+        } else {
+            ty = self.ctx.rt.ty.proc_type;
+        }
 
-        assert_eq!(proc.id.index(), self.sym.len());
-        self.sym.push(func);
-        self.procs.push((proc, func));
+        let ll_func = self.ctx.module.add_function(&format!("proc_{}", ir_func.id.index()), ty, None);
+        ll_func.set_personality_function(self.ctx.rt.dm_eh_personality);
+        ll_func.set_gc("statepoint-example");
+
+        assert_eq!(ir_func.id.index(), self.sym.len());
+        self.sym.push(ll_func);
+        self.funcs.push((ir_func, ll_func));
     }
 
     pub fn emit(&mut self) {
         self.populate_datum_types();
         self.emit_vtable();
+        self.emit_ftable();
         let main_block = self.emit_main();
 
-        for (proc, func) in self.procs.drain(..).collect::<Vec<_>>() { // TODO no
-            println!("EMITTING {:?}", proc.id);
-            let walker = CFGWalker::build(proc);
-            let mut proc_emit = ProcEmit::new(self.ctx, self, proc, func);
-            walker.walk(proc, &mut proc_emit);
+        for (ir_func, ll_func) in self.funcs.drain(..).collect::<Vec<_>>() { // TODO no
+            println!("EMITTING {:?}", ir_func.id);
+            let walker = CFGWalker::build(ir_func);
+            let mut func_emit = FuncEmit::new(self.ctx, self, ir_func, ll_func);
+            walker.walk(ir_func, &mut func_emit);
         }
         let main_proc = self.lookup_global_proc(self.env.intern_string_ro("entry"));
 
@@ -96,9 +110,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         let func_type = self.ctx.llvm_ctx.void_type().fn_type(&[], false);
         let func = self.ctx.module.add_function("main", func_type, None);
 
-        let block = self.ctx.llvm_ctx.append_basic_block(func, "entry");
-
-        block
+        self.ctx.llvm_ctx.append_basic_block(func, "entry")
     }
 
     pub(crate) fn copy_val(&self, src: PointerValue<'ctx>, dest: PointerValue<'ctx>) {
@@ -114,7 +126,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         self.ctx.builder.build_call(memcpy_intrinsic, &[dest_i8.into(), src_i8.into(), self.ctx.llvm_ctx.i64_type().const_int(ty::Complex::Any.get_store_size(), false).into(), self.ctx.llvm_ctx.bool_type().const_zero().into()], "");
     }
 
-    fn finalize_main(&self, block: inkwell::basic_block::BasicBlock, entry_func: inkwell::values::FunctionValue) {
+    fn finalize_main(&self, block: inkwell::basic_block::BasicBlock, entry_func: FuncId) {
         self.ctx.builder.position_at_end(block);
 
         let mut func_specs = IndexVec::with_capacity(self.env.funcs.len());
@@ -125,7 +137,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         // TODO: move file emit to a better place
         let rt_env = RtEnv {
             type_tree: self.env.type_tree.clone(),
-            func_specs: func_specs,
+            func_specs,
         };
         self.env.string_table.serialize_runtime(File::create("stringtable.bincode").unwrap());
         bincode::serialize_into(File::create("environment.bincode").unwrap(), &rt_env).unwrap();
@@ -138,6 +150,10 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             self.ctx.llvm_ctx.i32_type().const_zero(),
             self.ctx.llvm_ctx.i32_type().const_zero(),
         ], "vt_ptr") };
+        let ft_ptr = unsafe { self.ctx.builder.build_in_bounds_gep(self.ft_global.as_pointer_value(), &[
+            self.ctx.llvm_ctx.i32_type().const_zero(),
+            self.ctx.llvm_ctx.i32_type().const_zero(),
+        ], "ft_ptr") };
 
         // defined in linker script
         let stackmap_start = self.ctx.module.add_global(self.ctx.llvm_ctx.i8_type(), None, "__stackmaps_start");
@@ -150,7 +166,8 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             stackmap_start.as_pointer_value().into(),
             stackmap_end.as_pointer_value().into(),
             vt_ptr.into(),
-            entry_func.as_global_value().as_pointer_value().into(),
+            ft_ptr.into(),
+            self.ctx.llvm_ctx.i64_type().const_int(entry_func.raw(), false).into(),
         ], "");
 
         self.ctx.builder.build_return(None);
@@ -166,6 +183,11 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             assert_eq!(ty.id.index(), self.datum_types.len());
             self.datum_types.push(datum_ty);
         }
+    }
+
+    fn emit_ftable(&mut self) {
+        let ft_entries: Vec<_> = self.sym.iter().map(|fv| fv.as_global_value().as_pointer_value().const_cast(self.ctx.rt.ty.opaque_type_ptr)).collect();
+        self.ft_global.set_initializer(&self.ctx.rt.ty.opaque_type_ptr.const_array(&ft_entries));
     }
 
     fn emit_vtable(&mut self) {
