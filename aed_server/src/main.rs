@@ -1,21 +1,8 @@
-extern crate bytes;
-extern crate common;
-extern crate futures;
-extern crate serde_cbor;
-extern crate tokio;
-extern crate tokio_io;
-extern crate tokio_serde_cbor;
-extern crate tokio_serde_json;
-extern crate indexmap;
-extern crate snowflake;
-extern crate cstub_bindgen_macro;
-
 mod server;
 mod master_controller;
 mod runtime;
 
-use cstub_bindgen_macro::expose_c_stubs;
-use common::{messages, defs};
+use aed_common::{messages, defs};
 use tokio::net::TcpListener;
 use tokio::prelude::*;
 use tokio_io::codec::length_delimited;

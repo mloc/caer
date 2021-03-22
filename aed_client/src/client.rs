@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use common::messages;
+use aed_common::messages;
 use futures::sync::mpsc;
 use futures::{Async, Future, Stream};
 use futures::executor::{self, NotifyHandle, Notify};

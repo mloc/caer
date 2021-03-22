@@ -21,11 +21,5 @@ tokio-io = "0.1.6"
 tokio-serde-cbor = "0.2.1"
 tokio-serde-json = "0.0.0"
 
-[dependencies.common]
-path = "../common"
-
-[dependencies.lt_common]
-path = "../../lt_common"
-
-[dependencies.cstub_bindgen_macro]
-path = "../../cstub_bindgen_macro"
+[dependencies.aed_common]
+path = "../aed_common"

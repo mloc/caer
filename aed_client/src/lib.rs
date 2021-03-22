@@ -1,19 +1,5 @@
-extern crate common;
-
 #[macro_use]
 extern crate lazy_static;
-
-#[macro_use]
-extern crate serde_derive;
-
-extern crate serde;
-extern crate serde_json;
-extern crate serde_cbor;
-
-extern crate futures;
-extern crate tokio;
-extern crate tokio_io;
-extern crate bytes;
 
 mod client;
 
@@ -26,7 +12,7 @@ use tokio::prelude::*;
 use tokio_io::codec::length_delimited;
 use std::sync::Mutex;
 use std::mem::replace;
-use common::messages;
+use aed_common::messages;
 use futures::sync::mpsc;
 
 lazy_static! {

@@ -1,7 +1,8 @@
 [package]
 authors = ["Colm Ó hIcí <colmohici@gmail.com>"]
-name = "common"
+name = "aed_common"
 version = "0.1.0"
+edition = "2018"
 
 [dependencies]
 serde = "1.0.37"

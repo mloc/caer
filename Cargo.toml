@@ -2,6 +2,9 @@
 members = [
     "aco",
     "aco_sys",
+    "aed_client",
+    "aed_common",
+    "aed_server",
     "caer_codegen_llvm",
     "caer_compiler",
     "caer_frontend",

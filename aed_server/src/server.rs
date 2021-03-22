@@ -8,7 +8,7 @@ use tokio_io::codec::length_delimited;
 use indexmap::IndexMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
-use common::messages;
+use aed_common::messages;
 use bytes::BytesMut;
 use std::io;
 use serde_cbor;
@@ -33,7 +33,7 @@ impl Server {
 
         let server = Server {
             shared: Arc::new(ServerShared {
-                sink: sink,
+                sink,
 
                 clients: RwLock::new(IndexMap::new()),
                 addrs: RwLock::new(IndexMap::new()),

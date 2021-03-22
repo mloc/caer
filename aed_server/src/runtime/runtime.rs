@@ -1,10 +1,9 @@
-use cstub_bindgen_macro::expose_c_stubs;
 use futures::Async;
 use futures::stream::{Fuse, Stream};
 use futures::executor::{self, NotifyHandle, Notify};
 use snowflake::ProcessUniqueId;
 use tokio;
-use common::messages;
+use aed_common::messages;
 use crate::server;
 
 // cribbed from futures tests, used as we have no way to propagate notifications to DM
@@ -29,7 +28,7 @@ pub struct Runtime {
     proc: unsafe extern fn(),
 }
 
-#[expose_c_stubs(runtime)]
+//#[expose_c_stubs(runtime)]
 impl Runtime {
     fn setup(proc: unsafe extern fn()) -> Self {
         let (server, msg_in, fut) = server::Server::start(&"0.0.0.0:2939".parse().unwrap());

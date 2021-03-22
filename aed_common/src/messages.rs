@@ -1,4 +1,4 @@
-use defs::*;
+use crate::defs::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Client {

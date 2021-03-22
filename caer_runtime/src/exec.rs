@@ -73,14 +73,16 @@ impl Executor {
             self.coro_ctx.resume_coro(coro)
         };
 
-        for b in rt.queued_funcs.drain(..).collect::<Vec<_>>().clone() {
-            self.queue_func(b);
-        }
-
         if ended {
             println!("[EXEC] Coro {:?} finished", next_id);
             next_fibre.state = FibreState::Finished;
-        } else {
+        }
+
+        for (b, t) in rt.queued_funcs.drain(..).collect::<Vec<_>>().clone() {
+            self.queue_func(b, t);
+        }
+
+        if !ended {
             println!("[EXEC] Coro {:?} suspended", next_id);
             self.run_queue.push_back(next_id);
         }
