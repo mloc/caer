@@ -2,6 +2,7 @@ use bytes::BytesMut;
 use common::messages;
 use futures::sync::mpsc;
 use futures::{Async, Future, Stream};
+use futures::executor::{self, NotifyHandle, Notify};
 use serde_cbor;
 use std::io;
 use tokio;
@@ -9,10 +10,23 @@ use tokio::net::TcpStream;
 use tokio::prelude::*;
 use tokio_io::codec::length_delimited;
 
+// cribbed from futures tests, used as we have no way to propagate notifications to DM
+fn notify_noop() -> NotifyHandle {
+    struct Noop;
+
+    impl Notify for Noop {
+        fn notify(&self, _id: usize) {}
+    }
+
+    const NOOP : &'static Noop = &Noop;
+
+    NotifyHandle::from(NOOP)
+}
+
 pub struct Client {
     runtime: tokio::runtime::Runtime,
     sendq: mpsc::UnboundedSender<messages::Client>,
-    recvq: mpsc::UnboundedReceiver<messages::Server>,
+    recvq: executor::Spawn<mpsc::UnboundedReceiver<messages::Server>>,
 }
 
 impl Client {
@@ -23,7 +37,7 @@ impl Client {
         let (in_send, in_recv) = mpsc::unbounded();
 
         rt.spawn(
-            tokio::net::TcpStream::connect(&"127.0.0.1:2939".parse().unwrap())
+            tokio::net::TcpStream::connect(&"172.28.125.113:2939".parse().unwrap())
                 .map(|sock| {
                     println!("{:?}", sock);
                     Self::process(sock, out_recv, in_send);
@@ -33,10 +47,12 @@ impl Client {
                 }),
         );
 
+        let task = executor::spawn(in_recv);
+
         Client {
             runtime: rt,
             sendq: out_send,
-            recvq: in_recv,
+            recvq: task,
         }
     }
 
@@ -49,7 +65,7 @@ impl Client {
     }
 
     pub fn poll_recv(&mut self) -> Option<messages::Server> {
-        let poll = self.recvq.poll().unwrap(); // TODO errors
+        let poll = self.recvq.poll_stream_notify(&notify_noop(), 0).unwrap(); // TODO errors
         match poll {
             Async::Ready(t) => t,
             Async::NotReady => None,

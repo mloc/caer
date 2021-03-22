@@ -16,19 +16,19 @@ use snowflake::ProcessUniqueId;
 
 #[derive(Debug, Clone)]
 pub struct Server {
-    pub shared: Arc<ServerShared>,
+    shared: Arc<ServerShared>,
 }
 
 #[derive(Debug)]
-pub struct ServerShared {
-    sink: mpsc::UnboundedSender<(ProcessUniqueId, messages::Server)>,
+struct ServerShared {
+    sink: mpsc::UnboundedSender<(ProcessUniqueId, messages::Client)>,
 
     pub clients: RwLock<IndexMap<ProcessUniqueId, mpsc::UnboundedSender<BytesMut>>>,
     addrs: RwLock<IndexMap<ProcessUniqueId, SocketAddr>>,
 }
 
 impl Server {
-    pub fn start(addr: &SocketAddr) -> (Self, impl Stream<Item = (ProcessUniqueId, messages::Server), Error = ()>, impl Future<Item = (), Error = ()> + Send) {
+    pub fn start(addr: &SocketAddr) -> (Self, impl Stream<Item = (ProcessUniqueId, messages::Client), Error = ()>, impl Future<Item = (), Error = ()> + Send) {
         let (sink, source) = mpsc::unbounded();
 
         let server = Server {
@@ -121,8 +121,8 @@ impl Server {
             })
     }
 
-    pub fn send(&self, id: ProcessUniqueId, msg: &messages::Client) {
-        let enc = BytesMut::from(serde_cbor::ser::to_vec(msg).unwrap()); // todo error type
+    pub fn send(&self, id: ProcessUniqueId, msg: &messages::Server) {
+        let enc = BytesMut::from(serde_cbor::ser::to_vec(msg).unwrap()); // TODO error type
         let clients = self.shared.clients.read().unwrap();
         if let Some(chan) = clients.get(&id) {
             chan.unbounded_send(enc.clone()).unwrap();
@@ -131,8 +131,8 @@ impl Server {
         }
     }
 
-    pub fn send_all(&self, msg: &messages::Client) {
-        let enc = BytesMut::from(serde_cbor::ser::to_vec(msg).unwrap()); // todo error type
+    pub fn send_all(&self, msg: &messages::Server) {
+        let enc = BytesMut::from(serde_cbor::ser::to_vec(msg).unwrap()); // TODO error type
         for client in self.shared.clients.read().unwrap().values() {
             client.unbounded_send(enc.clone()).unwrap();
         }

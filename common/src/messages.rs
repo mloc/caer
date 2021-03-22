@@ -2,24 +2,26 @@ use defs::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Client {
-    Message(String)
+    Message(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Server {
-    Message(String)
+    Message(String),
+
+    NewObject(ObjectState),
+    UpdateObject(ObjectState),
+    DelObject(ObjID),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorldState {
+    pub bounds: (i16, i16, i16),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObjectState {
-    pub id: u32,
-    pub loc: Option<Location>,
-    pub appearance: Option<Appearance>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Appearance {
-    pub entries: Vec<AppearanceEntry>,
-    pub overlays: Vec<Appearance>,
-    pub underlays: Vec<Appearance>,
+    pub id: ObjID,
+    pub loc: Location,
+    pub appearance: Appearance,
 }

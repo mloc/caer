@@ -8,10 +8,14 @@ extern crate tokio_serde_cbor;
 extern crate tokio_serde_json;
 extern crate indexmap;
 extern crate snowflake;
+extern crate cstub_bindgen_macro;
 
 mod server;
+mod master_controller;
+mod runtime;
 
-use common::messages;
+use cstub_bindgen_macro::expose_c_stubs;
+use common::{messages, defs};
 use tokio::net::TcpListener;
 use tokio::prelude::*;
 use tokio_io::codec::length_delimited;
@@ -19,7 +23,20 @@ use bytes::BytesMut;
 use futures::sync::mpsc;
 use std::sync::Arc;
 
-struct Server {}
+/*pub struct Server {}
+
+#[expose_c_stubs(test)]
+impl Server {
+    fn new(name: &u32, anp: u32) -> Self {
+        Server {}
+    }
+    fn new2(&mut self, x: u32) -> Self {
+        Server {}
+    }
+    fn wah(&mut self) -> u32 {
+        3
+    }
+}*/
 
 struct Connection<R: AsyncRead, W: AsyncWrite> {
     reader: length_delimited::FramedRead<R>,
@@ -27,15 +44,27 @@ struct Connection<R: AsyncRead, W: AsyncWrite> {
 }
 
 fn main() {
-    let (srv, src, fut) = server::Server::start(&"127.0.0.1:2939".parse().unwrap());
+    let (srv, src, fut) = server::Server::start(&"0.0.0.0:2939".parse().unwrap());
 
     let proc_srv = srv.clone();
     let process = src
         .for_each(move |(id, msg)| {
             println!("{}: {:?}", id, msg);
             match msg {
-                messages::Server::Message(s) => {
-                    proc_srv.send_all(&messages::Client::Message(s));
+                messages::Client::Message(s) => {
+                    println!("{}", s);
+                    /*let appearance = messages::Appearance{
+                        entries: vec![],
+                        overlays: vec![],
+                        underlays: vec![],
+                    };
+
+                    let os = messages::ObjectState{
+                        id: 10,
+                        loc: defs::Location::Coords(1,2,3),
+                        appearance: appearance,
+                    };
+                    proc_srv.send(id, &messages::Server::UpdateObject(os));*/
                 },
             };
             Ok(())
