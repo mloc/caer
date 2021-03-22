@@ -1,3 +1,5 @@
+use crate::proc_builder::{ProcBody, BuiltinProc};
+
 use super::ir_builder::IrBuilder;
 use caer_types::type_tree::{self, Specialization};
 use caer_types::id::{StringId, FuncId, TypeId};
@@ -10,7 +12,7 @@ use caer_ir as ir;
 pub struct TreeBuilder<'a, 'ot> {
     objtree: &'ot objtree::ObjectTree,
     env: &'a mut ir::env::Env,
-    funcs: Vec<(ir::cfg::Function, objtree::ProcValue)>,
+    funcs: Vec<(ir::cfg::Function, ProcBody)>,
 }
 
 impl<'a, 'ot> TreeBuilder<'a, 'ot> {
@@ -157,15 +159,18 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
             let mut top_func = None;
             for pv in tp.value.iter() {
                 match &pv.code {
-                    objtree::Code::Present(_) => {},
+                    objtree::Code::Present(_) => {
+                        let func = self.env.new_func();
+                        top_func = Some(func.id);
+                        assert_eq!(func.id, self.funcs.len());
+                        self.funcs.push((func, ProcBody::Ast(pv.clone())));
+                    },
                     objtree::Code::Invalid(err) => panic!("oh no dm error {:?}", err),
-                    objtree::Code::Builtin => continue,
+                    objtree::Code::Builtin => {
+                        top_func = self.handle_builtin(oty, name, tp)
+                    },
                     objtree::Code::Disabled => panic!("woop woop procs disabled"),
                 }
-                let func = self.env.new_func();
-                top_func = Some(func.id);
-                assert_eq!(func.id, self.funcs.len());
-                self.funcs.push((func, pv.clone()));
             }
 
             if let Some(top) = top_func {
@@ -196,6 +201,21 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
         let dty = &mut self.env.type_tree.types[dty_id];
         dty.procs = procs;
         dty.proc_lookup = proc_lookup;
+    }
+
+    fn handle_builtin(&mut self, oty: objtree::TypeRef<'_>, name: &str, tp: &objtree::TypeProc) -> Option<FuncId> {
+        let op = match (&oty.path as &str, name) {
+            ("", "sleep") => {
+                ir::cfg::Op::Sleep(None) // TODO: arg
+            },
+            _ => return None,
+        };
+
+        let func = self.env.new_func();
+        let id = func.id;
+        assert_eq!(func.id, self.funcs.len());
+        self.funcs.push((func, ProcBody::Builtin(BuiltinProc::Sleep)));
+        Some(id)
     }
 
     fn path_to_pvec(&mut self, tyr: objtree::TypeRef<'ot>) -> Vec<StringId> {

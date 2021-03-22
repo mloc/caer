@@ -75,7 +75,9 @@
 	forl()
 	 */
 
-	SUSPEND()
+	sleep()
+
+	closure()
 
 /proc/abc()
 	var/x
@@ -117,7 +119,7 @@
 	world << "l1.Copy(3): [l1:Copy(3)]"
 	world << "l1.Copy(2, 4): [l1:Copy(2, 4)]"
 
-	SUSPEND()
+	sleep()
 
 /proc/catchet()
 	world << "before try"
@@ -146,14 +148,10 @@
 		for(var/j = 1; j - 4; j = j + 1)
 			world << i + j*/
 
-/proc/SUSPEND()
-	spawn
-		world.log << "woop"
-
 /proc/closure()
 	var/x = 8
 	var/y = 9
 	spawn
-		world.log << x+x+y
+		world.log << "CLOSURE: [x+x+y]"
 
 //#include "badty.dm"

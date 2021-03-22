@@ -1,3 +1,5 @@
+use crate::proc_builder::ProcBody;
+
 use super::proc_builder::ProcBuilder;
 use caer_ir::env::Env;
 use caer_types::id::{FuncId, StringId};
@@ -7,14 +9,14 @@ use std::borrow::Cow;
 
 pub struct IrBuilder<'a> {
     pub env: &'a mut Env,
-    procs: Vec<(cfg::Function, objtree::ProcValue)>,
+    procs: Vec<(cfg::Function, ProcBody)>,
     pub objtree: &'a objtree::ObjectTree,
 }
 
 impl<'a> IrBuilder<'a> {
     pub fn new(
         env: &'a mut Env,
-        procs: Vec<(cfg::Function, objtree::ProcValue)>,
+        procs: Vec<(cfg::Function, ProcBody)>,
         objtree: &'a objtree::ObjectTree,
     ) -> Self {
         Self {
@@ -33,9 +35,8 @@ impl<'a> IrBuilder<'a> {
             .collect();*/
 
         self.env.funcs = Default::default();
-        for (func, pv) in self.procs {
-            println!("building {:?} @ {:?}", func, pv.location);
-            ProcBuilder::build(func, self.env, self.objtree, &pv);
+        for (func, body) in self.procs {
+            ProcBuilder::build(func, self.env, self.objtree, &body);
         }
 
         // wow ewww

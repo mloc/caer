@@ -203,6 +203,15 @@ impl<'a> FuncBuilder<'a> {
         (root_block_id, scope)
     }
 
+    pub fn build_raw(&mut self, ops: &[cfg::Op]) {
+        let scope = self.func.new_scope(self.func.global_scope);
+        let mut block = self.new_block(scope);
+        for op in ops.iter().cloned() {
+            block.push_op(op);
+        }
+        self.finalize_block(block)
+    }
+
     pub fn builder_within_scope(&mut self, parent_scope: ScopeId) -> BlockBuilder {
         let scope = self.func.new_scope(parent_scope);
         let block = self.new_block(scope);

@@ -287,12 +287,15 @@ impl<'a> Function {
 
                     Op::CatchException(_) => {}
 
-                    Op::Suspend => {}
-
                     Op::Spawn(_, Some(src)) => {
                         flow[*src].reads += 1;
                     }
                     Op::Spawn(_, None) => {}
+
+                    Op::Sleep(Some(src)) => {
+                        flow[*src].reads += 1;
+                    }
+                    Op::Sleep(None) => {}
                 }
             }
 
@@ -645,8 +648,8 @@ pub enum Op {
     // TODO: rework to be less llvm-bound
     CatchException(Option<VarId>),
 
-    Suspend, // temporary
     Spawn(ClosureSlotId, Option<LocalId>),
+    Sleep(Option<LocalId>),
 }
 
 impl Op {
@@ -668,8 +671,8 @@ impl Op {
             Op::DatumCallProc(dst, _, _, _) => Some(*dst),
             Op::Throw(_) => None,
             Op::CatchException(_) => None,
-            Op::Suspend => None,
             Op::Spawn(_, _) => None,
+            Op::Sleep(_) => None,
         }
     }
 
@@ -696,10 +699,11 @@ impl Op {
             }
             Op::Throw(src) => vec![*src],
             Op::CatchException(_) => vec![],
-            Op::Suspend => vec![],
             // hm, this should probably source all the captured vars..
             Op::Spawn(_, Some(delay)) => vec![*delay],
             Op::Spawn(_, None) => vec![],
+            Op::Sleep(Some(delay)) => vec![*delay],
+            Op::Sleep(None) => vec![],
         }
     }
 
@@ -722,8 +726,8 @@ impl Op {
             Op::DatumStoreVar(_, _, _) => {}
             Op::Throw(_) => {}
             Op::CatchException(_) => {}
-            Op::Suspend => {}
             Op::Spawn(_, _) => {}
+            Op::Sleep(_) => {}
         }
     }
 
@@ -757,10 +761,11 @@ impl Op {
             Op::Load(_, _) => {}
             Op::AllocDatum(_, _) => {}
             Op::CatchException(_) => {}
-            Op::Suspend => {}
             // ditto
             Op::Spawn(_, Some(delay)) => {f(delay);}
             Op::Spawn(_, None) => {}
+            Op::Sleep(Some(delay)) => {f(delay);}
+            Op::Sleep(None) => {}
         }
     }
 

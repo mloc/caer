@@ -622,8 +622,8 @@ impl InferRunner {
                     ))?;
                 }
             }
-            Op::Suspend => {}
             Op::Spawn(_, _) => {},
+            Op::Sleep(_) => {},
 
             // flow cases
             Op::Binary(out_l, binop, lhs_l, rhs_l) => {

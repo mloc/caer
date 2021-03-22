@@ -634,11 +634,6 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 }
             },
 
-            Op::Suspend => {
-                println!("{:?}", walker.get_cur_lifetimes());
-                self.build_call(self.ctx.rt.rt_runtime_suspend.as_global_value().as_pointer_value(), &[self.prog_emit.rt_global.as_pointer_value().into()]);
-            },
-
             Op::Spawn(closure_slot, delay) => {
                 assert!(delay.is_none());
                 println!("in spawn");
@@ -653,7 +648,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
 
                 let cap_array = self.ctx.builder.build_array_alloca(self.ctx.rt.ty.val_type, self.ctx.llvm_ctx.i64_type().const_int(cv.len() as u64, false), "cap_array");
 
-                for(i, (my_var, _)) in cv.iter().copied().enumerate() {
+                for (i, (my_var, _)) in cv.iter().copied().enumerate() {
                     let var_val = self.ctx.builder.build_load(self.var_allocs[my_var].val, "");
                     let ptr = unsafe { self.gep(cap_array, &[i as u64]) };
                     self.conv_any_into(var_val, &self.var_allocs[my_var].ty, ptr);
@@ -667,6 +662,12 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     self.ctx.builder.build_address_space_cast(cap_array, self.ctx.rt.ty.val_type_ptr, "").into(),
                 ]);
             }
+
+            Op::Sleep(delay) => {
+                assert!(delay.is_none());
+                println!("{:?}", walker.get_cur_lifetimes());
+                self.build_call(self.ctx.rt.rt_runtime_suspend.as_global_value().as_pointer_value(), &[self.prog_emit.rt_global.as_pointer_value().into()]);
+            },
 
             //_ => unimplemented!("{:?}", op),
         }

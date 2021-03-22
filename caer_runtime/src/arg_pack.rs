@@ -7,25 +7,10 @@ use std::{cmp::Ordering, marker::PhantomData};
 use std::ptr::NonNull;
 use std::fmt;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum CallBundle {
     Proc((FuncId, ProcArgs)),
     Closure((FuncId, ClosureArgs)),
-}
-
-// TODO: urghhh
-impl fmt::Debug for CallBundle {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut o = f.debug_tuple("CallBundle");
-        match self {
-            CallBundle::Proc((_ptr, args)) => {
-                o.field(args).finish()
-            },
-            CallBundle::Closure((_ptr, args)) => {
-                o.field(args).finish()
-            },
-        }
-    }
 }
 
 impl CallBundle {

@@ -8,7 +8,7 @@ use caer_ir::id::{BlockId, LocalId, ScopeId, VarId};
 use caer_types::func::{CallingSpec, ProcSpec};
 use caer_types::id::{FuncId, StringId};
 use caer_types::ty;
-use dreammaker::{ast, objtree};
+use dreammaker::{ast, objtree::{self, ProcValue}};
 use std::collections::HashMap;
 
 pub struct ProcBuilder<'a> {
@@ -16,7 +16,6 @@ pub struct ProcBuilder<'a> {
     pub id: FuncId,
     pub env: &'a mut Env,
     pub objtree: &'a objtree::ObjectTree,
-    pub ast_proc: &'a objtree::ProcValue,
 }
 
 impl<'a> ProcBuilder<'a> {
@@ -24,24 +23,34 @@ impl<'a> ProcBuilder<'a> {
         func: Function,
         env: &'a mut Env,
         objtree: &'a objtree::ObjectTree,
-        ast_proc: &'a objtree::ProcValue,
+        body: &'a ProcBody,
     ) -> FuncId {
         let pb = Self {
             id: func.id,
             env,
             objtree,
-            ast_proc,
         };
 
-        pb.build_proc(func)
+        pb.build_proc(func, body)
     }
 
-    fn build_proc(mut self, mut func: Function) -> FuncId {
+    fn build_proc(mut self, mut func: Function, body: &'a ProcBody) -> FuncId {
         func.new_scope(func.global_scope);
 
+        match body {
+            ProcBody::Ast(pv) => {
+                self.build_ast_proc(func, pv)
+            },
+            ProcBody::Builtin(b) => {
+                self.build_builtin(func, b)
+            },
+        }
+    }
+
+    fn build_ast_proc(&mut self, mut func: Function, pv: &ProcValue) -> FuncId {
         let mut proc_spec = ProcSpec::default();
 
-        for (i, param) in self.ast_proc.parameters.iter().enumerate() {
+        for (i, param) in pv.parameters.iter().enumerate() {
             // TODO: need to record name separately for keyword args?
             let name_id = self.env.intern_string(&param.name);
             let var_id = func.add_var(func.global_scope, ty::Complex::Any, name_id);
@@ -55,7 +64,7 @@ impl<'a> ProcBuilder<'a> {
 
         let mut func_builder = FuncBuilder::for_proc(&mut self.env, &self.objtree, func);
 
-        let body = if let objtree::Code::Present(ref b) = self.ast_proc.code {
+        let body = if let objtree::Code::Present(ref b) = pv.code {
             b
         } else {
             panic!("not present")
@@ -63,6 +72,20 @@ impl<'a> ProcBuilder<'a> {
         func_builder.build_block(body.as_slice(), None, None);
         func_builder.finalize()
     }
+
+    fn build_builtin(&mut self, mut func: Function, builtin: &BuiltinProc) -> FuncId {
+        match builtin {
+            BuiltinProc::Sleep => {
+                // TODO: handle sleep arg
+                let proc_spec = ProcSpec::default();
+                func.calling_spec = Some(CallingSpec::Proc(proc_spec));
+                let mut func_builder = FuncBuilder::for_proc(&mut self.env, &self.objtree, func);
+                func_builder.build_raw(&[cfg::Op::Sleep(None)]);
+                func_builder.finalize()
+            },
+        }
+    }
+
 
     /*pub fn build_block(&mut self, stmts: &[ast::Spanned<ast::Statement>], parent_scope: ScopeId, next_block: Option<BlockId>) -> (BlockId, ScopeId) {
         self.build_within_scope(parent_scope, |bb| {
@@ -88,4 +111,15 @@ impl<'a> ProcBuilder<'a> {
         self.finalize_block(block);
         (root_block_id, scope)
     }*/
+}
+
+#[derive(Clone, Debug)]
+pub enum ProcBody {
+    Ast(objtree::ProcValue),
+    Builtin(BuiltinProc),
+}
+
+#[derive(Clone, Debug)]
+pub enum BuiltinProc {
+    Sleep,
 }

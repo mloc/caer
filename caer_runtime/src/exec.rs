@@ -28,7 +28,7 @@ impl Executor {
         }
     }
 
-    pub fn queue_func(&mut self, bundle: CallBundle) {
+    pub fn queue_func(&mut self, bundle: CallBundle, at_time: u64) {
         let fibre_id = self.next_fibre_id;
         self.next_fibre_id.0 += 1;
 
@@ -50,8 +50,12 @@ impl Executor {
         let next_fibre = self.fibres.get_mut(&next_id).unwrap();
 
         let coro = match &next_fibre.state {
-            FibreState::Running(coro) => coro,
+            FibreState::Running(coro) => {
+                println!("[EXEC] Resuming {:?}", next_id);
+                coro
+            }
             FibreState::Created(bundle) => {
+                println!("[EXEC] Starting {:?} with {:?}", next_id, bundle);
                 let coro = self.coro_ctx.spawn_coro(rt, bundle);
                 next_fibre.state = FibreState::Running(coro);
 
@@ -69,9 +73,15 @@ impl Executor {
             self.coro_ctx.resume_coro(coro)
         };
 
+        for b in rt.queued_funcs.drain(..).collect::<Vec<_>>().clone() {
+            self.queue_func(b);
+        }
+
         if ended {
+            println!("[EXEC] Coro {:?} finished", next_id);
             next_fibre.state = FibreState::Finished;
         } else {
+            println!("[EXEC] Coro {:?} suspended", next_id);
             self.run_queue.push_back(next_id);
         }
 

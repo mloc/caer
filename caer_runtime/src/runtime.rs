@@ -22,8 +22,12 @@ pub struct Runtime {
     pub(crate) env: RtEnv,
     pub(crate) gc_stackmap: GcStackmap,
     pub(crate) alloc: Alloc,
-    // TODO: delay/target time
-    pub(crate) queued_funcs: Vec<CallBundle>
+    // Updated by executor
+    pub(crate) world_time: u64,
+
+    // These are used to communicate back to the executor when yielding
+    pub(crate) queued_funcs: Vec<(CallBundle, u64)>,
+    pub(crate) sleep_duration: u64
 }
 
 // TODO: ERRH
@@ -32,7 +36,7 @@ pub struct Runtime {
 /// stackmap pointers need to be safe.
 #[no_mangle]
 pub unsafe extern "C" fn rt_runtime_init(
-    global_rt: &mut Runtime,
+    global_rt: &'static mut Runtime,
     stackmap_start: *const u8,
     stackmap_end: *const u8,
     vtable_ptr: *const vtable::Entry,
@@ -60,7 +64,9 @@ pub unsafe extern "C" fn rt_runtime_init(
         env,
         gc_stackmap,
         alloc: Alloc::new(),
+        world_time: 0,
         queued_funcs: Vec::new(),
+        sleep_duration: 0,
     };
 
     // update the global runtime seen by user code
@@ -97,8 +103,17 @@ impl Runtime {
     }
 
     #[no_mangle]
-    pub extern "C" fn rt_runtime_suspend(&mut self) {
-        crate::gc::run(self);
+    pub extern "C" fn rt_runtime_suspend(&mut self, sleep_duration: u64) {
+        self.sleep_duration = sleep_duration;
+
+        // Is this necessary?
+        // To be on the safe side, we end the ref on self.
+        #[allow(clippy::drop_ref)]
+        std::mem::drop(self);
+
+        unsafe {
+            aco::yield_to_main()
+        }
     }
 
     #[no_mangle]
@@ -139,6 +154,7 @@ impl Runtime {
         num_args: u64,
         args: NonNull<Val>,
     ) {
+        // TODO: handle delayed spawns
         println!("doing spawn: {:?} / {:?} / {:?}", closure_func, num_args, args);
         //let spec = &self.env.func_specs[closure_func];
         let env = unsafe { std::slice::from_raw_parts(args.as_ptr(), num_args as usize).to_vec() };
@@ -150,7 +166,12 @@ impl Runtime {
 
         // DM fibres can't directly interact with the executor, so we queue spawns in the runtime
         // to be picked up at next sleep
-        self.queued_funcs.push(bundle);
+        self.queued_funcs.push((bundle, 0));
+    }
+
+    #[no_mangle]
+    pub extern "C" fn rt_runtime_get_time(&mut self) -> u64 {
+        self.world_time
     }
 }
 
@@ -160,29 +181,22 @@ impl Runtime {
 // the lie that keeps the world running
 // TODO: move
 #[derive(Debug)]
-pub struct MetaRuntime<'rt> {
+pub struct MetaRuntime {
     executor: exec::Executor,
-    // this lifetime is bad
-    // deal with it
-    dmrt: &'rt mut Runtime,
+    dmrt: &'static mut Runtime,
 }
 
-impl MetaRuntime<'_> {
+impl MetaRuntime {
     fn start(&mut self, entry_proc: FuncId) {
         println!("runtime starting");
         self.executor
-            .queue_func(crate::arg_pack::CallBundle::Proc((entry_proc, crate::arg_pack::ProcArgs::empty())));
+            .queue_func(crate::arg_pack::CallBundle::Proc((entry_proc, crate::arg_pack::ProcArgs::empty())), 0);
         loop {
             println!("running next proc");
             if !self.executor.run_next(self.dmrt) {
                 println!("no procs left in queue, running final GC and finishing");
                 crate::gc::run(self.dmrt);
                 break;
-            }
-
-            let queue: Vec<_> = self.dmrt.queued_funcs.drain(..).collect();
-            for b in queue {
-                self.executor.queue_func(b);
             }
         }
         println!("runtime finished");
