@@ -40,18 +40,14 @@ fn main() {
             match msg {
                 messages::Client::Message(s) => {
                     println!("{}", s);
-                    /*let appearance = messages::Appearance{
-                        entries: vec![],
-                        overlays: vec![],
-                        underlays: vec![],
-                    };
+                    let appearance = defs::Appearance::default();
 
                     let os = messages::ObjectState{
                         id: 10,
                         loc: defs::Location::Coords(1,2,3),
                         appearance: appearance,
                     };
-                    proc_srv.send(id, &messages::Server::UpdateObject(os));*/
+                    proc_srv.send(id, &messages::Server::UpdateObject(os));
                 },
             };
             Ok(())

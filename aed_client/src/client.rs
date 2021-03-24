@@ -3,9 +3,7 @@ use aed_common::messages;
 use futures::sync::mpsc;
 use futures::{Async, Future, Stream};
 use futures::executor::{self, NotifyHandle, Notify};
-use serde_cbor;
 use std::io;
-use tokio;
 use tokio::net::TcpStream;
 use tokio::prelude::*;
 use tokio_io::codec::length_delimited;
@@ -18,7 +16,7 @@ fn notify_noop() -> NotifyHandle {
         fn notify(&self, _id: usize) {}
     }
 
-    const NOOP : &'static Noop = &Noop;
+    const NOOP : &Noop = &Noop;
 
     NotifyHandle::from(NOOP)
 }
@@ -30,14 +28,14 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new() -> Self {
+    pub fn new(host: &str) -> Self {
         let mut rt = tokio::runtime::Runtime::new().unwrap();
 
         let (out_send, out_recv) = mpsc::unbounded();
         let (in_send, in_recv) = mpsc::unbounded();
 
         rt.spawn(
-            tokio::net::TcpStream::connect(&"172.28.125.113:2939".parse().unwrap())
+            tokio::net::TcpStream::connect(&host.parse().unwrap())
                 .map(|sock| {
                     println!("{:?}", sock);
                     Self::process(sock, out_recv, in_send);
@@ -115,7 +113,7 @@ impl Client {
             })
             .and_then(|x| {
                 serde_cbor::ser::to_vec(&x)
-                    .map(|v| BytesMut::from(v))
+                    .map(BytesMut::from)
                     .map_err(|e| {
                         println!("encode error: {:?}", e);
                     })

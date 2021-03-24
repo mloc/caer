@@ -2,7 +2,11 @@
 
 /world/New()
 	world.log << "starting"
-	call(LIB_PATH, "dibby_setup")()
+	try
+		call(LIB_PATH, "dibby_setup")("127.0.0.1:2939")
+	catch(var/e)
+		world.log << json_encode(e)
+		del(src)
 	var/msg = json_encode(list("Message" = "hallo"))
 	call(LIB_PATH, "dibby_send")(msg)
 	while(TRUE)
@@ -114,7 +118,7 @@
 			var/ck = color[1]
 			var/list/cv = color[ck]
 			switch(ck)
-				if("RGB")
+				if("Rgb")
 					obj.color = rgb(cv[1], cv[2], cv[3])
 				if("Matrix")
 					obj.color = cv
@@ -130,4 +134,4 @@
 			if("Plural")
 				obj.gender = PLURAL
 	if("icon" in appearance)
-		obj.icon = iconmap[appearance["icon"]]
+		obj.icon = _iconmap[appearance["icon"]]

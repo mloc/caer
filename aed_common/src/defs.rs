@@ -1,4 +1,4 @@
-pub type ObjID = u32;
+pub type ObjId = u32;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Appearance {
@@ -35,7 +35,7 @@ pub struct Appearance {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Color {
     White,
-    RGB(u8, u8, u8),
+    Rgb(u8, u8, u8),
     Matrix(Vec<f32>),
 }
 
@@ -46,7 +46,7 @@ impl Default for Color {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Location {
     Null,
-    Within(ObjID),
+    Within(ObjId),
     Coords(i16, i16, i16),
 }
 

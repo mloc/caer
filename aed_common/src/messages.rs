@@ -11,7 +11,7 @@ pub enum Server {
 
     NewObject(ObjectState),
     UpdateObject(ObjectState),
-    DelObject(ObjID),
+    DelObject(ObjId),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,7 +21,7 @@ pub struct WorldState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObjectState {
-    pub id: ObjID,
+    pub id: ObjId,
     pub loc: Location,
     pub appearance: Appearance,
 }

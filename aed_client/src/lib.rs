@@ -1,3 +1,7 @@
+#![feature(maybe_uninit_uninit_array)]
+#![feature(maybe_uninit_extra)]
+#![feature(maybe_uninit_slice)]
+
 #[macro_use]
 extern crate lazy_static;
 
@@ -6,14 +10,8 @@ mod client;
 use std::os::raw::{c_char, c_int};
 use std::ffi::{CStr, CString};
 use std::cell::RefCell;
-use std::sync::RwLock;
-use std::thread;
-use tokio::prelude::*;
-use tokio_io::codec::length_delimited;
 use std::sync::Mutex;
 use std::mem::replace;
-use aed_common::messages;
-use futures::sync::mpsc;
 
 lazy_static! {
     static ref EMPTY_RET: CString = CString::new("").unwrap();
@@ -28,7 +26,7 @@ fn return_byond(s: CString) -> *const c_char {
 
     let p = s.as_ptr();
     RET.with(|c| c.replace(Some(s)));
-    return p;
+    p
 }
 
 fn norm_args(n: c_int, v: *const *const c_char) -> Vec<CString> {
@@ -43,37 +41,66 @@ fn norm_args(n: c_int, v: *const *const c_char) -> Vec<CString> {
     out
 }
 
+fn grab_args<'a, const N: usize>(n: c_int, v: *const *const c_char) -> Option<[&'a CStr; N]> {
+    if n != N as c_int {
+        return None
+    }
+
+    let dummy = EMPTY_RET.as_c_str();
+    let mut o = [dummy; N];
+
+    for i in 0..N {
+        unsafe {
+            o[i] = CStr::from_ptr(*(v.offset(i as _)));
+        }
+    }
+
+    Some(o)
+}
+
+macro_rules! grab_args_or {
+    ( $n:expr , $v:expr , $e:expr ) => {
+        match grab_args($n, $v) {
+            Some(x) => x,
+            None => return return_byond(CString::new($e).unwrap()),
+        }
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn hello(n: c_int, v: *const *const c_char) -> *const c_char {
-    let args = norm_args(n, v);
-    let s = CString::new(format!("{}: {:?}", n, args)).unwrap();
+    let [greeting, second] = grab_args_or!(n, v, "error");
+    let s = CString::new(format!("{}: {:?} {:?}", n, greeting, second)).unwrap();
     return_byond(s)
 }
 
 #[no_mangle]
-pub extern "C" fn dibby_setup(_n: c_int, _v: *const *const c_char) -> *const c_char {
+pub extern "C" fn dibby_setup(n: c_int, v: *const *const c_char) -> *const c_char {
+    let [host] = grab_args_or!(n, v, "bad number of args");
+
     {
         let mut client = CLIENT.lock().unwrap();
-        if let None = *client {
-            *client = Some(client::Client::new())
+        if client.is_none() {
+            *client = Some(client::Client::new(host.to_str().unwrap()))
         } else {
             return return_byond(CString::new("existing client").unwrap());
         }
     }
 
-    return EMPTY_RET.as_ptr();
+    EMPTY_RET.as_ptr()
 }
 
 #[no_mangle]
 pub extern "C" fn dibby_shutdown(_n: c_int, _v: *const *const c_char) -> *const c_char {
     let mut lock = CLIENT.lock().unwrap();
-    if let Some(_) = *lock {
+    if lock.is_some() {
         let client = replace(&mut *lock, None).unwrap();
         client.shutdown();
     } else {
         return return_byond(CString::new("no client").unwrap());
     }
-    return EMPTY_RET.as_ptr();
+
+    EMPTY_RET.as_ptr()
 }
 
 #[no_mangle]
@@ -94,13 +121,9 @@ pub extern "C" fn dibby_recv(_n: c_int, _v: *const *const c_char) -> *const c_ch
 
 #[no_mangle]
 pub extern "C" fn dibby_send(n: c_int, v: *const *const c_char) -> *const c_char {
-    if n != 1 {
-        return return_byond(CString::new("bad number of args").unwrap());
-    }
+    let [arg] = grab_args_or!(n, v, "bad number of args");
 
-    let args = norm_args(n, v);
-
-    let msg = serde_json::from_slice(args[0].as_bytes()).unwrap();
+    let msg = serde_json::from_slice(arg.to_bytes()).unwrap();
 
     let mut client = CLIENT.lock().unwrap();
     if let Some(ref mut client) =  *client {

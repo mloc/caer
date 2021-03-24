@@ -1,8 +1,7 @@
 use futures::Async;
 use futures::stream::{Fuse, Stream};
-use futures::executor::{self, NotifyHandle, Notify};
+use futures::executor::{NotifyHandle, Notify};
 use snowflake::ProcessUniqueId;
-use tokio;
 use aed_common::messages;
 use crate::server;
 
@@ -14,7 +13,7 @@ fn notify_noop() -> NotifyHandle {
         fn notify(&self, _id: usize) {}
     }
 
-    const NOOP : &'static Noop = &Noop;
+    const NOOP : &Noop = &Noop;
 
     NotifyHandle::from(NOOP)
 }

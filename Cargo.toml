@@ -2,7 +2,6 @@
 members = [
     "aco",
     "aco_sys",
-    "aed_client",
     "aed_common",
     "aed_server",
     "caer_codegen_llvm",
@@ -16,4 +15,8 @@ members = [
     "llvm_stackmaps",
     "rustc_dwarf",
     "rustc_unwind",
+]
+exclude = [
+    # aed_client needs a toolchain override
+    "aed_client",
 ]

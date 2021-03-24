@@ -264,22 +264,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "client"
-version = "0.1.0"
-dependencies = [
- "aed_common",
- "bytes",
- "futures",
- "lazy_static",
- "serde",
- "serde_cbor 0.8.2",
- "serde_derive",
- "serde_json",
- "tokio",
- "tokio-io",
-]
-
-[[package]]
 name = "cloudabi"
 version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
