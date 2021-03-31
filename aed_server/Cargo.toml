@@ -9,17 +9,18 @@ name = "ludo"
 crate-type = ["cdylib"]
 
 [dependencies]
-bytes = "0.4.6"
-futures = "0.1.20"
 indexmap = "1.0.1"
 quote = "0.6.10"
 serde_cbor = "0.8.2"
 snowflake = "1.3.0"
 syn = "0.15.21"
-tokio = "0.1.5"
-tokio-io = "0.1.6"
-tokio-serde-cbor = "0.2.1"
-tokio-serde-json = "0.0.0"
+tokio = { version = "1.2.0", features = ["net", "rt", "io-util", "macros", "rt-multi-thread"] }
+tokio-serde-cbor = "0.6.0"
+tokio-serde-json = "0.3.0"
+tokio-util = { version = "0.6.3", features = ["codec", "io"] }
+tokio-stream = "0.1.3"
+futures = "0.3.12"
+bytes = "1.0.1"
 
 [dependencies.aed_common]
 path = "../aed_common"

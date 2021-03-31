@@ -1,30 +1,17 @@
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
+use std::{net::SocketAddr, pin::Pin};
 use aed_common::messages;
-use futures::sync::mpsc;
-use futures::{Async, Future, Stream};
-use futures::executor::{self, NotifyHandle, Notify};
+use futures::channel::mpsc;
 use std::io;
-use tokio::net::TcpStream;
-use tokio::prelude::*;
-use tokio_io::codec::length_delimited;
-
-// cribbed from futures tests, used as we have no way to propagate notifications to DM
-fn notify_noop() -> NotifyHandle {
-    struct Noop;
-
-    impl Notify for Noop {
-        fn notify(&self, _id: usize) {}
-    }
-
-    const NOOP : &Noop = &Noop;
-
-    NotifyHandle::from(NOOP)
-}
+use futures::{Future, Stream, Sink, StreamExt, SinkExt, FutureExt, future, TryStream, TryStreamExt};
+use tokio::net::{TcpStream};
+use tokio_util::codec::{Framed, LengthDelimitedCodec};
+use futures::task::Poll;
 
 pub struct Client {
     runtime: tokio::runtime::Runtime,
     sendq: mpsc::UnboundedSender<messages::Client>,
-    recvq: executor::Spawn<mpsc::UnboundedReceiver<messages::Server>>,
+    recvq: mpsc::UnboundedReceiver<messages::Server>,
 }
 
 impl Client {
@@ -35,27 +22,28 @@ impl Client {
         let (in_send, in_recv) = mpsc::unbounded();
 
         rt.spawn(
-            tokio::net::TcpStream::connect(&host.parse().unwrap())
+            tokio::net::TcpStream::connect(host.parse::<SocketAddr>().unwrap()).then(|f| { future::ready(f
                 .map(|sock| {
                     println!("{:?}", sock);
                     Self::process(sock, out_recv, in_send);
                 })
                 .map_err(|e| {
                     println!("connect error: {:?}", e);
-                }),
-        );
+                }))
+            }
+        ));
 
-        let task = executor::spawn(in_recv);
+        //let task = rt.spawn(in_recv);
 
         Client {
             runtime: rt,
             sendq: out_send,
-            recvq: task,
+            recvq: in_recv,
         }
     }
 
     pub fn shutdown(self) {
-        self.runtime.shutdown_now().wait().unwrap()
+        self.runtime.shutdown_background()
     }
 
     pub fn send(&self, msg: messages::Client) {
@@ -63,10 +51,13 @@ impl Client {
     }
 
     pub fn poll_recv(&mut self) -> Option<messages::Server> {
-        let poll = self.recvq.poll_stream_notify(&notify_noop(), 0).unwrap(); // TODO errors
+        let waker = futures::task::noop_waker_ref();
+        let mut cx = std::task::Context::from_waker(waker);
+
+        let poll = Pin::new(&mut self.recvq).poll_next(&mut cx); // TODO errors
         match poll {
-            Async::Ready(t) => t,
-            Async::NotReady => None,
+            Poll::Ready(t) => t,
+            Poll::Pending => None,
         }
     }
 
@@ -75,52 +66,49 @@ impl Client {
         out_recv: mpsc::UnboundedReceiver<messages::Client>,
         in_send: mpsc::UnboundedSender<messages::Server>,
     ) {
-        let (recv, send) = sock.split();
+        let framed = Framed::new(sock, LengthDelimitedCodec::new());
+        let (send, recv) = framed.split();
 
-        let reader = length_delimited::FramedRead::new(recv);
-        let writer = length_delimited::FramedWrite::new(send);
-
-        tokio::spawn(Self::process_reader(reader, in_send));
-        tokio::spawn(Self::process_writer(writer, out_recv));
+        tokio::spawn(Self::process_reader(recv, in_send));
+        tokio::spawn(Self::process_writer(send, out_recv));
     }
 
     fn process_reader(
-        reader: impl Stream<Item = BytesMut, Error = io::Error>,
+        reader: impl TryStream<Ok = BytesMut, Error = io::Error>,
         in_send: mpsc::UnboundedSender<messages::Server>,
-    ) -> impl Future<Item = (), Error = ()> {
+    ) -> impl Future<Output = ()> {
         reader
             .map_err(|e| {
                 println!("recv error: {:?}", e);
             })
             .and_then(|x| {
-                serde_cbor::de::from_slice(&x).map_err(|e| {
+                let v = serde_cbor::de::from_slice(&x).map_err(|e| {
                     println!("decode error: {:?}", e);
-                })
+                });
+                future::ready(v)
             })
             .forward(in_send.sink_map_err(|e| {
                 println!("receive channel error: {:?}", e);
             }))
-            .then(|_| Ok(()))
+            .then(|_| future::ready(()))
     }
 
     fn process_writer(
-        writer: impl Sink<SinkItem = BytesMut, SinkError = io::Error>,
+        writer: impl Sink<Bytes, Error = io::Error>,
         out_recv: mpsc::UnboundedReceiver<messages::Client>,
-    ) -> impl Future<Item = (), Error = ()> {
+    ) -> impl Future<Output = ()> {
         out_recv
-            .map_err(|e| {
-                println!("client send channel error: {:?}", e);
-            })
+            .map(Ok)
             .and_then(|x| {
-                serde_cbor::ser::to_vec(&x)
-                    .map(BytesMut::from)
+                future::ready(serde_cbor::ser::to_vec(&x)
+                    .map(Bytes::from)
                     .map_err(|e| {
                         println!("encode error: {:?}", e);
-                    })
+                    }))
             })
             .forward(writer.sink_map_err(|e| {
                 println!("send error: {:?}", e);
             }))
-            .then(|_| Ok(()))
+            .then(|_| future::ready(()))
     }
 }

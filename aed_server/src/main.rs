@@ -4,10 +4,11 @@ mod runtime;
 
 use aed_common::{messages, defs};
 use tokio::net::TcpListener;
-use tokio::prelude::*;
-use tokio_io::codec::length_delimited;
+use tokio_stream::StreamExt;
+use tokio_util::codec::length_delimited;
+use tokio::io::{AsyncRead, AsyncWrite};
 use bytes::BytesMut;
-use futures::sync::mpsc;
+use tokio::sync::mpsc;
 use std::sync::Arc;
 
 /*pub struct Server {}
@@ -25,39 +26,32 @@ impl Server {
     }
 }*/
 
-struct Connection<R: AsyncRead, W: AsyncWrite> {
+/*struct Connection<R: AsyncRead, W: AsyncWrite> {
     reader: length_delimited::FramedRead<R>,
     writer: length_delimited::FramedWrite<W, Vec<u8>>,
-}
+}*/
 
-fn main() {
-    let (srv, src, fut) = server::Server::start(&"0.0.0.0:2939".parse().unwrap());
+#[tokio::main]
+async fn main() {
+    let (srv, mut src) = server::Server::start(&"0.0.0.0:2939".parse().unwrap()).await;
 
     let proc_srv = srv.clone();
-    let process = src
-        .for_each(move |(id, msg)| {
-            println!("{}: {:?}", id, msg);
-            match msg {
-                messages::Client::Message(s) => {
-                    println!("{}", s);
-                    let appearance = defs::Appearance::default();
+    while let Some((id, msg)) = src.next().await {
+        println!("{}: {:?}", id, msg);
+        match msg {
+            messages::Client::Message(s) => {
+                println!("{}", s);
+                let appearance = defs::Appearance::default();
 
-                    let os = messages::ObjectState{
-                        id: 10,
-                        loc: defs::Location::Coords(1,2,3),
-                        appearance: appearance,
-                    };
-                    proc_srv.send(id, &messages::Server::UpdateObject(os));
-                },
-            };
-            Ok(())
-        });
-
-
-    let mut rt = tokio::runtime::Runtime::new().unwrap();
-    rt.spawn(fut);
-    rt.spawn(process);
-    rt.shutdown_on_idle().wait().unwrap();
+                let os = messages::ObjectState{
+                    id: 10,
+                    loc: defs::Location::Coords(1,2,3),
+                    appearance,
+                };
+                proc_srv.send(id, &messages::Server::UpdateObject(os));
+            },
+        };
+    }
 
     /*let addr = "127.0.0.1:2978".parse().unwrap();
     let listener = TcpListener::bind(&addr).unwrap();
