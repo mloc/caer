@@ -1,15 +1,9 @@
-mod server;
+pub mod server;
 mod master_controller;
 mod runtime;
 
 use aed_common::{messages, defs};
-use tokio::net::TcpListener;
 use tokio_stream::StreamExt;
-use tokio_util::codec::length_delimited;
-use tokio::io::{AsyncRead, AsyncWrite};
-use bytes::BytesMut;
-use tokio::sync::mpsc;
-use std::sync::Arc;
 
 /*pub struct Server {}
 
@@ -31,26 +25,29 @@ impl Server {
     writer: length_delimited::FramedWrite<W, Vec<u8>>,
 }*/
 
-#[tokio::main]
-async fn main() {
-    let (srv, mut src) = server::Server::start(&"0.0.0.0:2939".parse().unwrap()).await;
+fn main() {
+    let (srv, mut src_stream) = server::Server::start(&"0.0.0.0:2939".parse().unwrap());
 
-    let proc_srv = srv.clone();
-    while let Some((id, msg)) = src.next().await {
-        println!("{}: {:?}", id, msg);
-        match msg {
-            messages::Client::Message(s) => {
-                println!("{}", s);
-                let appearance = defs::Appearance::default();
+    loop {
+        while let Some((id, msg)) = src_stream.poll() {
+            println!("{}: {:?}", id, msg);
+            match msg {
+                messages::Client::Message(s) => {
+                    println!("{}", s);
+                    let appearance = defs::Appearance::default();
 
-                let os = messages::ObjectState{
-                    id: 10,
-                    loc: defs::Location::Coords(1,2,3),
-                    appearance,
-                };
-                proc_srv.send(id, &messages::Server::UpdateObject(os));
-            },
-        };
+                    let os = messages::ObjectState{
+                        id: 10,
+                        loc: defs::Location::Coords(1,2,3),
+                        appearance,
+                    };
+                    srv.send(id, &messages::Server::UpdateObject(os));
+                },
+                messages::Client::VerbCall(..) => {
+                },
+            };
+        }
+        std::thread::sleep_ms(1000);
     }
 
     /*let addr = "127.0.0.1:2978".parse().unwrap();

@@ -5,7 +5,6 @@ use futures::TryStream;
 use futures::SinkExt;
 use futures::FutureExt;
 use std::fmt::Debug;
-//use futures::TryFutureExt;
 use aed_common::messages;
 use bytes::{BytesMut, Bytes};
 use futures::Sink;
@@ -19,48 +18,86 @@ use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
+use std::pin::Pin;
+use futures::task::Poll;
+
+// Bit of a hack while aed and caer are separate
+pub struct ServerStream<I> {
+    stream: Pin<Box<dyn Stream<Item = I>>>,
+}
+
+impl<I> ServerStream<I> {
+    pub fn poll(&mut self) -> Option<I> {
+        let waker = futures::task::noop_waker_ref();
+        let mut cx = std::task::Context::from_waker(waker);
+
+        let poll = self.stream.poll_next_unpin(&mut cx); // TODO errors
+        match poll {
+            Poll::Ready(t) => t,
+            Poll::Pending => None,
+        }
+    }
+
+    pub fn iter(&mut self) -> impl Iterator<Item = I> + '_ {
+        std::iter::from_fn(move || self.poll())
+    }
+
+    pub fn decompose(self) -> Pin<Box<dyn Stream<Item = I>>> {
+        self.stream
+    }
+}
+
 
 #[derive(Debug, Clone)]
 pub struct Server {
     shared: Arc<ServerShared>,
 }
 
+pub type ClientId = ProcessUniqueId;
+
 #[derive(Debug)]
 struct ServerShared {
-    sink: mpsc::UnboundedSender<(ProcessUniqueId, messages::Client)>,
+    runtime: Arc<tokio::runtime::Runtime>,
+    sink: mpsc::UnboundedSender<(ClientId, messages::Client)>,
 
     pub clients: RwLock<IndexMap<ProcessUniqueId, mpsc::UnboundedSender<Bytes>>>,
     addrs: RwLock<IndexMap<ProcessUniqueId, SocketAddr>>,
 }
 
 impl Server {
-    pub async fn start(
+    pub fn start(
         addr: &SocketAddr,
     ) -> (
         Self,
-        impl Stream<Item = (ProcessUniqueId, messages::Client)>,
+        ServerStream<(ProcessUniqueId, messages::Client)>,
     ) {
+        let rt = Arc::new(tokio::runtime::Runtime::new().unwrap());
         let (sink, source) = mpsc::unbounded();
 
         let server = Server {
             shared: Arc::new(ServerShared {
+                runtime: rt.clone(),
                 sink,
 
                 clients: RwLock::new(IndexMap::new()),
                 addrs: RwLock::new(IndexMap::new()),
             }),
         };
+        println!("server starting on {}", addr);
 
         let server_pass = server.clone();
-        let listen = TcpListener::bind(addr).await.unwrap();
-        tokio::spawn(async move {
-            loop {
-                let (socket, e) = listen.accept().await.unwrap();
-                let server = server_pass.clone();
-                tokio::spawn(async move {
-                    server.process_connection(socket);
-                });
-            }
+        let addr = addr.to_owned();
+        rt.spawn(async move {
+            let listen = TcpListener::bind(addr).await.unwrap();
+            tokio::spawn(async move {
+                loop {
+                    let (socket, _) = listen.accept().await.unwrap();
+                    let server = server_pass.clone();
+                    tokio::spawn(async move {
+                        server.process_connection(socket);
+                    });
+                }
+            });
         });
         /*let future = listen
             .incoming()
@@ -78,7 +115,7 @@ impl Server {
             .into_future();
         */
 
-        (server, source)
+        (server, ServerStream { stream: Box::pin(source) })
     }
 
     fn process_connection(&self, sock: TcpStream) {
@@ -87,6 +124,7 @@ impl Server {
         let (send, recv) = framed.split();
 
         let id = ProcessUniqueId::new();
+        println!("got connection from {}, id: {}", peer_addr, id);
 
         let rf = self.process_reader(id, recv);
 
@@ -117,8 +155,10 @@ impl Server {
             }))
             .then(move |_| {
                 println!("{} disconnected", id);
-                let mut clients = shared.clients.write().unwrap();
-                clients.remove(&id);
+                {
+                    let mut clients = shared.clients.write().unwrap();
+                    clients.remove(&id);
+                }
                 future::ready(())
             })
     }
@@ -149,7 +189,7 @@ impl Server {
         let enc = BytesMut::from(serde_cbor::ser::to_vec(msg).unwrap().as_slice()); // TODO error type
         let clients = self.shared.clients.read().unwrap();
         if let Some(chan) = clients.get(&id) {
-            chan.unbounded_send(enc.clone().into()).unwrap();
+            chan.unbounded_send(enc.into()).unwrap();
         } else {
             // TODO errors
         }

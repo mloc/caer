@@ -20,6 +20,8 @@ caer_types = { path = "../caer_types" }
 aco = { path = "../aco" }
 unwind = "0.3.0"
 num-traits = "0.2.12"
+aed_server = { path = "../aed_server" }
+aed_common = { path = "../aed_common" }
 
 [dependencies.llvm_stackmaps]
 path = "../llvm_stackmaps"

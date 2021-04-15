@@ -4,7 +4,7 @@ use aed_common::messages;
 use futures::channel::mpsc;
 use std::io;
 use futures::{Future, Stream, Sink, StreamExt, SinkExt, FutureExt, future, TryStream, TryStreamExt};
-use tokio::net::{TcpStream};
+use tokio::net::TcpStream;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use futures::task::Poll;
 
@@ -16,7 +16,7 @@ pub struct Client {
 
 impl Client {
     pub fn new(host: &str) -> Self {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
 
         let (out_send, out_recv) = mpsc::unbounded();
         let (in_send, in_recv) = mpsc::unbounded();
@@ -32,8 +32,6 @@ impl Client {
                 }))
             }
         ));
-
-        //let task = rt.spawn(in_recv);
 
         Client {
             runtime: rt,

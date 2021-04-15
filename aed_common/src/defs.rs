@@ -1,4 +1,6 @@
 pub type ObjId = u32;
+pub type VerbId = u32;
+pub type UserId = u32;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Appearance {

@@ -28,6 +28,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "aed_server"
+version = "0.1.0"
+dependencies = [
+ "aed_common",
+ "bytes 1.0.1",
+ "futures",
+ "indexmap",
+ "quote 0.6.13",
+ "serde_cbor 0.8.2",
+ "snowflake",
+ "syn 0.15.44",
+ "tokio",
+ "tokio-serde-cbor",
+ "tokio-serde-json",
+ "tokio-stream",
+ "tokio-util",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "0.7.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -193,6 +212,8 @@ name = "caer_runtime"
 version = "0.1.0"
 dependencies = [
  "aco",
+ "aed_common",
+ "aed_server",
  "bincode",
  "caer_types",
  "index_vec",
@@ -1179,25 +1200,6 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
-]
-
-[[package]]
-name = "server"
-version = "0.1.0"
-dependencies = [
- "aed_common",
- "bytes 1.0.1",
- "futures",
- "indexmap",
- "quote 0.6.13",
- "serde_cbor 0.8.2",
- "snowflake",
- "syn 0.15.44",
- "tokio",
- "tokio-serde-cbor",
- "tokio-serde-json",
- "tokio-stream",
- "tokio-util",
 ]
 
 [[package]]

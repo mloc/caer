@@ -123,7 +123,7 @@ cfg_if::cfg_if! {
 if #[cfg(all(any(target_os = "ios", target_os = "netbsd", not(target_arch = "arm"))))] {
     // Not ARM EHABI
     #[repr(C)]
-    #[derive(Copy, Clone, PartialEq)]
+    #[derive(Debug, Copy, Clone, PartialEq)]
     pub enum _Unwind_Action {
         _UA_SEARCH_PHASE = 1,
         _UA_CLEANUP_PHASE = 2,

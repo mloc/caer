@@ -1,5 +1,6 @@
-#![feature(ptr_offset_from)]
 #![feature(arbitrary_enum_discriminant)]
+#![feature(unwind_attributes)]
+#![feature(c_unwind)]
 
 mod alloc;
 pub mod arg_pack;
@@ -13,5 +14,6 @@ mod gc_stackmap;
 pub mod list;
 pub mod runtime;
 pub mod string_table;
+mod sync;
 pub mod val;
 pub mod vtable;

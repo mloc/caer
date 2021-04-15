@@ -107,7 +107,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     fn emit_main(&mut self) -> inkwell::basic_block::BasicBlock<'ctx> {
-        let func_type = self.ctx.llvm_ctx.void_type().fn_type(&[], false);
+        let func_type = self.ctx.llvm_ctx.i32_type().fn_type(&[], false);
         let func = self.ctx.module.add_function("main", func_type, None);
 
         self.ctx.llvm_ctx.append_basic_block(func, "entry")
@@ -170,7 +170,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             self.ctx.llvm_ctx.i64_type().const_int(entry_func.raw(), false).into(),
         ], "");
 
-        self.ctx.builder.build_return(None);
+        self.ctx.builder.build_return(Some(&self.ctx.llvm_ctx.i32_type().const_int(0, false)));
     }
 
     fn populate_datum_types(&mut self) {

@@ -1,7 +1,3 @@
-#![feature(maybe_uninit_uninit_array)]
-#![feature(maybe_uninit_extra)]
-#![feature(maybe_uninit_slice)]
-
 #[macro_use]
 extern crate lazy_static;
 
@@ -49,9 +45,9 @@ fn grab_args<'a, const N: usize>(n: c_int, v: *const *const c_char) -> Option<[&
     let dummy = EMPTY_RET.as_c_str();
     let mut o = [dummy; N];
 
-    for i in 0..N {
+    for (i, entry) in o.iter_mut().enumerate() {
         unsafe {
-            o[i] = CStr::from_ptr(*(v.offset(i as _)));
+            *entry = CStr::from_ptr(*(v.offset(i as _)));
         }
     }
 
@@ -104,7 +100,8 @@ pub extern "C" fn dibby_shutdown(_n: c_int, _v: *const *const c_char) -> *const 
 }
 
 #[no_mangle]
-pub extern "C" fn dibby_recv(_n: c_int, _v: *const *const c_char) -> *const c_char {
+pub extern "C" fn dibby_recv(n: c_int, v: *const *const c_char) -> *const c_char {
+    let [] = grab_args_or!(n, v, "bad number of args");
     let mut client = CLIENT.lock().unwrap();
     if let Some(ref mut client) =  *client {
         match client.poll_recv() {

@@ -19,7 +19,9 @@ unsafe extern "C" fn rt_exception_get_val(exception: &Exception, out_val: &mut V
 }
 
 #[no_mangle]
-unsafe extern "C" fn rt_throw(exception_val: &Val) -> ! {
+//#[unwind(allowed)]
+unsafe extern "C-unwind" fn rt_throw(exception_val: *const Val) -> ! {
+    println!("pre");
     let exception = Box::new(Exception {
         header: unwind::_Unwind_Exception {
             exception_class: DM_EXCEPTION_CLASS,
@@ -28,7 +30,9 @@ unsafe extern "C" fn rt_throw(exception_val: &Val) -> ! {
         },
         exception_val: *exception_val,
     });
+    println!("getting there");
     let exception_param = Box::into_raw(exception) as *mut unwind::_Unwind_Exception;
+    println!("oh man");
     let ret = unwind::_Unwind_RaiseException(exception_param);
 
     println!("_Unwind_RaiseException errored with {:?}, aborting.", ret);

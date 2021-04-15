@@ -1,15 +1,15 @@
 use crate::alloc::Alloc;
 use crate::datum::Datum;
-use crate::environment::Environment;
 use crate::exec;
 use crate::gc_stackmap::GcStackmap;
 use crate::list::List;
 use crate::string_table::StringTable;
 use crate::val::Val;
-use crate::vtable::{self, ProcPtr};
+use crate::vtable;
 use caer_types::{id::{FuncId, StringId, TypeId}, rt_env::RtEnv};
 use caer_types::type_tree::Specialization;
 use crate::arg_pack::CallBundle;
+use crate::sync;
 
 use std::fs::File;
 use std::mem;
@@ -33,7 +33,8 @@ pub struct Runtime {
 // TODO: ERRH
 /// # Safety
 /// Should only be called by generated code that knows what it's doing; in particular, the
-/// stackmap pointers need to be safe.
+/// pointers need to be valid, and global_rt must point to an appropriately sized section of
+/// memory.
 #[no_mangle]
 pub unsafe extern "C" fn rt_runtime_init(
     global_rt: &'static mut Runtime,
@@ -75,6 +76,7 @@ pub unsafe extern "C" fn rt_runtime_init(
     let mut meta = MetaRuntime {
         executor: exec::Executor::setup(),
         dmrt: global_rt,
+        sync_server: sync::SyncServer::setup(),
     };
     meta.start(entry_proc);
 }
@@ -180,10 +182,10 @@ impl Runtime {
 // dark and ephemeral
 // the lie that keeps the world running
 // TODO: move
-#[derive(Debug)]
 pub struct MetaRuntime {
     executor: exec::Executor,
     dmrt: &'static mut Runtime,
+    sync_server: sync::SyncServer,
 }
 
 impl MetaRuntime {
@@ -197,6 +199,9 @@ impl MetaRuntime {
                 println!("no procs left in queue, running final GC and finishing");
                 crate::gc::run(self.dmrt);
                 break;
+            }
+            for msg in self.sync_server.iter_messages() {
+                println!("msg: {:?}", msg);
             }
         }
         println!("runtime finished");

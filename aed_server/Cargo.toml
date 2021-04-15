@@ -1,12 +1,8 @@
 [package]
 authors = ["Colm Ó hIcí <colmohici@gmail.com>"]
-name = "server"
+name = "aed_server"
 edition = "2018"
 version = "0.1.0"
-
-[lib]
-name = "ludo"
-crate-type = ["cdylib"]
 
 [dependencies]
 indexmap = "1.0.1"

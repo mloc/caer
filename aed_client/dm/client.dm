@@ -11,10 +11,10 @@
 	call(LIB_PATH, "dibby_send")(msg)
 	while(TRUE)
 		var/ret = call(LIB_PATH, "dibby_recv")()
-		world.log << json_encode(ret)
 		if(ret != "")
+			world.log << json_encode(ret)
 			break
-		sleep(10)
+		sleep(0)
 	call(LIB_PATH, "dibby_shutdown")()
 	del(src)
 

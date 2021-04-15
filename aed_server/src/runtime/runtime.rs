@@ -29,7 +29,7 @@ pub struct Runtime {
 }
 
 //#[expose_c_stubs(runtime)]
-impl Runtime {
+/*impl Runtime {
     async fn setup(proc: unsafe extern fn()) -> Self {
         let (server, msg_in) = server::Server::start(&"0.0.0.0:2939".parse().unwrap()).await;
 
@@ -65,4 +65,4 @@ impl Runtime {
             Poll::Pending => None,
         }
     }*/
-}
+}*/
