@@ -66,11 +66,16 @@ impl<'a> ProcBuilder<'a> {
     fn build_builtin(&mut self, mut func: Function, builtin: &BuiltinProc) -> FuncId {
         match builtin {
             BuiltinProc::Sleep => {
-                // TODO: handle sleep arg
-                let proc_spec = ProcSpec::default();
+                let s_delay = self.env.intern_string("delay");
+                // TODO: handle args better
+                let id = func.add_var(func.global_scope, ty::Complex::Any, s_delay);
+                func.params.push(id);
+                let mut proc_spec = ProcSpec::default();
+                proc_spec.params.push(s_delay);
+                proc_spec.names.push((s_delay, 0));
                 func.calling_spec = Some(CallingSpec::Proc(proc_spec));
                 let mut func_builder = FuncBuilder::for_proc(&mut self.env, &self.objtree, func);
-                func_builder.build_raw(&[cfg::Op::Sleep(None)]);
+                func_builder.build_raw_sleep(id);
                 func_builder.func.builtin = true;
                 func_builder.finalize()
             },

@@ -79,9 +79,11 @@
 	forl()
 	 */
 
-	sleep()
+	sleep(0)
 
 	closure()
+
+	run_forever()
 
 /proc/abc()
 	var/x
@@ -123,7 +125,7 @@
 	world << "l1.Copy(3): [l1:Copy(3)]"
 	world << "l1.Copy(2, 4): [l1:Copy(2, 4)]"
 
-	sleep()
+	sleep(0)
 
 /proc/catchet()
 	world << "before try"
@@ -157,5 +159,14 @@
 	var/y = 9
 	spawn
 		world.log << "CLOSURE: [x+x+y]"
+
+/proc/run_forever()
+	spawn
+		var/i = 0
+		while(1) {
+			world.log << "still here after [i] cycles"
+			i = i + 1
+			sleep(10)
+		}
 
 //#include "badty.dm"

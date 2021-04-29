@@ -17,6 +17,11 @@ impl SyncServer {
         Self { server, stream }
     }
 
+    // TODO: remove this
+    pub fn get_sync_send(&self) -> server::Server {
+        self.server.clone()
+    }
+
     pub fn iter_messages_timeout(&self, timeout: Duration) -> MessagesIter {
         MessagesIter::new_timeout(&self.stream, timeout)
     }

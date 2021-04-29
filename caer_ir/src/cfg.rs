@@ -310,10 +310,9 @@ impl<'a> Function {
                     },
                     Op::Spawn(_, None) => {},
 
-                    Op::Sleep(Some(src)) => {
+                    Op::Sleep(src) => {
                         flow[*src].reads += 1;
                     },
-                    Op::Sleep(None) => {},
                 }
             }
 
@@ -673,7 +672,7 @@ pub enum Op {
     CatchException(Option<VarId>),
 
     Spawn(ClosureSlotId, Option<LocalId>),
-    Sleep(Option<LocalId>),
+    Sleep(LocalId),
 }
 
 impl Op {
@@ -726,8 +725,7 @@ impl Op {
             // hm, this should probably source all the captured vars..
             Op::Spawn(_, Some(delay)) => vec![*delay],
             Op::Spawn(_, None) => vec![],
-            Op::Sleep(Some(delay)) => vec![*delay],
-            Op::Sleep(None) => vec![],
+            Op::Sleep(delay) => vec![*delay],
         }
     }
 
@@ -790,10 +788,9 @@ impl Op {
                 f(delay);
             },
             Op::Spawn(_, None) => {},
-            Op::Sleep(Some(delay)) => {
+            Op::Sleep(delay) => {
                 f(delay);
             },
-            Op::Sleep(None) => {},
         }
     }
 

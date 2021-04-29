@@ -2,9 +2,11 @@ use std::fs::File;
 use std::mem;
 use std::ptr::NonNull;
 
+use aed_common::messages;
 use caer_types::id::{FuncId, StringId, TypeId};
 use caer_types::rt_env::RtEnv;
 use caer_types::type_tree::Specialization;
+use ordered_float::OrderedFloat;
 
 use crate::alloc::Alloc;
 use crate::arg_pack::CallBundle;
@@ -13,6 +15,7 @@ use crate::gc_stackmap::GcStackmap;
 use crate::list::List;
 use crate::meta_runtime::MetaRuntime;
 use crate::string_table::StringTable;
+use crate::sync::SyncServer;
 use crate::val::Val;
 use crate::vtable;
 
@@ -24,11 +27,17 @@ pub struct Runtime {
     pub(crate) gc_stackmap: GcStackmap,
     pub(crate) alloc: Alloc,
     // Updated by executor
+    // TODO: move to scheduler/timemaster(?)
     pub(crate) world_time: u64,
 
     // These are used to communicate back to the executor when yielding
+    // TODO: encapsulate somewhere else
     pub(crate) queued_funcs: Vec<(CallBundle, u64)>,
-    pub(crate) sleep_duration: u64,
+    pub(crate) sleep_duration: OrderedFloat<f32>,
+
+    // TEMPORARY
+    // TODO: replace with better message plumbing
+    sync_send: aed_server::server::Server,
 }
 
 // TODO: ERRH
@@ -61,6 +70,8 @@ pub unsafe extern "C" fn rt_runtime_init(
 
     let gc_stackmap = GcStackmap::parse(stackmaps_raw);
 
+    let sync_server = SyncServer::setup();
+
     let new = Runtime {
         string_table: init_st,
         vtable,
@@ -69,13 +80,14 @@ pub unsafe extern "C" fn rt_runtime_init(
         alloc: Alloc::new(),
         world_time: 0,
         queued_funcs: Vec::new(),
-        sleep_duration: 0,
+        sleep_duration: 0f32.into(),
+        sync_send: sync_server.get_sync_send(),
     };
 
     // update the global runtime seen by user code
     mem::forget(mem::replace(global_rt, new));
 
-    let mut meta = MetaRuntime::new(global_rt);
+    let mut meta = MetaRuntime::new(global_rt, sync_server);
     meta.start(entry_proc);
 }
 
@@ -91,6 +103,10 @@ impl Runtime {
         let size = mem::size_of::<List>();
         self.alloc.alloc(size).cast()
     }
+
+    pub fn send_message(&self, msg: &messages::Server) {
+        self.sync_send.send_all(msg)
+    }
 }
 
 impl Runtime {
@@ -102,8 +118,12 @@ impl Runtime {
     }
 
     #[no_mangle]
-    pub extern "C" fn rt_runtime_suspend(&mut self, sleep_duration: u64) {
-        self.sleep_duration = sleep_duration;
+    pub extern "C" fn rt_runtime_suspend(&mut self, sleep_duration: &Val) {
+        println!("SLEEP({:?})", sleep_duration);
+        self.sleep_duration = match sleep_duration {
+            Val::Float(f) => *f,
+            _ => panic!("invalid val for sleep(): {:?}", sleep_duration),
+        };
 
         // Is this necessary?
         // To be on the safe side, we end the ref on self.

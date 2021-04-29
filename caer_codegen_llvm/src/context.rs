@@ -338,7 +338,7 @@ rt_funcs! {
         (rt_runtime_init, void_type~val, [rt_type~gptr, i8_type~gptr, i8_type~gptr, vt_entry_type~gptr, opaque_type_ptr~gptr, i64_type~val]),
         (rt_runtime_alloc_datum, datum_common_type~ptr, [rt_type~gptr, i32_type~val]),
         (rt_runtime_concat_strings, i64_type~val, [rt_type~gptr, i64_type~val, i64_type~val]),
-        (rt_runtime_suspend, void_type~val, [rt_type~gptr]),
+        (rt_runtime_suspend, void_type~val, [rt_type~gptr, val_type~ptr]),
         (rt_runtime_spawn_closure, void_type~val, [
             rt_type~gptr,
             // func id of closure

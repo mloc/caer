@@ -1,11 +1,13 @@
 use std::time::{self, Duration, Instant};
 
+use aed_common::messages;
+use aed_server::server::ClientId;
 use caer_types::id::FuncId;
 use exec::TickTime;
 
 use crate::{exec, runtime, sync};
 
-const TICK_LAG: time::Duration = time::Duration::from_millis(1000);
+pub const TICK_LAG: time::Duration = time::Duration::from_millis(1000);
 
 // TODO: rename!
 // what a name
@@ -18,16 +20,17 @@ pub struct MetaRuntime {
     sync_server: sync::SyncServer,
 
     // Scheduling stuff
+    // TODO: move into scheduler
     tick_base: TickTime,
     tick_base_time: Instant,
 }
 
 impl MetaRuntime {
-    pub fn new(dmrt: &'static mut runtime::Runtime) -> Self {
+    pub fn new(dmrt: &'static mut runtime::Runtime, sync_server: sync::SyncServer) -> Self {
         Self {
             executor: exec::Executor::setup(),
             dmrt,
-            sync_server: sync::SyncServer::setup(),
+            sync_server,
 
             tick_base: TickTime(0),
             tick_base_time: Instant::now(),
@@ -65,6 +68,7 @@ impl MetaRuntime {
                     "overrun by more than TICK_LAG/2 ({:?}), resetting tick base",
                     TICK_LAG / 2
                 );
+                self.reset_tick_base();
             }
 
             self.dmrt.world_time += 1;
@@ -110,8 +114,13 @@ impl MetaRuntime {
             Some(t) => self.sync_server.iter_messages_timeout(t),
             None => self.sync_server.iter_messages_nonblocking(),
         };
-        for msg in iter {
-            println!("msg: {:?}", msg);
+        // TODO: remove collect
+        for (id, msg) in iter.collect::<Vec<_>>() {
+            self.handle_message(id, msg);
         }
+    }
+
+    fn handle_message(&mut self, id: ClientId, msg: messages::Client) {
+        println!("{:?}: msg: {:?}", id, msg);
     }
 }

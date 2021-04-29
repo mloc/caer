@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::ptr::NonNull;
 
 use crate::arg_pack::{CallBundle, ClosureArgs, ProcArgs};
+use crate::meta_runtime;
 use crate::runtime::Runtime;
 use crate::val::Val;
 use crate::vtable::{ClosurePtr, ProcPtr};
@@ -87,7 +88,20 @@ impl Executor {
         if !ended {
             println!("[EXEC] Coro {:?} suspended", next_id);
             // TODO: what's the SoT for "world time"? - currently, Runtime
-            let sleep_until = rt.world_time + rt.sleep_duration;
+            // TODO: better handling, especially wrt floats
+            let duration = if rt.sleep_duration < 0f32.into() {
+                // TODO: "priority" queueing
+                0
+            } else if rt.sleep_duration > 0f32.into() {
+                // TODO: integrate with tick_lag
+                (rt.sleep_duration.into_inner() / 10f32 / meta_runtime::TICK_LAG.as_secs_f32())
+                    .ceil() as u64
+            } else {
+                // TODO: "non priority" queueing
+                0
+            };
+            println!("[EXEC] Sleeping for {} ticks", duration);
+            let sleep_until = rt.world_time + duration;
             self.run_queue.enqueue(next_id, TickTime(sleep_until));
         }
 
@@ -174,16 +188,20 @@ impl Queue {
 
     fn ensure_sorted(&mut self) {
         // Stable sorting is desirable.
-        self.queue.sort_by_key(|(_, t): &(_, TickTime)| *t)
+        self.queue.reverse();
+        self.queue.sort_by_key(|(_, t): &(_, TickTime)| *t);
+        self.queue.reverse();
     }
 
     pub fn enqueue(&mut self, fibre: FibreId, wake_time: TickTime) {
-        self.queue.push((fibre, wake_time))
+        self.queue.reverse();
+        self.queue.push((fibre, wake_time));
+        self.queue.reverse();
     }
 
     pub fn earliest_wake(&mut self) -> Option<TickTime> {
         self.ensure_sorted();
-        self.queue.first().map(|(_, t)| *t)
+        self.queue.last().map(|(_, t)| *t)
     }
 
     pub fn pop(&mut self) -> Option<(FibreId, TickTime)> {

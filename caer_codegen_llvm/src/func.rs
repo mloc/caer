@@ -965,7 +965,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             },
 
             Op::Sleep(delay) => {
-                assert!(delay.is_none());
+                let local = self.get_local(*delay);
                 println!("{:?}", walker.get_cur_lifetimes());
                 self.build_call(
                     self.ctx
@@ -973,7 +973,10 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                         .rt_runtime_suspend
                         .as_global_value()
                         .as_pointer_value(),
-                    &[self.prog_emit.rt_global.as_pointer_value().into()],
+                    &[
+                        self.prog_emit.rt_global.as_pointer_value().into(),
+                        local.into(),
+                    ],
                 );
             },
             //_ => unimplemented!("{:?}", op),

@@ -215,12 +215,12 @@ impl<'a> FuncBuilder<'a> {
         (root_block_id, scope)
     }
 
-    pub fn build_raw(&mut self, ops: &[cfg::Op]) {
+    pub fn build_raw_sleep(&mut self, arg: VarId) {
         let scope = self.func.new_scope(self.func.global_scope);
         let mut block = self.new_block(scope);
-        for op in ops.iter().cloned() {
-            block.push_op(op);
-        }
+        let lid = self.add_local(scope, ty::Complex::Any);
+        block.push_op(cfg::Op::Load(lid, arg));
+        block.push_op(cfg::Op::Sleep(lid));
         self.finalize_block(block)
     }
 

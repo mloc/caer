@@ -1,6 +1,7 @@
 use std::ops::*;
 use std::ptr::NonNull;
 
+use aed_common::messages;
 use caer_types::id::StringId;
 use caer_types::type_tree::Specialization;
 use caer_types::{layout, op};
@@ -74,15 +75,17 @@ pub extern "C" fn rt_val_to_switch_disc(val: &Val) -> u32 {
 
 #[no_mangle]
 pub extern "C" fn rt_val_print(val: &Val, rt: &mut Runtime) {
-    match val {
-        Val::Null | Val::Ref(None) => println!("null"),
-        Val::Float(n) => println!("{}", n),
-        Val::String(s) => println!("{:?}", rt.string_table.get(*s)),
+    let s = match val {
+        Val::Null | Val::Ref(None) => "null".into(),
+        Val::Float(n) => format!("{}", n),
+        Val::String(s) => format!("{:?}", rt.string_table.get(*s)),
         _ => {
             let sid = val.cast_string(rt);
-            println!("{}", rt.string_table.get(sid));
+            rt.string_table.get(sid).into()
         },
-    }
+    };
+    println!("{}", s);
+    rt.send_message(&messages::Server::Message(s));
 }
 
 #[no_mangle]
