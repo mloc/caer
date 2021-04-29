@@ -1,8 +1,8 @@
-pub mod server;
 mod master_controller;
 mod runtime;
+pub mod server;
 
-use aed_common::{messages, defs};
+use aed_common::{defs, messages};
 use tokio_stream::StreamExt;
 
 /*pub struct Server {}
@@ -26,7 +26,7 @@ impl Server {
 }*/
 
 fn main() {
-    let (srv, mut src_stream) = server::Server::start(&"0.0.0.0:2939".parse().unwrap());
+    /*let (srv, mut src_stream) = server::Server::start(&"0.0.0.0:2939".parse().unwrap());
 
     loop {
         while let Some((id, msg)) = src_stream.poll() {
@@ -48,7 +48,7 @@ fn main() {
             };
         }
         std::thread::sleep_ms(1000);
-    }
+    }*/
 
     /*let addr = "127.0.0.1:2978".parse().unwrap();
     let listener = TcpListener::bind(&addr).unwrap();

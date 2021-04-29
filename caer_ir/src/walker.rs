@@ -22,7 +22,7 @@ impl<'a> CFGWalker<'a> {
     pub fn build(proc: &'a cfg::Function) -> Self {
         let (postorder, preds) = Self::build_postorder(proc);
         let rev_postorder = {
-            let mut v = postorder.clone();
+            let mut v = postorder;
             v.reverse();
             v
         };
@@ -59,22 +59,22 @@ impl<'a> CFGWalker<'a> {
     }
 
     pub fn walk(mut self, proc: &'a cfg::Function, actor: &mut impl WalkActor) {
-        actor.pre_start(&mut self);
-        for id in self.rev_postorder.clone().iter().copied() {
+        actor.pre_start(&self);
+        for id in self.rev_postorder.iter().copied() {
             let block = &proc.blocks[id];
 
             self.lifetime_tracker.block_start(id, self.preds[id]);
-            actor.block_start(&mut self, id);
+            actor.block_start(&self, id);
 
             for (i, op) in block.ops.iter().enumerate() {
-                actor.handle_op(&mut self, id, op, i);
+                actor.handle_op(&self, id, op, i);
                 self.lifetime_tracker.handle_op(op);
             }
 
-            actor.block_end(&mut self, id);
+            actor.block_end(&self, id);
             self.lifetime_tracker.block_end(id);
         }
-        actor.end(&mut self);
+        actor.end(&self);
     }
 
     pub fn get_predecessor(&self, id: BlockId) -> Option<BlockId> {
@@ -175,7 +175,7 @@ impl<'a> LifetimeTracker<'a> {
             } else if pred_scope.parent.is_some() && pred_scope.parent == cur_scope.parent {
                 // special case, jumping between two sibling scopes. rollback then add a jb rec
                 assert!(self.scope_jb[cur_scope.id].is_none(), "scope {:?} has multiple entry points", cur_scope.id);
-                self.scope_jb[cur_scope.id] = self.scope_jb[pred_scope.id].clone();
+                self.scope_jb[cur_scope.id] = self.scope_jb[pred_scope.id];
                 self.jb_rollback(pred_scope.id, &mut alive_locals, &mut alive_vars);
             } else {
                 panic!("could not find relation between {:?} and {:?}", pred_scope.id, cur_scope.id);

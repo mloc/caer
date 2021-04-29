@@ -65,10 +65,7 @@ impl Complex {
     // term any is overloaded.
     // in this case it means any ty that needs RTTI
     pub fn is_any(&self) -> bool {
-        match self {
-            Complex::Any | Complex::OneOf(_) => true,
-            _ => false,
-        }
+        matches!(self, Complex::Any | Complex::OneOf(_))
     }
 
     pub fn contains(&self, prim: Primitive) -> bool {
@@ -92,14 +89,11 @@ impl Complex {
 
 impl Ty for Primitive {
     fn needs_destructor(&self) -> bool {
-        match self {
-            Primitive::Ref(_) => true,
-            _ => false,
-        }
+        matches!(self, Primitive::Ref(_))
     }
 
     fn as_primitive(&self) -> Option<Primitive> {
-        return Some(*self);
+        Some(*self)
     }
 
     fn is_primitive(&self, prim: Primitive) -> bool {

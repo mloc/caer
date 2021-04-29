@@ -12,6 +12,7 @@ pub mod ffi;
 mod gc;
 mod gc_stackmap;
 pub mod list;
+mod meta_runtime;
 pub mod runtime;
 pub mod string_table;
 mod sync;

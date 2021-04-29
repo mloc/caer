@@ -29,7 +29,7 @@ impl StringTable {
     }
 
     pub fn lookup(&self, s: impl AsRef<str>) -> Option<StringId> {
-        self.ids.get(s.as_ref()).map(|id| *id)
+        self.ids.get(s.as_ref()).copied()
     }
 
     pub fn put<'a>(&mut self, s: impl Into<Cow<'a, str>>) -> StringId {
@@ -56,5 +56,11 @@ impl StringTable {
     pub fn serialize_runtime(&self, writer: impl Write) {
         let flat: Vec<(StringId, &String)> = self.strings.iter_enumerated().collect();
         bincode::serialize_into(writer, &flat).unwrap();
+    }
+}
+
+impl Default for StringTable {
+    fn default() -> Self {
+        Self::new()
     }
 }

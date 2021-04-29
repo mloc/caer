@@ -1,0 +1,11 @@
+[package]
+name = "caer_shimgen"
+version = "0.1.0"
+authors = ["Colm Ó hIcí <git@ohici.ie>"]
+edition = "2018"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+caer_ir = { path = "../caer_ir" }
+caer_types = { path = "../caer_types" }
+thiserror = "1.0.24"

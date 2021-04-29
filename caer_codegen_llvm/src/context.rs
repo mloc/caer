@@ -1,4 +1,3 @@
-use inkwell;
 use std::mem::size_of;
 use inkwell::types::BasicType;
 use caer_types::layout;

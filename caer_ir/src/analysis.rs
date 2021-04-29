@@ -324,9 +324,9 @@ impl OpIndex {
     }
 }
 
-impl Into<RefIndex> for OpIndex {
-    fn into(self) -> RefIndex {
-        RefIndex::Op(self)
+impl From<OpIndex> for RefIndex {
+    fn from(val: OpIndex) -> Self {
+        RefIndex::Op(val)
     }
 }
 

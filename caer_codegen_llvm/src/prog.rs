@@ -123,7 +123,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             self.ctx.module.get_intrinsic("llvm.memcpy", &[i8_ptr.into(), i8_ptr.into(), self.ctx.llvm_ctx.i64_type().into()]).unwrap()
         };
 
-        self.ctx.builder.build_call(memcpy_intrinsic, &[dest_i8.into(), src_i8.into(), self.ctx.llvm_ctx.i64_type().const_int(ty::Complex::Any.get_store_size(), false).into(), self.ctx.llvm_ctx.bool_type().const_zero().into()], "");
+        self.ctx.builder.build_call(memcpy_intrinsic, &[dest_i8, src_i8, self.ctx.llvm_ctx.i64_type().const_int(ty::Complex::Any.get_store_size(), false).into(), self.ctx.llvm_ctx.bool_type().const_zero().into()], "");
     }
 
     fn finalize_main(&self, block: inkwell::basic_block::BasicBlock, entry_func: FuncId) {
@@ -218,9 +218,9 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 
             let field_tys = self.ctx.rt.ty.vt_entry_type.get_field_types();
             assert_eq!(entries.len(), field_tys.len());
-            let cast_entries: Vec<_> = entries.into_iter().enumerate().map(|(i, entry)| {
+            let cast_entries: Vec<_> = entries.iter().enumerate().map(|(i, entry)| {
                 match *entry {
-                    AnyValueEnum::FunctionValue(f) => self.ctx.builder.build_bitcast(f.as_global_value().as_pointer_value(), field_tys[i], "").into(),
+                    AnyValueEnum::FunctionValue(f) => self.ctx.builder.build_bitcast(f.as_global_value().as_pointer_value(), field_tys[i], ""),
                     AnyValueEnum::IntValue(v) => v.into(),
                     _ => unimplemented!("add handler"),
                 }
@@ -275,7 +275,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 
         self.ctx.builder.position_at_end(entry_block);
 
-        if cases.len() == 0 {
+        if cases.is_empty() {
             // hack, TODO: replace
             self.ctx.builder.build_unconditional_branch(conv_block);
             self.ctx.builder.position_at_end(conv_block);
@@ -383,7 +383,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 
         self.ctx.builder.position_at_end(entry_block);
 
-        if cases.len() == 0 {
+        if cases.is_empty() {
             // hack, TODO: replace
             self.ctx.builder.build_unconditional_branch(conv_block);
             self.ctx.builder.position_at_end(conv_block);

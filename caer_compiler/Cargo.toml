@@ -8,3 +8,4 @@ license = "GPL-3.0-or-later"
 [dependencies]
 caer_codegen_llvm = { path = "../caer_codegen_llvm" }
 caer_frontend = { path = "../caer_frontend" }
+caer_shimgen = { path = "../caer_shimgen" }

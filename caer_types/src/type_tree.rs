@@ -24,6 +24,12 @@ impl TypeTree {
     }
 }
 
+impl Default for TypeTree {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Specialization {
     Datum,
@@ -45,6 +51,12 @@ pub struct DType {
 
     pub procs: Vec<StringId>,
     pub proc_lookup: HashMap<StringId, ProcInfo>,
+}
+
+impl DType {
+    pub fn iter_procs(&self) -> impl Iterator<Item = &ProcInfo> + '_ {
+        self.procs.iter().map(move |id| &self.proc_lookup[id])
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

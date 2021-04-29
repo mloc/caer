@@ -64,6 +64,9 @@ pub struct Closure {
 #[derive(Debug, Clone, Serialize)]
 pub struct Function {
     pub id: FuncId,
+    // For method procs: the func called by ..()
+    // TODO: should this be moved into some proc bookkeeping?
+    pub parent: Option<FuncId>,
 
     pub blocks: IndexVec<BlockId, Block>,
     pub scopes: IndexVec<ScopeId, Scope>,
@@ -78,6 +81,9 @@ pub struct Function {
     pub child_closures: IndexVec<ClosureSlotId, FuncId>,
 
     pub calling_spec: Option<CallingSpec>,
+
+    // Hacky. Used for shim gen.
+    pub builtin: bool,
 }
 
 impl<'a> Function {
@@ -90,6 +96,7 @@ impl<'a> Function {
 
         let mut new = Self {
             id,
+            parent: None,
 
             blocks: IndexVec::new(),
             scopes,
@@ -104,6 +111,8 @@ impl<'a> Function {
             child_closures: IndexVec::new(),
 
             calling_spec: None,
+
+            builtin: false,
         };
 
         // TODO: compile time intern, "."

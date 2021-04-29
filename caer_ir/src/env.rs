@@ -2,9 +2,7 @@ use super::cfg::*;
 use crate::string::StringTable;
 use caer_types::id::{FuncId, StringId};
 use std::collections::HashMap;
-use caer_types::func::FuncInfo;
 use caer_types::type_tree::TypeTree;
-use index_vec::IndexVec;
 use std::borrow::Cow;
 
 // this should be renamed; ir-something
@@ -45,5 +43,11 @@ impl Env {
 
     pub fn intern_string_ro(&self, s: impl AsRef<str>) -> StringId {
         self.string_table.lookup(s.as_ref()).unwrap()
+    }
+}
+
+impl Default for Env {
+    fn default() -> Self {
+        Self::new()
     }
 }

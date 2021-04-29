@@ -1,21 +1,28 @@
 #define LIB_PATH "libmclient.so"
+#define LIB_CALL(cmd) call(LIB_PATH, cmd)
+
+// TODO: find fastest num2text
+#define CALL_VERB(id) LIB_CALL("dibby_call_verb")("[id]")
+#include "../../caer_compiler/out/shim.dm"
 
 /world/New()
 	world.log << "starting"
 	try
-		call(LIB_PATH, "dibby_setup")("127.0.0.1:2939")
+		LIB_CALL("dibby_setup")("127.0.0.1:2939")
 	catch(var/e)
 		world.log << json_encode(e)
 		del(src)
 	var/msg = json_encode(list("Message" = "hallo"))
-	call(LIB_PATH, "dibby_send")(msg)
+	LIB_CALL("dibby_send")(msg)
 	while(TRUE)
-		var/ret = call(LIB_PATH, "dibby_recv")()
+		var/ret = LIB_CALL("dibby_recv")()
 		if(ret != "")
 			world.log << json_encode(ret)
-			break
-		sleep(0)
-	call(LIB_PATH, "dibby_shutdown")()
+			sleep(-1)
+			continue
+			//break
+		sleep(1)
+	LIB_CALL("dibby_shutdown")()
 	del(src)
 
 #define GET_OBJECT(id) (_all_objects[id])

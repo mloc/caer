@@ -1,7 +1,6 @@
 use crate::{arg_pack::{CallBundle, ClosureArgs, ProcArgs}, vtable::ClosurePtr};
 use crate::runtime::Runtime;
 use crate::vtable::ProcPtr;
-use std::collections::VecDeque;
 use std::ptr::NonNull;
 use crate::val::Val;
 use std::collections::HashMap;
@@ -9,13 +8,16 @@ use std::collections::HashMap;
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 struct FibreId(usize);
 
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, PartialOrd, Ord)]
+pub struct TickTime(pub u64);
+
 #[derive(Debug)]
 pub struct Executor {
     coro_ctx: CoroCtx,
 
     fibres: HashMap<FibreId, FibreRecord>,
     next_fibre_id: FibreId,
-    run_queue: VecDeque<FibreId>,
+    run_queue: Queue,
 }
 
 impl Executor {
@@ -24,11 +26,11 @@ impl Executor {
             coro_ctx: CoroCtx::create(),
             fibres: HashMap::new(),
             next_fibre_id: FibreId(0),
-            run_queue: VecDeque::new(),
+            run_queue: Queue::new(),
         }
     }
 
-    pub fn queue_func(&mut self, bundle: CallBundle, at_time: u64) {
+    pub fn queue_func(&mut self, bundle: CallBundle, at_time: TickTime) {
         let fibre_id = self.next_fibre_id;
         self.next_fibre_id.0 += 1;
 
@@ -38,15 +40,20 @@ impl Executor {
         };
 
         self.fibres.insert(fibre_id, fibre);
-        self.run_queue.push_back(fibre_id);
+        self.run_queue.enqueue(fibre_id, at_time);
     }
 
     pub fn run_next(&mut self, rt: &mut Runtime) -> bool {
-        if self.run_queue.is_empty() {
-            return false
+        println!("[EXEC] queue: {:?}", self.run_queue);
+        match self.run_queue.earliest_wake() {
+            // Nothing in runqueue
+            None => return false,
+            // Earliest in runqueue is in the future
+            Some(t) if t > TickTime(rt.world_time) => return false,
+            _ => {},
         }
 
-        let next_id = self.run_queue.pop_front().unwrap();
+        let (next_id, _) = self.run_queue.pop().unwrap();
         let next_fibre = self.fibres.get_mut(&next_id).unwrap();
 
         let coro = match &next_fibre.state {
@@ -78,13 +85,11 @@ impl Executor {
             next_fibre.state = FibreState::Finished;
         }
 
-        for (b, t) in rt.queued_funcs.drain(..).collect::<Vec<_>>().clone() {
-            self.queue_func(b, t);
-        }
-
         if !ended {
             println!("[EXEC] Coro {:?} suspended", next_id);
-            self.run_queue.push_back(next_id);
+            // TODO: what's the SoT for "world time"? - currently, Runtime
+            let sleep_until = rt.world_time + rt.sleep_duration;
+            self.run_queue.enqueue(next_id, TickTime(sleep_until));
         }
 
         true
@@ -155,5 +160,41 @@ impl CoroCtx {
 
     unsafe fn resume_coro(&self, coro: &aco::Coro) -> bool {
         self.ctx.resume(coro)
+    }
+}
+
+#[derive(Debug)]
+struct Queue {
+    queue: Vec<(FibreId, TickTime)>,
+}
+
+impl Queue {
+    pub fn new() -> Self {
+        Self {
+            queue: Default::default(),
+        }
+    }
+
+    fn ensure_sorted(&mut self) {
+        // Stable sorting is desirable.
+        self.queue.sort_by_key(|(_, t): &(_, TickTime)| *t)
+    }
+
+    pub fn enqueue(&mut self, fibre: FibreId, wake_time: TickTime) {
+        self.queue.push((fibre, wake_time))
+    }
+
+    pub fn earliest_wake(&mut self) -> Option<TickTime> {
+        self.ensure_sorted();
+        self.queue.first().map(|(_, t)| *t)
+    }
+
+    pub fn pop(&mut self) -> Option<(FibreId, TickTime)> {
+        self.ensure_sorted();
+        self.queue.pop()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.queue.is_empty()
     }
 }

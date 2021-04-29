@@ -3,6 +3,7 @@ extern crate lazy_static;
 
 mod client;
 
+use std::pin::Pin;
 use std::os::raw::{c_char, c_int};
 use std::ffi::{CStr, CString};
 use std::cell::RefCell;
@@ -17,9 +18,10 @@ lazy_static! {
 
 fn return_byond(s: CString) -> *const c_char {
     thread_local! {
-        static RET: RefCell<Option<CString>> = RefCell::new(None);
+        static RET: RefCell<Option<Pin<Box<CStr>>>> = RefCell::new(None);
     }
 
+    let s: Pin<_> = s.into_boxed_c_str().into();
     let p = s.as_ptr();
     RET.with(|c| c.replace(Some(s)));
     p

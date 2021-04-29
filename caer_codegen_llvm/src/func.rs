@@ -4,7 +4,7 @@ use inkwell::types::BasicType;
 use inkwell::basic_block::BasicBlock;
 use caer_types::layout;
 use caer_types::id::{FuncId, StringId};
-use crate::value::{StackValue, LocalValue, BveWrapper};
+use crate::value::{StackValue, BveWrapper};
 use crate::prog::{ProgEmit, Intrinsic};
 use index_vec::IndexVec;
 use caer_ir::cfg::*;

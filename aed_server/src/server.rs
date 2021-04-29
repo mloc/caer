@@ -1,52 +1,21 @@
-use futures::channel::mpsc;
-use futures::Future;
-use futures::future;
-use futures::TryStream;
-use futures::SinkExt;
-use futures::FutureExt;
 use std::fmt::Debug;
+use std::net::SocketAddr;
+use std::pin::Pin;
+use std::sync::{Arc, RwLock};
+use std::time::Duration;
+use std::{io, sync};
+
 use aed_common::messages;
-use bytes::{BytesMut, Bytes};
-use futures::Sink;
-use futures::Stream;
-use futures::StreamExt;
-use futures::TryStreamExt;
+use bytes::{Bytes, BytesMut};
+use futures::channel::mpsc;
+use futures::task::Poll;
+use futures::{
+    future, Future, FutureExt, Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt,
+};
 use indexmap::IndexMap;
 use snowflake::ProcessUniqueId;
-use std::io;
-use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
-use std::pin::Pin;
-use futures::task::Poll;
-
-// Bit of a hack while aed and caer are separate
-pub struct ServerStream<I> {
-    stream: Pin<Box<dyn Stream<Item = I>>>,
-}
-
-impl<I> ServerStream<I> {
-    pub fn poll(&mut self) -> Option<I> {
-        let waker = futures::task::noop_waker_ref();
-        let mut cx = std::task::Context::from_waker(waker);
-
-        let poll = self.stream.poll_next_unpin(&mut cx); // TODO errors
-        match poll {
-            Poll::Ready(t) => t,
-            Poll::Pending => None,
-        }
-    }
-
-    pub fn iter(&mut self) -> impl Iterator<Item = I> + '_ {
-        std::iter::from_fn(move || self.poll())
-    }
-
-    pub fn decompose(self) -> Pin<Box<dyn Stream<Item = I>>> {
-        self.stream
-    }
-}
-
 
 #[derive(Debug, Clone)]
 pub struct Server {
@@ -58,26 +27,21 @@ pub type ClientId = ProcessUniqueId;
 #[derive(Debug)]
 struct ServerShared {
     runtime: Arc<tokio::runtime::Runtime>,
-    sink: mpsc::UnboundedSender<(ClientId, messages::Client)>,
+    sink: sync::Mutex<sync::mpsc::Sender<(ClientId, messages::Client)>>,
 
     pub clients: RwLock<IndexMap<ProcessUniqueId, mpsc::UnboundedSender<Bytes>>>,
     addrs: RwLock<IndexMap<ProcessUniqueId, SocketAddr>>,
 }
 
 impl Server {
-    pub fn start(
-        addr: &SocketAddr,
-    ) -> (
-        Self,
-        ServerStream<(ProcessUniqueId, messages::Client)>,
-    ) {
+    pub fn start(addr: &SocketAddr) -> (Self, sync::mpsc::Receiver<(ProcessUniqueId, messages::Client)>) {
         let rt = Arc::new(tokio::runtime::Runtime::new().unwrap());
-        let (sink, source) = mpsc::unbounded();
+        let (sink, source) = sync::mpsc::channel();
 
         let server = Server {
             shared: Arc::new(ServerShared {
                 runtime: rt.clone(),
-                sink,
+                sink: sync::Mutex::new(sink),
 
                 clients: RwLock::new(IndexMap::new()),
                 addrs: RwLock::new(IndexMap::new()),
@@ -115,7 +79,7 @@ impl Server {
             .into_future();
         */
 
-        (server, ServerStream { stream: Box::pin(source) })
+        (server, source)
     }
 
     fn process_connection(&self, sock: TcpStream) {
@@ -133,11 +97,10 @@ impl Server {
     }
 
     fn process_reader(
-        &self,
-        id: ProcessUniqueId,
-        reader: impl TryStream<Ok = BytesMut, Error = io::Error>,
+        &self, id: ProcessUniqueId, reader: impl TryStream<Ok = BytesMut, Error = io::Error>,
     ) -> impl Future<Output = ()> {
         let shared = self.shared.clone();
+        let sink = shared.sink.lock().unwrap().clone();
 
         reader
             .map_err(|e| {
@@ -150,9 +113,11 @@ impl Server {
                 future::ready(v)
             })
             .map_ok(move |x| (id, x))
-            .forward(self.shared.sink.clone().sink_map_err(|e| {
-                println!("receive channel error: {:?}", e);
-            }))
+            .try_for_each(move |x| {
+                sink.send(x).unwrap();
+                // TODO: bubble error
+                future::ready(Ok(()))
+            })
             .then(move |_| {
                 println!("{} disconnected", id);
                 {
@@ -164,9 +129,7 @@ impl Server {
     }
 
     fn process_writer(
-        &self,
-        id: ProcessUniqueId,
-        writer: impl Sink<Bytes, Error = impl Debug>,
+        &self, id: ProcessUniqueId, writer: impl Sink<Bytes, Error = impl Debug>,
     ) -> impl Future<Output = ()> {
         let (client_w, client_r) = mpsc::unbounded();
 

@@ -1,8 +1,7 @@
-use std::io::{Read, Write};
+use std::io::Read;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use bincode;
 use caer_types::id::StringId;
 
 // THOUGHTS
@@ -44,7 +43,7 @@ impl StringTable {
     }
 
     pub fn lookup(&self, s: impl AsRef<str>) -> Option<StringId> {
-        self.ids.get(s.as_ref()).map(|id| *id)
+        self.ids.get(s.as_ref()).copied()
     }
 
     pub fn put<'a>(&mut self, s: impl Into<Cow<'a, str>>) -> StringId {
@@ -94,6 +93,12 @@ impl StringTable {
             ids,
             next_id,
         }
+    }
+}
+
+impl Default for StringTable {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

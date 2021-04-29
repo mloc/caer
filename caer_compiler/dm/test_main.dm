@@ -4,6 +4,10 @@
 /datum/container/proc/foo()
 	return "hi am foo"
 
+/datum/container/child/foo()
+	//return ..() + " and child"
+	return "hi am child"
+
 /proc/argfoo(var/bar)
 	world << bar
 

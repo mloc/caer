@@ -4,7 +4,6 @@ use super::ir_builder::IrBuilder;
 use caer_types::type_tree::{self, Specialization};
 use caer_types::id::{StringId, FuncId, TypeId};
 use dreammaker::objtree;
-use index_vec::IndexVec;
 use std::collections::HashMap;
 use caer_ir as ir;
 
@@ -160,7 +159,14 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
             for pv in tp.value.iter() {
                 match &pv.code {
                     objtree::Code::Present(_) => {
-                        let func = self.env.new_func();
+                        let mut func = self.env.new_func();
+                        if let Some(id) = top_func {
+                            func.parent = Some(id)
+                        // At this point, proc_lookup hasn't been modified for this proc since it
+                        // was cloned from the parent type.
+                        } else if let Some(parent_proc) = proc_lookup.get(&name_id) {
+                            func.parent = Some(parent_proc.top_proc)
+                        }
                         top_func = Some(func.id);
                         assert_eq!(func.id, self.funcs.len());
                         self.funcs.push((func, ProcBody::Ast(pv.clone())));
@@ -203,10 +209,10 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
         dty.proc_lookup = proc_lookup;
     }
 
-    fn handle_builtin(&mut self, oty: objtree::TypeRef<'_>, name: &str, tp: &objtree::TypeProc) -> Option<FuncId> {
-        let op = match (&oty.path as &str, name) {
+    fn handle_builtin(&mut self, oty: objtree::TypeRef<'_>, name: &str, _tp: &objtree::TypeProc) -> Option<FuncId> {
+        let builtin = match (&oty.path as &str, name) {
             ("", "sleep") => {
-                ir::cfg::Op::Sleep(None) // TODO: arg
+                BuiltinProc::Sleep
             },
             _ => return None,
         };
@@ -214,15 +220,15 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
         let func = self.env.new_func();
         let id = func.id;
         assert_eq!(func.id, self.funcs.len());
-        self.funcs.push((func, ProcBody::Builtin(BuiltinProc::Sleep)));
+        self.funcs.push((func, ProcBody::Builtin(builtin)));
         Some(id)
     }
 
     fn path_to_pvec(&mut self, tyr: objtree::TypeRef<'ot>) -> Vec<StringId> {
-        assert!(tyr.is_root() || tyr.path.starts_with("/"));
+        assert!(tyr.is_root() || tyr.path.starts_with('/'));
         let mut path_vec = Vec::new();
 
-        for seg in tyr.path.split("/").skip(1) {
+        for seg in tyr.path.split('/').skip(1) {
             assert_ne!(seg, "");
             path_vec.push(self.env.intern_string(seg));
         }

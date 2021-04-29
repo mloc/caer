@@ -1,15 +1,11 @@
-use super::block_builder::BlockBuilder;
 use super::func_builder::FuncBuilder;
-use super::ir_builder::IrBuilder;
 use caer_ir::cfg;
 use caer_ir::cfg::Function;
 use caer_ir::env::Env;
-use caer_ir::id::{BlockId, LocalId, ScopeId, VarId};
 use caer_types::func::{CallingSpec, ProcSpec};
-use caer_types::id::{FuncId, StringId};
+use caer_types::id::FuncId;
 use caer_types::ty;
-use dreammaker::{ast, objtree::{self, ProcValue}};
-use std::collections::HashMap;
+use dreammaker::objtree::{self, ProcValue};
 
 pub struct ProcBuilder<'a> {
     // should be ProcId, eventually
@@ -81,6 +77,7 @@ impl<'a> ProcBuilder<'a> {
                 func.calling_spec = Some(CallingSpec::Proc(proc_spec));
                 let mut func_builder = FuncBuilder::for_proc(&mut self.env, &self.objtree, func);
                 func_builder.build_raw(&[cfg::Op::Sleep(None)]);
+                func_builder.func.builtin = true;
                 func_builder.finalize()
             },
         }
