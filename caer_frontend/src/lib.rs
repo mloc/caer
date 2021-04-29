@@ -18,7 +18,7 @@ pub fn build(path: impl AsRef<Path>) -> caer_ir::env::Env {
     let tree = parser.parse_object_tree();
 
     let mut env = caer_ir::env::Env::new();
-    let mut tb = tree::TreeBuilder::new(&tree, &mut env);
+    let tb = tree::TreeBuilder::new(&tree, &mut env);
     tb.build();
     env
 }

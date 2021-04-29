@@ -18,15 +18,11 @@ impl Coro {
             aco_sys::aco_create(ctx.main_coro, stack.handle, 0, Some(bootstrap), payload)
         };
 
-        Coro {
-            handle,
-        }
+        Coro { handle }
     }
 
     pub fn is_end(&self) -> bool {
-        unsafe {
-            (*self.handle).is_end != 0
-        }
+        unsafe { (*self.handle).is_end != 0 }
     }
 }
 

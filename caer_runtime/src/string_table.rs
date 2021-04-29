@@ -1,6 +1,6 @@
-use std::io::Read;
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::io::Read;
 
 use caer_types::id::StringId;
 
@@ -37,7 +37,7 @@ impl StringTable {
 
     pub fn get(&self, id: StringId) -> &str {
         if id.index() == 0 {
-            return ""
+            return "";
         }
         &self.strings[&id]
     }
@@ -49,11 +49,11 @@ impl StringTable {
     pub fn put<'a>(&mut self, s: impl Into<Cow<'a, str>>) -> StringId {
         let s = s.into();
         if s.is_empty() {
-            return StringId::new(0)
+            return StringId::new(0);
         }
 
         if let Some(id) = self.ids.get(s.as_ref()) {
-            return *id
+            return *id;
         }
 
         let s_owned = s.into_owned();

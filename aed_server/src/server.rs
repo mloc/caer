@@ -1,17 +1,12 @@
 use std::fmt::Debug;
 use std::net::SocketAddr;
-use std::pin::Pin;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
 use std::{io, sync};
 
 use aed_common::messages;
 use bytes::{Bytes, BytesMut};
 use futures::channel::mpsc;
-use futures::task::Poll;
-use futures::{
-    future, Future, FutureExt, Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt,
-};
+use futures::{future, Future, FutureExt, Sink, SinkExt, StreamExt, TryStream, TryStreamExt};
 use indexmap::IndexMap;
 use snowflake::ProcessUniqueId;
 use tokio::net::{TcpListener, TcpStream};
@@ -34,7 +29,12 @@ struct ServerShared {
 }
 
 impl Server {
-    pub fn start(addr: &SocketAddr) -> (Self, sync::mpsc::Receiver<(ProcessUniqueId, messages::Client)>) {
+    pub fn start(
+        addr: &SocketAddr,
+    ) -> (
+        Self,
+        sync::mpsc::Receiver<(ProcessUniqueId, messages::Client)>,
+    ) {
         let rt = Arc::new(tokio::runtime::Runtime::new().unwrap());
         let (sink, source) = sync::mpsc::channel();
 

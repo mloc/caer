@@ -1,10 +1,13 @@
 pub mod error;
 
-use caer_ir::env::Env;
-use caer_types::{id::FuncId, type_tree::{DType, ProcInfo}};
-use crate::error::GeneratorError;
-use std::result;
 use std::io::Write;
+use std::result;
+
+use caer_ir::env::Env;
+use caer_types::id::FuncId;
+use caer_types::type_tree::{DType, ProcInfo};
+
+use crate::error::GeneratorError;
 
 type Result<T> = result::Result<T, GeneratorError>;
 
@@ -42,7 +45,7 @@ impl<'ir, W: Write> Generator<W> {
             // anyway.
             // TODO: inline stringid comparisons?
             if ir.string_table.get(proc.name) == "sleep" {
-                continue
+                continue;
             }
             self.write_proc(ir, proc)?;
         }
@@ -82,7 +85,7 @@ impl<'ir, W: Write> Generator<W> {
 
 enum RuntimeCall {
     // TODO: use procids
-    CallVerb(FuncId)
+    CallVerb(FuncId),
 }
 
 impl RuntimeCall {

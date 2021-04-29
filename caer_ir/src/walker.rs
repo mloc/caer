@@ -1,6 +1,7 @@
-use crate::id::{BlockId, VarId, LocalId, ScopeId};
-use crate::cfg;
 use index_vec::IndexVec;
+
+use crate::cfg;
+use crate::id::{BlockId, LocalId, ScopeId, VarId};
 
 // TODO: rename
 pub trait WalkActor {
@@ -34,14 +35,20 @@ impl<'a> CFGWalker<'a> {
         }
     }
 
-    fn build_postorder(proc: &'a cfg::Function) -> (Vec<BlockId>, IndexVec<BlockId, Option<BlockId>>) {
+    fn build_postorder(
+        proc: &'a cfg::Function,
+    ) -> (Vec<BlockId>, IndexVec<BlockId, Option<BlockId>>) {
         let mut postorder = Vec::new();
         let mut preds = IndexVec::new();
         preds.resize(proc.blocks.len(), None);
 
         let mut visited: IndexVec<BlockId, _> = IndexVec::new();
         visited.resize(proc.blocks.len(), false);
-        fn rec(cur: BlockId, pred: Option<BlockId>, proc: &cfg::Function, postorder: &mut Vec<BlockId>, preds: &mut IndexVec<BlockId, Option<BlockId>>, visited: &mut IndexVec<BlockId, bool>) {
+        fn rec(
+            cur: BlockId, pred: Option<BlockId>, proc: &cfg::Function,
+            postorder: &mut Vec<BlockId>, preds: &mut IndexVec<BlockId, Option<BlockId>>,
+            visited: &mut IndexVec<BlockId, bool>,
+        ) {
             if visited[cur] {
                 return;
             }
@@ -53,7 +60,14 @@ impl<'a> CFGWalker<'a> {
             }
             postorder.push(cur);
         }
-        rec(BlockId::new(0), None, proc, &mut postorder, &mut preds, &mut visited);
+        rec(
+            BlockId::new(0),
+            None,
+            proc,
+            &mut postorder,
+            &mut preds,
+            &mut visited,
+        );
 
         (postorder, preds)
     }
@@ -167,25 +181,38 @@ impl<'a> LifetimeTracker<'a> {
                 // fine, nothing needs done
             } else if cur_scope.parent == Some(pred_scope.id) {
                 // add a jumpback record for the new scope
-                assert!(self.scope_jb[cur_scope.id].is_none(), "scope {:?} has multiple entry points", cur_scope.id);
+                assert!(
+                    self.scope_jb[cur_scope.id].is_none(),
+                    "scope {:?} has multiple entry points",
+                    cur_scope.id
+                );
                 self.scope_jb[cur_scope.id] = Some((alive_locals.len(), alive_vars.len()));
             } else if pred_scope.parent == Some(cur_scope.id) {
                 // leaving a scope, rollback
                 self.jb_rollback(pred_scope.id, &mut alive_locals, &mut alive_vars);
             } else if pred_scope.parent.is_some() && pred_scope.parent == cur_scope.parent {
                 // special case, jumping between two sibling scopes. rollback then add a jb rec
-                assert!(self.scope_jb[cur_scope.id].is_none(), "scope {:?} has multiple entry points", cur_scope.id);
+                assert!(
+                    self.scope_jb[cur_scope.id].is_none(),
+                    "scope {:?} has multiple entry points",
+                    cur_scope.id
+                );
                 self.scope_jb[cur_scope.id] = self.scope_jb[pred_scope.id];
                 self.jb_rollback(pred_scope.id, &mut alive_locals, &mut alive_vars);
             } else {
-                panic!("could not find relation between {:?} and {:?}", pred_scope.id, cur_scope.id);
+                panic!(
+                    "could not find relation between {:?} and {:?}",
+                    pred_scope.id, cur_scope.id
+                );
             }
         }
 
         self.cur_lifetimes = Some((alive_locals, alive_vars));
     }
 
-    fn jb_rollback(&mut self, scope: ScopeId, alive_locals: &mut Vec<LocalId>, alive_vars: &mut Vec<VarId>) {
+    fn jb_rollback(
+        &mut self, scope: ScopeId, alive_locals: &mut Vec<LocalId>, alive_vars: &mut Vec<VarId>,
+    ) {
         let (local_jb, var_jb) = self.scope_jb[scope].unwrap();
         alive_locals.truncate(local_jb);
         for id in alive_vars[var_jb..].iter() {
@@ -198,19 +225,19 @@ impl<'a> LifetimeTracker<'a> {
         if let Some(dest) = op.dest_local() {
             let alive_locals = &mut self.cur_lifetimes.as_mut().unwrap().0;
             alive_locals.push(dest);
-            return
+            return;
         }
 
         match op {
             cfg::Op::Store(dest, _) | cfg::Op::CatchException(Some(dest)) => {
                 if self.var_live[*dest] {
-                    return
+                    return;
                 }
                 let alive_vars = &mut self.cur_lifetimes.as_mut().unwrap().1;
                 alive_vars.push(*dest);
                 self.var_live[*dest] = true;
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 

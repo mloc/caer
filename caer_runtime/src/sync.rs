@@ -1,4 +1,5 @@
-use std::{iter::FusedIterator, sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError}};
+use std::iter::FusedIterator;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
 use std::time::Duration;
 
 use aed_server::server;
@@ -16,15 +17,11 @@ impl SyncServer {
         Self { server, stream }
     }
 
-    pub fn iter_messages_timeout(
-        &self, timeout: Duration,
-    ) -> MessagesIter {
+    pub fn iter_messages_timeout(&self, timeout: Duration) -> MessagesIter {
         MessagesIter::new_timeout(&self.stream, timeout)
     }
 
-    pub fn iter_messages_nonblocking(
-        &self,
-    ) -> MessagesIter {
+    pub fn iter_messages_nonblocking(&self) -> MessagesIter {
         MessagesIter::new_nonblocking(&self.stream)
     }
 }
@@ -43,7 +40,7 @@ impl<'a> MessagesIter<'a> {
     }
 
     fn new_nonblocking(stream: &'a Receiver<Message>) -> Self {
-        Self{
+        Self {
             stream,
             state: IterState::Streaming,
         }
@@ -71,19 +68,15 @@ impl<'a> Iterator for MessagesIter<'a> {
                     },
                 }
             },
-            IterState::Streaming => {
-                match self.stream.try_recv() {
-                    Ok(m) => {
-                        Some(m)
-                    }
-                    Err(TryRecvError::Empty) => {
-                        self.state = IterState::Done;
-                        None
-                    },
-                    Err(TryRecvError::Disconnected) => {
-                        panic!("server disconnected!");
-                    },
-                }
+            IterState::Streaming => match self.stream.try_recv() {
+                Ok(m) => Some(m),
+                Err(TryRecvError::Empty) => {
+                    self.state = IterState::Done;
+                    None
+                },
+                Err(TryRecvError::Disconnected) => {
+                    panic!("server disconnected!");
+                },
             },
             IterState::Done => None,
         }

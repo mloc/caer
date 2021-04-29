@@ -106,7 +106,10 @@ pub enum _Unwind_Context {}
 pub type _Unwind_Exception_Cleanup_Fn =
     extern "C" fn(unwind_code: _Unwind_Reason_Code, exception: *mut _Unwind_Exception);
 #[cfg_attr(
-    all(feature = "llvm-libunwind", any(target_os = "fuchsia", target_os = "linux")),
+    all(
+        feature = "llvm-libunwind",
+        any(target_os = "fuchsia", target_os = "linux")
+    ),
     link(name = "unwind", kind = "static")
 )]
 extern "C" {

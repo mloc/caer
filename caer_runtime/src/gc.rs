@@ -1,12 +1,14 @@
+use std::ptr::NonNull;
+
+use caer_types::id::TypeId;
+use caer_types::layout;
+use caer_types::type_tree::Specialization;
+
 use crate::datum::{Datum, GcMarker};
 use crate::gc_stackmap::*;
 use crate::list::List;
 use crate::runtime::Runtime;
 use crate::val::{self, Val};
-use caer_types::id::TypeId;
-use caer_types::layout;
-use caer_types::type_tree::{DType, Specialization};
-use std::ptr::NonNull;
 
 pub fn scan_stack(rt: &mut crate::runtime::Runtime) -> Vec<*mut u32> {
     use unwind::{Cursor, RegNum};
@@ -28,7 +30,7 @@ pub fn scan_stack(rt: &mut crate::runtime::Runtime) -> Vec<*mut u32> {
                             let addr =
                                 (cursor.register(RegNum::SP).unwrap() as i64) + (offset as i64);
                             addr as *mut u32 // alignment?
-                        }
+                        },
                         LocationPointer::Indirect { reg, offset } => {
                             // TODO: very x86-64 specific
                             if reg != 7 {
@@ -37,7 +39,7 @@ pub fn scan_stack(rt: &mut crate::runtime::Runtime) -> Vec<*mut u32> {
                             let addr =
                                 (cursor.register(RegNum::SP).unwrap() as i64) + (offset as i64);
                             unsafe { *(addr as *const *mut u32) }
-                        }
+                        },
                         _ => panic!("unhandled stackmap location: {:?}", location),
                     };
 
@@ -91,11 +93,11 @@ impl<'a> Gc<'a> {
     fn mark_val(&mut self, val: &Val) {
         match val {
             // TODO: string GC
-            Val::String(_) => {}
+            Val::String(_) => {},
             Val::Ref(Some(datum_ptr)) => {
                 self.mark_gdatum(*datum_ptr);
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -112,11 +114,11 @@ impl<'a> Gc<'a> {
         match *gc_marker {
             GcMarker::Black => {
                 return;
-            }
+            },
             GcMarker::Grey => unimplemented!("grey unimplemented, no incremental"),
             GcMarker::White => {
                 *gc_marker = GcMarker::Black;
-            }
+            },
         }
 
         let dty_id = unsafe { datum_ptr.as_ref().ty };
@@ -133,12 +135,12 @@ impl<'a> Gc<'a> {
         match dty.specialization {
             Specialization::Datum => {
                 self.mark_datum(datum_ptr, dty_id);
-            }
+            },
             Specialization::List => {
                 let mut list_ptr = datum_ptr.cast();
                 let list_ref = unsafe { list_ptr.as_mut() };
                 self.mark_list(list_ref);
-            }
+            },
         }
     }
 
@@ -149,9 +151,7 @@ impl<'a> Gc<'a> {
             dty_id
         );
 
-        let vars = unsafe {
-            datum_ptr.as_mut().get_vars(self.runtime)
-        };
+        let vars = unsafe { datum_ptr.as_mut().get_vars(self.runtime) };
         println!("datum has {:?} vars", vars.len());
         for val in vars {
             self.mark_val(val);

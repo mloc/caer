@@ -1,16 +1,17 @@
 // TODO: maybe don't throw exceptions in methods, use result+unwrapper?
 
+use std::collections::{hash_map, HashMap};
+use std::ptr::NonNull;
+use std::slice;
+
+use caer_types::id::{StringId, TypeId};
+use caer_types::type_tree::Specialization;
+
 use crate::arg_pack::ProcPack;
 use crate::datum::Datum;
-use std::collections::hash_map;
-use std::slice;
 use crate::runtime::Runtime;
-use caer_types::id::{TypeId, StringId};
-use caer_types::type_tree::Specialization;
 use crate::val::{rt_val_drop, Val};
 use crate::vtable::ProcPtr;
-use std::collections::HashMap;
-use std::ptr::NonNull;
 
 #[derive(Debug, Clone)]
 #[repr(C)]
@@ -209,11 +210,11 @@ impl List {
             .update_val(new_val);
     }
 
-    pub fn var_get(&mut self, var: StringId) -> Val {
+    pub fn var_get(&mut self, _var: StringId) -> Val {
         unimplemented!("list var get")
     }
 
-    pub fn var_set(&mut self, var: StringId, val: Val) {
+    pub fn var_set(&mut self, _var: StringId, _val: Val) {
         unimplemented!("list var set")
     }
 
@@ -256,7 +257,7 @@ impl List {
                             }
                         }
                     };
-                }
+                },
                 o => list.push(*o),
             }
         }
@@ -374,7 +375,7 @@ fn ensure_list(val: Val, rt: &Runtime) -> NonNull<List> {
                 panic!("RTE ref but not list")
             }
             datum_ptr.cast()
-        }
+        },
         _ => panic!("RTE not list"),
     }
 }
@@ -395,39 +396,29 @@ impl<'a> Iterator for GcIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.state {
-            GcIterState::Array(ref mut iter) => {
-                match iter.next() {
-                    None => {
-                        match &self.list.map {
-                            Some(map) => {
-                                let mut map_iter = map.iter();
-                                let next = Self::grind_assoc(&mut map_iter);
-                                self.state = GcIterState::Assoc(map_iter);
-                                next
-                            }
-                            None => {
-                                self.state = GcIterState::Done;
-                                None
-                            }
-                        }
-                    }
-                    o => o,
-                }
-            }
-            GcIterState::Assoc(ref mut iter) => {
-                match Self::grind_assoc(iter) {
-                    Some(v) => {
-                        Some(v)
-                    }
+            GcIterState::Array(ref mut iter) => match iter.next() {
+                None => match &self.list.map {
+                    Some(map) => {
+                        let mut map_iter = map.iter();
+                        let next = Self::grind_assoc(&mut map_iter);
+                        self.state = GcIterState::Assoc(map_iter);
+                        next
+                    },
                     None => {
                         self.state = GcIterState::Done;
                         None
-                    }
-                }
-            }
-            GcIterState::Done => {
-                None
-            }
+                    },
+                },
+                o => o,
+            },
+            GcIterState::Assoc(ref mut iter) => match Self::grind_assoc(iter) {
+                Some(v) => Some(v),
+                None => {
+                    self.state = GcIterState::Done;
+                    None
+                },
+            },
+            GcIterState::Done => None,
         }
     }
 }
@@ -439,9 +430,9 @@ impl<'a> GcIterator<'a> {
                 None => return None,
                 Some((_, assoc)) => {
                     if let Some(ref val) = assoc.val {
-                        return Some(val)
+                        return Some(val);
                     }
-                }
+                },
             }
         }
     }
@@ -449,8 +440,9 @@ impl<'a> GcIterator<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::List;
     use caer_types::id::StringId;
+
+    use super::List;
     use crate::val::Val;
 
     #[test]

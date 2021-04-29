@@ -1,7 +1,9 @@
-use serde::{Serialize, Deserialize};
-use index_vec::IndexVec;
 use std::collections::HashMap;
-use crate::id::{TypeId, StringId, FuncId};
+
+use index_vec::IndexVec;
+use serde::{Deserialize, Serialize};
+
+use crate::id::{FuncId, StringId, TypeId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypeTree {

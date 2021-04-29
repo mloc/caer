@@ -1,4 +1,3 @@
-use super::func_builder::FuncBuilder;
 use caer_ir::cfg;
 use caer_ir::cfg::Function;
 use caer_ir::env::Env;
@@ -6,6 +5,8 @@ use caer_types::func::{CallingSpec, ProcSpec};
 use caer_types::id::FuncId;
 use caer_types::ty;
 use dreammaker::objtree::{self, ProcValue};
+
+use super::func_builder::FuncBuilder;
 
 pub struct ProcBuilder<'a> {
     // should be ProcId, eventually
@@ -16,10 +17,7 @@ pub struct ProcBuilder<'a> {
 
 impl<'a> ProcBuilder<'a> {
     pub fn build(
-        func: Function,
-        env: &'a mut Env,
-        objtree: &'a objtree::ObjectTree,
-        body: &'a ProcBody,
+        func: Function, env: &'a mut Env, objtree: &'a objtree::ObjectTree, body: &'a ProcBody,
     ) -> FuncId {
         let pb = Self {
             id: func.id,
@@ -34,12 +32,8 @@ impl<'a> ProcBuilder<'a> {
         func.new_scope(func.global_scope);
 
         match body {
-            ProcBody::Ast(pv) => {
-                self.build_ast_proc(func, pv)
-            },
-            ProcBody::Builtin(b) => {
-                self.build_builtin(func, b)
-            },
+            ProcBody::Ast(pv) => self.build_ast_proc(func, pv),
+            ProcBody::Builtin(b) => self.build_builtin(func, b),
         }
     }
 
@@ -82,7 +76,6 @@ impl<'a> ProcBuilder<'a> {
             },
         }
     }
-
 
     /*pub fn build_block(&mut self, stmts: &[ast::Spanned<ast::Statement>], parent_scope: ScopeId, next_block: Option<BlockId>) -> (BlockId, ScopeId) {
         self.build_within_scope(parent_scope, |bb| {

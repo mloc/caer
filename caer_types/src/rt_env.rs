@@ -1,8 +1,9 @@
-use crate::id::FuncId;
-use crate::func::FuncInfo;
-use crate::type_tree::TypeTree;
 use index_vec::IndexVec;
 use serde::{Deserialize, Serialize};
+
+use crate::func::FuncInfo;
+use crate::id::FuncId;
+use crate::type_tree::TypeTree;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RtEnv {

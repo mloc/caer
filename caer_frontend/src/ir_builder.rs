@@ -1,11 +1,12 @@
-use crate::proc_builder::ProcBody;
+use std::borrow::Cow;
 
-use super::proc_builder::ProcBuilder;
+use caer_ir::cfg;
 use caer_ir::env::Env;
 use caer_types::id::{FuncId, StringId};
 use dreammaker::objtree;
-use caer_ir::cfg;
-use std::borrow::Cow;
+
+use super::proc_builder::ProcBuilder;
+use crate::proc_builder::ProcBody;
 
 pub struct IrBuilder<'a> {
     pub env: &'a mut Env,
@@ -15,9 +16,7 @@ pub struct IrBuilder<'a> {
 
 impl<'a> IrBuilder<'a> {
     pub fn new(
-        env: &'a mut Env,
-        procs: Vec<(cfg::Function, ProcBody)>,
-        objtree: &'a objtree::ObjectTree,
+        env: &'a mut Env, procs: Vec<(cfg::Function, ProcBody)>, objtree: &'a objtree::ObjectTree,
     ) -> Self {
         Self {
             env,
@@ -29,10 +28,10 @@ impl<'a> IrBuilder<'a> {
     // TODO: ERRH(fe)
     pub fn build(mut self) {
         /*self.env.procs = self
-            .procs
-            .iter_enumerated()
-            .map(|(i, proc)| ProcBuilder::build(self, i, &proc))
-            .collect();*/
+        .procs
+        .iter_enumerated()
+        .map(|(i, proc)| ProcBuilder::build(self, i, &proc))
+        .collect();*/
 
         self.env.funcs = Default::default();
         for (func, body) in self.procs {

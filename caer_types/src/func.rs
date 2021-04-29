@@ -1,5 +1,6 @@
-use crate::id::{StringId, FuncId};
 use serde::{Deserialize, Serialize};
+
+use crate::id::{FuncId, StringId};
 
 /// Holds run-time information about a func.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -2,15 +2,19 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    cc::Build::new().file("src/aco.c").file("src/acosw.S").file("src/shim.c").compile("aco");
+    cc::Build::new()
+        .file("src/aco.c")
+        .file("src/acosw.S")
+        .file("src/shim.c")
+        .compile("aco");
 
-    let mut builder = bindgen::Builder::default().header("src/aco.h").header("src/shim.h");
+    let mut builder = bindgen::Builder::default()
+        .header("src/aco.h")
+        .header("src/shim.h");
 
-    for ty in &[
-	"aco_save_stack_t",
-    ] {
-	builder = builder.opaque_type(ty);
-	builder = builder.whitelist_type(ty);
+    for ty in &["aco_save_stack_t"] {
+        builder = builder.opaque_type(ty);
+        builder = builder.whitelist_type(ty);
     }
 
     for func in &[
@@ -21,8 +25,8 @@ fn main() {
         "aco_create",
         "aco_destroy",
         "aco_resume",
-	"acosw",
-	"aco_rshim_get_co",
+        "acosw",
+        "aco_rshim_get_co",
     ] {
         builder = builder.whitelist_function(func);
     }

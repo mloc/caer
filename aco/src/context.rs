@@ -19,9 +19,7 @@ impl Context {
             )
         };
 
-        Context {
-            main_coro,
-        }
+        Context { main_coro }
     }
 
     pub fn make_stack(&self) -> Stack {

@@ -1,10 +1,9 @@
 use std::time::{self, Duration, Instant};
-use std::thread;
-use crate::exec;
-use crate::runtime;
-use crate::sync;
+
 use caer_types::id::FuncId;
 use exec::TickTime;
+
+use crate::{exec, runtime, sync};
 
 const TICK_LAG: time::Duration = time::Duration::from_millis(1000);
 
@@ -49,7 +48,10 @@ impl MetaRuntime {
     fn run_forever(&mut self) {
         loop {
             let deadline = self.cur_tick_deadline();
-            println!("running tick {:?} with deadline {:?}", self.dmrt.world_time, deadline);
+            println!(
+                "running tick {:?} with deadline {:?}",
+                self.dmrt.world_time, deadline
+            );
             self.run_tick();
 
             while let Some(underrun) = deadline.checked_duration_since(time::Instant::now()) {
@@ -58,8 +60,11 @@ impl MetaRuntime {
 
             let overrun = time::Instant::now().saturating_duration_since(deadline);
             println!("overran tick by {:?}", overrun);
-            if overrun > TICK_LAG/2 {
-                println!("overrun by more than TICK_LAG/2 ({:?}), resetting tick base", TICK_LAG/2);
+            if overrun > TICK_LAG / 2 {
+                println!(
+                    "overrun by more than TICK_LAG/2 ({:?}), resetting tick base",
+                    TICK_LAG / 2
+                );
             }
 
             self.dmrt.world_time += 1;
@@ -90,7 +95,7 @@ impl MetaRuntime {
 
     fn run_one(&mut self) -> bool {
         if !self.executor.run_next(self.dmrt) {
-            return false
+            return false;
         }
 
         for (b, t) in self.dmrt.queued_funcs.drain(..) {

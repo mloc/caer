@@ -1,15 +1,16 @@
+use std::ops::*;
+use std::ptr::NonNull;
+
+use caer_types::id::StringId;
+use caer_types::type_tree::Specialization;
+use caer_types::{layout, op};
+use ordered_float::OrderedFloat;
+
 use crate::arg_pack::ProcPack;
 use crate::datum::Datum;
 use crate::list::List;
 use crate::runtime::Runtime;
 use crate::string_table::StringTable;
-use caer_types::id::StringId;
-use caer_types::layout;
-use caer_types::op;
-use caer_types::type_tree::Specialization;
-use ordered_float::OrderedFloat;
-use std::ops::*;
-use std::ptr::NonNull;
 
 // null must be first
 // TODO: not copy?
@@ -24,17 +25,13 @@ pub enum Val {
 
 #[no_mangle]
 pub extern "C" fn rt_val_binary_op(
-    rt: &mut Runtime,
-    op: op::BinaryOp,
-    lhs: &Val,
-    rhs: &Val,
-    out: &mut Val,
+    rt: &mut Runtime, op: op::BinaryOp, lhs: &Val, rhs: &Val, out: &mut Val,
 ) {
     match op {
         op::BinaryOp::Eq | op::BinaryOp::Ne | op::BinaryOp::Equiv | op::BinaryOp::NotEquiv => {
             *out = Val::handle_equality(rt, op, lhs, rhs);
-        }
-        _ => {}
+        },
+        _ => {},
     }
 
     let mut lhs = *lhs;
@@ -46,7 +43,7 @@ pub extern "C" fn rt_val_binary_op(
         Val::Null => Val::Null,
         Val::Float(lval) => {
             Val::Float(Val::binary_arithm(op, lval.into(), rhs.cast_float().into()).into())
-        }
+        },
         Val::String(lval) => {
             if op != op::BinaryOp::Add {
                 unimplemented!("RTE badop")
@@ -54,7 +51,7 @@ pub extern "C" fn rt_val_binary_op(
             // TODO reconsider this, DM doesn't allow "e" + 2
             let rval = rhs.cast_string(rt);
             Val::String(rt.string_table.concat(lval, rval))
-        }
+        },
         Val::Ref(_) => unimplemented!("overloads"),
     }
 }
@@ -84,7 +81,7 @@ pub extern "C" fn rt_val_print(val: &Val, rt: &mut Runtime) {
         _ => {
             let sid = val.cast_string(rt);
             println!("{}", rt.string_table.get(sid));
-        }
+        },
     }
 }
 
@@ -106,11 +103,7 @@ pub extern "C" fn rt_val_drop(val: &Val) {
 
 #[no_mangle]
 pub extern "C" fn rt_val_call_proc(
-    val: &Val,
-    proc_name: StringId,
-    args: &ProcPack,
-    rt: &mut Runtime,
-    out: &mut Val,
+    val: &Val, proc_name: StringId, args: &ProcPack, rt: &mut Runtime, out: &mut Val,
 ) {
     val.call_proc(proc_name, args, rt, out)
 }
@@ -160,7 +153,7 @@ impl Val {
                 let lookup_fn = rt.vtable[datum_ref.ty].proc_lookup;
                 let proc_fn = lookup_fn(proc_name, rt_ptr);
                 proc_fn(args, rt_ptr, out)
-            }
+            },
             _ => panic!("RTE can't call proc on val {:?}", self),
         }
     }
@@ -176,7 +169,7 @@ impl Val {
             Val::Null => Val::Null,
             Val::Float(lval) => {
                 Val::Float(Val::binary_arithm(op, lval.into(), rhs.cast_float().into()).into())
-            }
+            },
             Val::String(lval) => {
                 if op != op::BinaryOp::Add {
                     unimplemented!("RTE badop")
@@ -184,7 +177,7 @@ impl Val {
                 // TODO reconsider this, DM doesn't allow "e" + 2. compile error?
                 let rval = rhs.cast_string_const(st);
                 Val::String(st.concat(lval, rval))
-            }
+            },
             Val::Ref(_) => unimplemented!(),
         }
     }
@@ -271,10 +264,10 @@ impl Val {
                         let list_ptr = dp.cast();
                         let list: &List = unsafe { list_ptr.as_ref() };
                         rt.string_table.put(format!("{:?}", list))
-                    }
+                    },
                     Specialization::Datum => rt.env.type_tree.types[dty].path_str,
                 }
-            }
+            },
         }
     }
 

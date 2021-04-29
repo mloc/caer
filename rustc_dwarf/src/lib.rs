@@ -89,7 +89,7 @@ impl DwarfReader {
         result as i64
     }
 
-    pub unsafe fn read_encoded(&mut self, encoding: u8) -> Result<usize, ()>{
+    pub unsafe fn read_encoded(&mut self, encoding: u8) -> Result<usize, ()> {
         if encoding == DW_EH_PE_omit {
             return Err(());
         }
@@ -134,5 +134,9 @@ impl DwarfReader {
 
 #[inline]
 fn round_up(unrounded: usize, align: usize) -> Result<usize, ()> {
-    if align.is_power_of_two() { Ok((unrounded + align - 1) & !(align - 1)) } else { Err(()) }
+    if align.is_power_of_two() {
+        Ok((unrounded + align - 1) & !(align - 1))
+    } else {
+        Err(())
+    }
 }

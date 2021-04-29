@@ -1,15 +1,14 @@
 // naming is hard, TODO: rename some other uses of "proc" to "func"
 
-use crate::ir_builder::IrBuilder;
-use crate::block_builder::BlockBuilder;
-use caer_ir::env::Env;
-use std::collections::{BTreeMap, HashMap};
 use caer_ir::cfg;
-use caer_ir::id::{ScopeId, BlockId, VarId, LocalId, ClosureSlotId};
-use dreammaker::{ast, objtree};
-use caer_types::id::{StringId, FuncId, TypeId};
-use index_vec::IndexVec;
+use caer_ir::env::Env;
+use caer_ir::id::{BlockId, ClosureSlotId, LocalId, ScopeId, VarId};
+use caer_types::id::{FuncId, StringId, TypeId};
 use caer_types::ty;
+use dreammaker::{ast, objtree};
+use index_vec::IndexVec;
+
+use crate::block_builder::BlockBuilder;
 
 pub struct FuncBuilder<'a> {
     pub(crate) env: &'a mut Env,
@@ -23,7 +22,9 @@ pub struct FuncBuilder<'a> {
 }
 
 impl<'a> FuncBuilder<'a> {
-    pub(crate) fn for_proc(env: &'a mut Env, objtree: &'a objtree::ObjectTree, func: cfg::Function) -> Self {
+    pub(crate) fn for_proc(
+        env: &'a mut Env, objtree: &'a objtree::ObjectTree, func: cfg::Function,
+    ) -> Self {
         Self {
             env,
             objtree,
@@ -34,7 +35,9 @@ impl<'a> FuncBuilder<'a> {
         }
     }
 
-    pub(crate) fn for_closure(env: &'a mut Env, objtree: &'a objtree::ObjectTree, over: FuncId, scope: ScopeId) -> Self {
+    pub(crate) fn for_closure(
+        env: &'a mut Env, objtree: &'a objtree::ObjectTree, over: FuncId, scope: ScopeId,
+    ) -> Self {
         let mut func = env.new_func();
         func.set_closure(over, scope);
         Self {
@@ -71,23 +74,25 @@ impl<'a> FuncBuilder<'a> {
     // TODO: ERRH within frontend
     pub(crate) fn lookup_var(&mut self, scope: ScopeId, name: StringId) -> VarId {
         if let Some(var_in_proc) = self.func.lookup_var(scope, name) {
-            return var_in_proc
+            return var_in_proc;
         }
         if let Some(var) = self.resolve_closure_var(scope, name, false) {
-            return var
+            return var;
         }
         panic!("can't find var: {:?}", name);
     }
 
     // If read_only is true, don't attempt to create a new var if it doesn't already exist.
-    fn resolve_closure_var(&mut self, scope: ScopeId, name: StringId, read_only: bool) -> Option<VarId> {
+    fn resolve_closure_var(
+        &mut self, _scope: ScopeId, name: StringId, _read_only: bool,
+    ) -> Option<VarId> {
         let first_parent;
         let first_scope;
         if let Some(closure) = &self.func.closure {
             first_parent = closure.over;
             first_scope = closure.scope;
         } else {
-            return None
+            return None;
         }
 
         let mut capture_stack = Vec::new();
@@ -102,7 +107,7 @@ impl<'a> FuncBuilder<'a> {
             let cur_func = self.env.funcs.get_mut(&cur_func_id).unwrap();
             if let Some(match_var) = cur_func.lookup_var(cur_scope, name) {
                 top_var = match_var;
-                break
+                break;
             }
 
             if let Some(closure) = &mut cur_func.closure {
@@ -111,7 +116,7 @@ impl<'a> FuncBuilder<'a> {
                 capture_stack.push(cur_func_id);
             } else {
                 // If we've hit the root func without finding a var, we're out of options.
-                return None
+                return None;
             }
         }
 
@@ -182,14 +187,21 @@ impl<'a> FuncBuilder<'a> {
         self.func.vars[var].assoc_dty = Some(dty)
     }
 
-    pub(crate) fn add_closure_slot(&mut self, scope: ScopeId, block: &'a ast::Block) -> ClosureSlotId {
+    pub(crate) fn add_closure_slot(
+        &mut self, scope: ScopeId, block: &'a ast::Block,
+    ) -> ClosureSlotId {
         let ret = self.closure_slots.next_idx();
         self.closure_slots.push((scope, block));
         ret
     }
 
-    pub fn build_block(&mut self, stmts: &'a [ast::Spanned<ast::Statement>], parent_scope: Option<ScopeId>, next_block: Option<BlockId>) -> (BlockId, ScopeId) {
-        let scope = self.func.new_scope(parent_scope.unwrap_or(self.func.global_scope));
+    pub fn build_block(
+        &mut self, stmts: &'a [ast::Spanned<ast::Statement>], parent_scope: Option<ScopeId>,
+        next_block: Option<BlockId>,
+    ) -> (BlockId, ScopeId) {
+        let scope = self
+            .func
+            .new_scope(parent_scope.unwrap_or(self.func.global_scope));
         let block = self.new_block(scope);
 
         let mut bb = BlockBuilder::new(block);
@@ -218,7 +230,9 @@ impl<'a> FuncBuilder<'a> {
         BlockBuilder::new(block)
     }
 
-    pub fn build_within_scope(&mut self, parent_scope: ScopeId, f: impl FnOnce(&mut BlockBuilder)) -> (BlockId, ScopeId) {
+    pub fn build_within_scope(
+        &mut self, parent_scope: ScopeId, f: impl FnOnce(&mut BlockBuilder),
+    ) -> (BlockId, ScopeId) {
         let scope = self.func.new_scope(parent_scope);
         let block = self.new_block(scope);
 

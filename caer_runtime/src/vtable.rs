@@ -1,12 +1,13 @@
+use std::ops::Index;
+use std::ptr::NonNull;
+use std::slice::from_raw_parts;
+
+use caer_types::id::{FuncId, StringId, TypeId};
+
 use crate::arg_pack::ProcPack;
 use crate::datum::Datum;
 use crate::runtime::Runtime;
 use crate::val::Val;
-use caer_types::id::{FuncId, StringId, TypeId};
-
-use std::ops::Index;
-use std::ptr::NonNull;
-use std::slice::from_raw_parts;
 
 /// Convenience wrapper around the global static vtable
 #[derive(Debug)]
@@ -16,10 +17,12 @@ pub struct Vtable {
 }
 
 impl Vtable {
-    pub(crate) fn from_static(vtable_ptr: *const Entry, vtable_n: usize, funcs_ptr: *const FuncPtr, funcs_n: usize) -> Self {
+    pub(crate) fn from_static(
+        vtable_ptr: *const Entry, vtable_n: usize, funcs_ptr: *const FuncPtr, funcs_n: usize,
+    ) -> Self {
         let table = unsafe { from_raw_parts(vtable_ptr, vtable_n) };
         let funcs = unsafe { from_raw_parts(funcs_ptr, funcs_n) };
-        Vtable { table , funcs }
+        Vtable { table, funcs }
     }
 
     pub fn lookup_func(&self, func: FuncId) -> Option<FuncPtr> {
@@ -47,6 +50,7 @@ impl FuncPtr {
     pub unsafe fn as_proc(self) -> ProcPtr {
         std::mem::transmute(self.ptr)
     }
+
     pub unsafe fn as_closure(self) -> ClosurePtr {
         std::mem::transmute(self.ptr)
     }

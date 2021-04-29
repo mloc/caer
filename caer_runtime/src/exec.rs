@@ -1,9 +1,10 @@
-use crate::{arg_pack::{CallBundle, ClosureArgs, ProcArgs}, vtable::ClosurePtr};
-use crate::runtime::Runtime;
-use crate::vtable::ProcPtr;
-use std::ptr::NonNull;
-use crate::val::Val;
 use std::collections::HashMap;
+use std::ptr::NonNull;
+
+use crate::arg_pack::{CallBundle, ClosureArgs, ProcArgs};
+use crate::runtime::Runtime;
+use crate::val::Val;
+use crate::vtable::{ClosurePtr, ProcPtr};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 struct FibreId(usize);
@@ -60,7 +61,7 @@ impl Executor {
             FibreState::Running(coro) => {
                 println!("[EXEC] Resuming {:?}", next_id);
                 coro
-            }
+            },
             FibreState::Created(bundle) => {
                 println!("[EXEC] Starting {:?} with {:?}", next_id, bundle);
                 let coro = self.coro_ctx.spawn_coro(rt, bundle);
@@ -76,9 +77,7 @@ impl Executor {
             FibreState::Finished => panic!("finished fibre in queue: {:?}", next_id),
         };
 
-        let ended = unsafe {
-            self.coro_ctx.resume_coro(coro)
-        };
+        let ended = unsafe { self.coro_ctx.resume_coro(coro) };
 
         if ended {
             println!("[EXEC] Coro {:?} finished", next_id);
@@ -119,9 +118,7 @@ impl CoroCtx {
     fn create() -> Self {
         let ctx = aco::Context::create();
         let stack = ctx.make_stack();
-        Self {
-            ctx, stack
-        }
+        Self { ctx, stack }
     }
 
     fn spawn_coro(&self, rt: &mut Runtime, bundle: &CallBundle) -> aco::Coro {

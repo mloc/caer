@@ -1,11 +1,12 @@
-use crate::proc_builder::{ProcBody, BuiltinProc};
+use std::collections::HashMap;
+
+use caer_ir as ir;
+use caer_types::id::{FuncId, StringId, TypeId};
+use caer_types::type_tree::{self, Specialization};
+use dreammaker::objtree;
 
 use super::ir_builder::IrBuilder;
-use caer_types::type_tree::{self, Specialization};
-use caer_types::id::{StringId, FuncId, TypeId};
-use dreammaker::objtree;
-use std::collections::HashMap;
-use caer_ir as ir;
+use crate::proc_builder::{BuiltinProc, ProcBody};
 
 /// Walks the object tree, generating a type tree and queueing work for CfgBuilder.
 pub struct TreeBuilder<'a, 'ot> {
@@ -40,25 +41,35 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
 
     // nasty, copied from old tt builder
     // TODO: encapsulate types better
-    fn populate_ty(&mut self, oty: objtree::TypeRef<'ot>, types_topsort: &mut Vec<(TypeId, objtree::TypeRef<'ot>)>) -> TypeId {
-        if let Some(id) = self.env.type_tree.type_by_node_id.get(&(oty.index().index() as u64)) {
+    fn populate_ty(
+        &mut self, oty: objtree::TypeRef<'ot>,
+        types_topsort: &mut Vec<(TypeId, objtree::TypeRef<'ot>)>,
+    ) -> TypeId {
+        if let Some(id) = self
+            .env
+            .type_tree
+            .type_by_node_id
+            .get(&(oty.index().index() as u64))
+        {
             return *id;
         }
 
-        let parent_ty = oty.parent_type_without_root().map(|tyr| self.populate_ty(tyr, types_topsort));
+        let parent_ty = oty
+            .parent_type_without_root()
+            .map(|tyr| self.populate_ty(tyr, types_topsort));
 
         let path = self.path_to_pvec(oty);
         let mut type_path = parent_ty.map_or_else(
-            || { Vec::new() },
-            |id| { self.env.type_tree.types[id].type_path.clone() },
+            || Vec::new(),
+            |id| self.env.type_tree.types[id].type_path.clone(),
         );
         if !oty.is_root() {
             type_path.push(*path.last().unwrap());
         }
 
         let mut specialization = parent_ty.map_or_else(
-            || { Specialization::Datum },
-            |id| { self.env.type_tree.types[id].specialization },
+            || Specialization::Datum,
+            |id| self.env.type_tree.types[id].specialization,
         );
         if oty.path == "/list" {
             specialization = Specialization::List;
@@ -83,7 +94,10 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
             assert_eq!(id.index(), 0);
         }
 
-        self.env.type_tree.type_by_node_id.insert(oty.index().index() as u64, id);
+        self.env
+            .type_tree
+            .type_by_node_id
+            .insert(oty.index().index() as u64, id);
         self.env.type_tree.type_by_path_str.insert(dty.path_str, id);
         self.env.type_tree.types.push(dty);
         types_topsort.push((id, oty));
@@ -95,7 +109,7 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
             Some(ty_id) => {
                 let p = &self.env.type_tree.types[ty_id];
                 (p.vars.clone(), p.var_lookup.clone())
-            }
+            },
             None => (Vec::new(), HashMap::new()),
         };
 
@@ -134,7 +148,6 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
                     panic!("ty {:?} defs var {} before decl", oty, name);
                 }
             }
-
         }
 
         let dty = &mut self.env.type_tree.types[dty_id];
@@ -147,7 +160,7 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
             Some(ty_id) => {
                 let p = &self.env.type_tree.types[ty_id];
                 (p.procs.clone(), p.proc_lookup.clone())
-            }
+            },
             None => (Vec::new(), HashMap::new()),
         };
 
@@ -172,9 +185,7 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
                         self.funcs.push((func, ProcBody::Ast(pv.clone())));
                     },
                     objtree::Code::Invalid(err) => panic!("oh no dm error {:?}", err),
-                    objtree::Code::Builtin => {
-                        top_func = self.handle_builtin(oty, name, tp)
-                    },
+                    objtree::Code::Builtin => top_func = self.handle_builtin(oty, name, tp),
                     objtree::Code::Disabled => panic!("woop woop procs disabled"),
                 }
             }
@@ -199,7 +210,7 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
                             top_proc: top,
                         };
                         proc_lookup.insert(name_id, pi);
-                    }
+                    },
                 }
             }
         }
@@ -209,11 +220,11 @@ impl<'a, 'ot> TreeBuilder<'a, 'ot> {
         dty.proc_lookup = proc_lookup;
     }
 
-    fn handle_builtin(&mut self, oty: objtree::TypeRef<'_>, name: &str, _tp: &objtree::TypeProc) -> Option<FuncId> {
+    fn handle_builtin(
+        &mut self, oty: objtree::TypeRef<'_>, name: &str, _tp: &objtree::TypeProc,
+    ) -> Option<FuncId> {
         let builtin = match (&oty.path as &str, name) {
-            ("", "sleep") => {
-                BuiltinProc::Sleep
-            },
+            ("", "sleep") => BuiltinProc::Sleep,
             _ => return None,
         };
 

@@ -1,11 +1,13 @@
+use std::cmp::Ordering;
+use std::marker::PhantomData;
+use std::ptr::NonNull;
+
+use caer_types::func::CallingSpec;
+use caer_types::id::{FuncId, StringId};
+
 use crate::ffi::FfiArray;
 use crate::runtime::Runtime;
 use crate::val::Val;
-use caer_types::func::CallingSpec;
-use caer_types::id::{FuncId, StringId};
-use std::{cmp::Ordering, marker::PhantomData};
-use std::ptr::NonNull;
-use std::fmt;
 
 #[derive(Clone, Debug)]
 pub enum CallBundle {
@@ -36,8 +38,7 @@ pub struct ProcArgs {
     pub src: Val,
 }
 
-impl ProcArgs {
-}
+impl ProcArgs {}
 
 #[repr(C)]
 #[derive(Debug)]
@@ -77,7 +78,10 @@ impl ProcPack<'_> {
     // TODO: rework unpacking
     // TODO: support passing in proc_id as primitive idx
     fn unpack_into(&self, target_ptrs: NonNull<*mut Val>, func_id: FuncId, rt: &mut Runtime) {
-        let spec = rt.env.func_specs[func_id].calling_spec.get_proc_spec().unwrap_or_else(|| panic!("func {:?} cannot be called as a proc", func_id));
+        let spec = rt.env.func_specs[func_id]
+            .calling_spec
+            .get_proc_spec()
+            .unwrap_or_else(|| panic!("func {:?} cannot be called as a proc", func_id));
         // compiler should ensure that targets is an array with the same sizes as the spec
         let targets_arr = unsafe { FfiArray::with_len(target_ptrs, spec.params.len()) };
         let targets = targets_arr.as_slice();
@@ -102,7 +106,7 @@ impl ProcPack<'_> {
                     unsafe { *targets[spec.names[i_param].1 as usize] = named_args[i_arg].1 };
                     i_param += 1;
                     i_arg += 1;
-                }
+                },
             }
         }
 
@@ -117,10 +121,7 @@ impl ProcPack<'_> {
 
 #[no_mangle]
 pub extern "C" fn rt_arg_pack_unpack_into(
-    argpack: &ProcPack,
-    target_ptrs: NonNull<*mut Val>,
-    proc_id: FuncId,
-    rt: &mut Runtime,
+    argpack: &ProcPack, target_ptrs: NonNull<*mut Val>, proc_id: FuncId, rt: &mut Runtime,
 ) {
     argpack.unpack_into(target_ptrs, proc_id, rt)
 }

@@ -1,7 +1,9 @@
-use crate::stackmap::*;
-use byteorder::ByteOrder;
 use std::marker::PhantomData;
+
+use byteorder::ByteOrder;
 use thiserror::Error;
+
+use crate::stackmap::*;
 
 #[derive(Error, Debug)]
 pub enum ParseError {
@@ -142,10 +144,7 @@ impl<'a, BO: ByteOrder + 'a> Parser<'a, BO> {
 
         let pointer = match pointer_type {
             0x01 => LocationPointer::Register { reg },
-            0x02 => LocationPointer::Direct {
-                reg,
-                offset,
-            },
+            0x02 => LocationPointer::Direct { reg, offset },
             0x03 => LocationPointer::Indirect { reg, offset },
             0x04 => LocationPointer::Constant(offset as u64),
             0x05 => {
@@ -159,7 +158,7 @@ impl<'a, BO: ByteOrder + 'a> Parser<'a, BO> {
                     return Err(ParseError::ConstantTableOverflow(offset));
                 }
                 LocationPointer::Constant(constant)
-            }
+            },
             unsupported => return Err(ParseError::UnsupportedLocationType(unsupported)),
         };
 

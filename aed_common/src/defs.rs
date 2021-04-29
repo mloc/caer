@@ -42,7 +42,9 @@ pub enum Color {
 }
 
 impl Default for Color {
-    fn default() -> Color { Color::White }
+    fn default() -> Color {
+        Color::White
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,7 +55,9 @@ pub enum Location {
 }
 
 impl Default for Location {
-    fn default() -> Location { Location::Null }
+    fn default() -> Location {
+        Location::Null
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,5 +69,7 @@ pub enum Gender {
 }
 
 impl Default for Gender {
-    fn default() -> Gender { Gender::Neuter }
+    fn default() -> Gender {
+        Gender::Neuter
+    }
 }

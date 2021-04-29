@@ -1,12 +1,11 @@
 // this is gonna be too monolithic, split it up;
 
-use index_vec::IndexVec;
-use serde::{Serialize, Deserialize};
-
 use caer_types::func::FuncInfo;
-use caer_types::id::{StringId, FuncId};
+use caer_types::id::FuncId;
 use caer_types::rt_env::RtEnv;
 use caer_types::type_tree::TypeTree;
+use index_vec::IndexVec;
+use serde::{Deserialize, Serialize};
 
 // TODO: move stringtable into here, at least intern
 #[derive(Debug, Serialize, Deserialize)]

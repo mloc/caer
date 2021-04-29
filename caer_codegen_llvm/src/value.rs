@@ -1,5 +1,5 @@
 use caer_types::ty;
-use inkwell::values::{PointerValue, GlobalValue, BasicValue, BasicValueEnum, IntValue};
+use inkwell::values::{BasicValue, BasicValueEnum, GlobalValue, IntValue, PointerValue};
 
 #[derive(Debug, Clone)]
 pub struct StackValue<'ctx> {

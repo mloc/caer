@@ -1,10 +1,10 @@
 // Personality function + LSDA handling mostly cribbed from rust compiler source code,  commit ef92009c1dbe2750f1d24a6619b827721fb49749
 // Copyright the rust project's contributors: https://github.com/rust-lang/rust/blob/master/COPYRIGHT
 
-use crate::val::Val;
 use libc::{c_int, uintptr_t};
-use rustc_dwarf as dwarf;
-use rustc_unwind as unwind;
+use {rustc_dwarf as dwarf, rustc_unwind as unwind};
+
+use crate::val::Val;
 
 const DM_EXCEPTION_CLASS: unwind::_Unwind_Exception_Class = 0x43414552_444d_0000;
 
@@ -39,8 +39,7 @@ unsafe extern "C-unwind" fn rt_throw(exception_val: *const Val) -> ! {
     std::process::abort();
 
     extern "C" fn exception_cleanup(
-        _unwind_code: unwind::_Unwind_Reason_Code,
-        exception: *mut unwind::_Unwind_Exception,
+        _unwind_code: unwind::_Unwind_Reason_Code, exception: *mut unwind::_Unwind_Exception,
     ) {
         unsafe {
             let _: Box<Exception> = Box::from_raw(exception as *mut Exception);
@@ -50,11 +49,9 @@ unsafe extern "C-unwind" fn rt_throw(exception_val: *const Val) -> ! {
 
 #[no_mangle]
 unsafe extern "C" fn dm_eh_personality(
-    version: c_int,
-    actions: unwind::_Unwind_Action,
+    version: c_int, actions: unwind::_Unwind_Action,
     _exception_class: unwind::_Unwind_Exception_Class,
-    exception_object: *mut unwind::_Unwind_Exception,
-    context: *mut unwind::_Unwind_Context,
+    exception_object: *mut unwind::_Unwind_Exception, context: *mut unwind::_Unwind_Context,
 ) -> unwind::_Unwind_Reason_Code {
     if version != 1 {
         return unwind::_URC_FATAL_PHASE1_ERROR;
@@ -82,7 +79,7 @@ unsafe extern "C" fn dm_eh_personality(
                 unwind::_Unwind_SetGR(context, unwind::UNWIND_DATA_REG.1, 0);
                 unwind::_Unwind_SetIP(context, lpad);
                 unwind::_URC_INSTALL_CONTEXT
-            }
+            },
             EHAction::Terminate => unwind::_URC_FATAL_PHASE2_ERROR,
         }
     }
@@ -97,8 +94,7 @@ enum EHAction {
 }
 
 unsafe fn handle_lsda(
-    lsda: *const u8,
-    context: *mut unwind::_Unwind_Context,
+    lsda: *const u8, context: *mut unwind::_Unwind_Context,
 ) -> Result<EHAction, ()> {
     if lsda.is_null() {
         return Ok(EHAction::None);
@@ -138,7 +134,7 @@ unsafe fn handle_lsda(
         let cs_start = reader.read_encoded(call_site_encoding)?;
         let cs_len = reader.read_encoded(call_site_encoding)?;
         let cs_lpad = reader.read_encoded(call_site_encoding)?;
-        let cs_action = reader.read_uleb128();
+        let _cs_action = reader.read_uleb128();
         // Callsite table is sorted by cs_start, so if we've passed the ip, we
         // may stop searching.
         if ip < func_start + cs_start {

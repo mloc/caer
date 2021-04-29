@@ -1,5 +1,6 @@
-use crate::ty::{Complex, Primitive};
 use serde::Serialize;
+
+use crate::ty::{Complex, Primitive};
 
 #[derive(Debug, Copy, Clone, PartialEq, Serialize)]
 #[repr(u32)]
@@ -62,39 +63,49 @@ impl HardBinary {
 
             (BinaryOp::Eq, (Primitive::Float, Primitive::Float)) => {
                 Some(Self::FloatCmp(FloatPredicate::OEQ))
-            }
+            },
             // if we have eq float lhs and non-float rhs, we can just return false
             // TODO: handle ints
             (BinaryOp::Eq, (Primitive::Float, _)) => {
                 Some(Self::FloatCmp(FloatPredicate::PredicateFalse))
-            }
+            },
 
             (BinaryOp::Ne, (Primitive::Float, Primitive::Float)) => {
                 Some(Self::FloatCmp(FloatPredicate::ONE))
-            }
+            },
             // ditto, but always return true
             (BinaryOp::Ne, (Primitive::Float, _)) => {
                 Some(Self::FloatCmp(FloatPredicate::PredicateTrue))
-            }
+            },
 
             (BinaryOp::Gt, (Primitive::Float, Primitive::Float)) => {
                 Some(Self::FloatCmp(FloatPredicate::OGT))
-            }
+            },
             (BinaryOp::Ge, (Primitive::Float, Primitive::Float)) => {
                 Some(Self::FloatCmp(FloatPredicate::OGE))
-            }
+            },
             (BinaryOp::Lt, (Primitive::Float, Primitive::Float)) => {
                 Some(Self::FloatCmp(FloatPredicate::OLT))
-            }
+            },
             (BinaryOp::Le, (Primitive::Float, Primitive::Float)) => {
                 Some(Self::FloatCmp(FloatPredicate::OLE))
-            }
+            },
 
-            (BinaryOp::BitAnd, (Primitive::Float, Primitive::Float)) => Some(Self::FloatBitOp(BitOp::And)),
-            (BinaryOp::BitOr, (Primitive::Float, Primitive::Float)) => Some(Self::FloatBitOp(BitOp::Or)),
-            (BinaryOp::BitXor, (Primitive::Float, Primitive::Float)) => Some(Self::FloatBitOp(BitOp::Xor)),
-            (BinaryOp::Shl, (Primitive::Float, Primitive::Float)) => Some(Self::FloatBitOp(BitOp::Shl)),
-            (BinaryOp::Shr, (Primitive::Float, Primitive::Float)) => Some(Self::FloatBitOp(BitOp::Shr)),
+            (BinaryOp::BitAnd, (Primitive::Float, Primitive::Float)) => {
+                Some(Self::FloatBitOp(BitOp::And))
+            },
+            (BinaryOp::BitOr, (Primitive::Float, Primitive::Float)) => {
+                Some(Self::FloatBitOp(BitOp::Or))
+            },
+            (BinaryOp::BitXor, (Primitive::Float, Primitive::Float)) => {
+                Some(Self::FloatBitOp(BitOp::Xor))
+            },
+            (BinaryOp::Shl, (Primitive::Float, Primitive::Float)) => {
+                Some(Self::FloatBitOp(BitOp::Shl))
+            },
+            (BinaryOp::Shr, (Primitive::Float, Primitive::Float)) => {
+                Some(Self::FloatBitOp(BitOp::Shr))
+            },
 
             _ => None,
         }

@@ -1,11 +1,10 @@
-use caer_types::ty;
-
-use ena::unify::{InPlace, UnificationTable, UnifyKey, UnifyValue, Snapshot};
-use index_vec::{IndexVec, Idx};
-use thiserror::Error;
-use petgraph::graph::DiGraph;
-
 use std::collections::{BTreeSet, HashMap};
+
+use caer_types::ty;
+use ena::unify::{InPlace, Snapshot, UnificationTable, UnifyKey, UnifyValue};
+use index_vec::{Idx, IndexVec};
+use petgraph::graph::DiGraph;
+use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct InferKey(u32);
@@ -167,7 +166,9 @@ impl InferEngine {
         self.table.commit(self.snapshot_stack.pop().unwrap())
     }
 
-    pub fn register_subs(&mut self, subs: Vec<(InferKey, InferKey)>) -> Result<(), InferUnifyError> {
+    pub fn register_subs(
+        &mut self, subs: Vec<(InferKey, InferKey)>,
+    ) -> Result<(), InferUnifyError> {
         if self.sub_expanded.is_some() {
             // TODO: allow more sub registers
             panic!("subs already handled, can only handle one sub register")
@@ -200,31 +201,37 @@ impl InferEngine {
             Rule::Const(key, ty) => {
                 let const_val = Some(InferValue::from_ty(ty.clone()));
                 self.table.unify_var_value(*key, const_val)?;
-            }
+            },
             Rule::ConstFreeze(key, ty) => {
                 let const_val = Some(InferValue::from_ty(ty.clone()).freeze());
                 self.table.unify_var_value(*key, const_val)?;
-            }
+            },
             Rule::Equals(k1, k2) => {
                 self.table.unify_var_var(*k1, *k2)?;
-            }
+            },
         }
         Ok(())
     }
 
     pub fn resolve_assignments(&mut self) -> IndexVec<InferKey, InferValue> {
-        (0..self.table.len()).map(|i| {
-            let key = InferKey::from_usize(i);
-            self.table.probe_value(key).unwrap_or_default()
-        }).collect()
+        (0..self.table.len())
+            .map(|i| {
+                let key = InferKey::from_usize(i);
+                self.table.probe_value(key).unwrap_or_default()
+            })
+            .collect()
     }
 
-    pub fn check_resolve_assignments(&mut self) -> Result<IndexVec<InferKey, InferValue>, InferUnifyError> {
+    pub fn check_resolve_assignments(
+        &mut self,
+    ) -> Result<IndexVec<InferKey, InferValue>, InferUnifyError> {
         self.propogate_subs()?;
-        Ok((0..self.table.len()).map(|i| {
-            let key = InferKey::from_usize(i);
-            self.table.probe_value(key).unwrap_or_default()
-        }).collect())
+        Ok((0..self.table.len())
+            .map(|i| {
+                let key = InferKey::from_usize(i);
+                self.table.probe_value(key).unwrap_or_default()
+            })
+            .collect())
     }
 }
 
@@ -234,9 +241,11 @@ struct SubtypeResolver<'i> {
 }
 
 impl<'i> SubtypeResolver<'i> {
-    fn expand_subs(table: &'i mut UnificationTable<InPlace<InferKey>>, subs: Vec<(InferKey, InferKey)>) -> Result<Vec<(InferKey, InferKey)>, InferUnifyError> {
+    fn expand_subs(
+        table: &'i mut UnificationTable<InPlace<InferKey>>, subs: Vec<(InferKey, InferKey)>,
+    ) -> Result<Vec<(InferKey, InferKey)>, InferUnifyError> {
         let resolver = Self {
-            table: table,
+            table,
             sub_constraints: subs,
         };
         resolver.resolve()
@@ -254,9 +263,7 @@ impl<'i> SubtypeResolver<'i> {
 
         let mut node_for_infer = HashMap::new();
         let mut get_node = |g: &mut DiGraph<InferKey, ()>, idx: InferKey| {
-            *node_for_infer.entry(idx).or_insert_with(|| {
-                g.add_node(idx)
-            })
+            *node_for_infer.entry(idx).or_insert_with(|| g.add_node(idx))
         };
 
         for (sub, sup) in self.sub_constraints.iter() {
@@ -270,7 +277,8 @@ impl<'i> SubtypeResolver<'i> {
 
     fn tidy_constraints(&mut self) {
         let c_tab = &mut self.table;
-        self.sub_constraints.retain(|(sub, sup)| !c_tab.unioned(*sub, *sup));
+        self.sub_constraints
+            .retain(|(sub, sup)| !c_tab.unioned(*sub, *sup));
         // normalize keys to their root, for easier eq
         self.sub_constraints.iter_mut().for_each(|(sub, sup)| {
             *sub = c_tab.find(*sub);
@@ -283,16 +291,19 @@ impl<'i> SubtypeResolver<'i> {
 
         let sccs = petgraph::algo::kosaraju_scc(&graph);
         for scc in sccs {
-            scc.iter().try_fold(None, |prev, cur_idx| -> Result<Option<InferKey>, InferUnifyError> {
-                let cur_key = graph[*cur_idx];
-                match prev {
-                    None => Ok(Some(cur_key)),
-                    Some(prev_key) => {
-                        self.table.unify_var_var(prev_key, cur_key)?;
-                        Ok(Some(cur_key))
-                    },
-                }
-            })?;
+            scc.iter().try_fold(
+                None,
+                |prev, cur_idx| -> Result<Option<InferKey>, InferUnifyError> {
+                    let cur_key = graph[*cur_idx];
+                    match prev {
+                        None => Ok(Some(cur_key)),
+                        Some(prev_key) => {
+                            self.table.unify_var_var(prev_key, cur_key)?;
+                            Ok(Some(cur_key))
+                        },
+                    }
+                },
+            )?;
         }
 
         Ok(())
@@ -302,10 +313,13 @@ impl<'i> SubtypeResolver<'i> {
         let graph = &self.get_graph();
 
         let topsort = petgraph::algo::toposort(&graph, None).expect("subtype graph has cycles");
-        topsort.into_iter().flat_map(|node| {
-            graph.neighbors_directed(node, petgraph::Direction::Incoming).map(move |sub_node| {
-                (graph[sub_node], graph[node])
+        topsort
+            .into_iter()
+            .flat_map(|node| {
+                graph
+                    .neighbors_directed(node, petgraph::Direction::Incoming)
+                    .map(move |sub_node| (graph[sub_node], graph[node]))
             })
-        }).collect()
+            .collect()
     }
 }

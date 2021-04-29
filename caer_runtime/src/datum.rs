@@ -1,7 +1,9 @@
-use caer_types::id::TypeId;
 use std::slice::from_raw_parts_mut;
-use crate::val::Val;
+
+use caer_types::id::TypeId;
+
 use crate::runtime::Runtime;
+use crate::val::Val;
 
 // TODO: rename. object? called gdatum in some places.
 

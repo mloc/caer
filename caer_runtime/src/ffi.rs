@@ -1,7 +1,7 @@
-use std::convert::TryInto;
-use std::convert::TryFrom;
-use std::slice::from_raw_parts;
+use std::convert::{TryFrom, TryInto};
 use std::ptr::NonNull;
+use std::slice::from_raw_parts;
+
 use num_traits::Zero;
 
 #[repr(C)]
@@ -11,7 +11,10 @@ pub struct FfiArray<T, I = u64> {
     data: NonNull<T>,
 }
 
-impl<T, I> FfiArray<T, I> where I: Copy + Zero + Eq + TryFrom<usize> {
+impl<T, I> FfiArray<T, I>
+where
+    I: Copy + Zero + Eq + TryFrom<usize>,
+{
     pub fn empty() -> Self {
         Self {
             len: I::zero(),
@@ -22,10 +25,7 @@ impl<T, I> FfiArray<T, I> where I: Copy + Zero + Eq + TryFrom<usize> {
     /// # Safety
     /// lol
     pub unsafe fn with_len(data: NonNull<T>, len: I) -> Self {
-        Self {
-            len,
-            data,
-        }
+        Self { len, data }
     }
 
     // TODO: fix lifetimes, make into From or something
@@ -54,6 +54,13 @@ where
 {
     #[inline]
     pub fn as_slice(&self) -> &[T] {
-        unsafe { from_raw_parts(self.data.as_ptr(), self.len.try_into().expect("array size too big to cast to usize")) }
+        unsafe {
+            from_raw_parts(
+                self.data.as_ptr(),
+                self.len
+                    .try_into()
+                    .expect("array size too big to cast to usize"),
+            )
+        }
     }
 }

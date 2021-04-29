@@ -14,7 +14,7 @@ use crate::list::List;
 use crate::meta_runtime::MetaRuntime;
 use crate::string_table::StringTable;
 use crate::val::Val;
-use crate::{exec, sync, vtable};
+use crate::vtable;
 
 #[derive(Debug)]
 pub struct Runtime {

@@ -1,13 +1,15 @@
-use crate::cfg::{self, Op};
-use crate::const_val::ConstVal;
-use crate::env::Env;
-use crate::id::{BlockId, LocalId, VarId};
+use std::collections::{HashMap, HashSet};
+
 use caer_infer as infer;
 use caer_types::id::FuncId;
 use caer_types::op::BinaryOp;
 use caer_types::ty;
 use index_vec::IndexVec;
-use std::collections::{HashMap, HashSet};
+
+use crate::cfg::{self, Op};
+use crate::const_val::ConstVal;
+use crate::env::Env;
+use crate::id::{BlockId, LocalId, VarId};
 
 // modifies a clone of the proc, for now. proc-level cfg opts
 pub struct ProcAnalysis<'a> {
@@ -74,14 +76,14 @@ impl<'a> ProcAnalysis<'a> {
                         let var_info = &mut self.var_info[*var];
                         assert!(var_info.decl_op.is_none());
                         var_info.decl_op = Some(idx);
-                    }
+                    },
                     Op::Load(_, var) => {
                         self.var_info[*var].loads.push(idx);
-                    }
+                    },
                     Op::Store(var, _) => {
                         self.var_info[*var].stores.push(idx);
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
 
@@ -94,14 +96,21 @@ impl<'a> ProcAnalysis<'a> {
                     self.local_info[*discriminant]
                         .dependent_ops
                         .push(RefIndex::Terminator(block.id));
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
 
         //self.binop_prop();
         self.demote_vars();
-        self.infer_types(&postorder.iter().map(|(_, x)| x).cloned().rev().collect::<Vec<_>>());
+        self.infer_types(
+            &postorder
+                .iter()
+                .map(|(_, x)| x)
+                .cloned()
+                .rev()
+                .collect::<Vec<_>>(),
+        );
     }
 
     // nasty but handy
@@ -120,10 +129,7 @@ impl<'a> ProcAnalysis<'a> {
     }
 
     fn build_orders(
-        &self,
-        pred: Option<BlockId>,
-        block: &cfg::Block,
-        visited: &mut IndexVec<BlockId, bool>,
+        &self, pred: Option<BlockId>, block: &cfg::Block, visited: &mut IndexVec<BlockId, bool>,
         postorder: &mut Vec<(Option<BlockId>, BlockId)>,
     ) {
         if visited[block.id] {
@@ -153,8 +159,8 @@ impl<'a> ProcAnalysis<'a> {
                     match op {
                         BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
                             infer_type = Some(lhs_ty.clone());
-                        }
-                        _ => {}
+                        },
+                        _ => {},
                     }
                 }
 
@@ -190,10 +196,13 @@ impl<'a> ProcAnalysis<'a> {
             }
 
             if var_info.stores.len() == 1 {
-                println!("{:?} {:?}", var_info.id, self.proc.vars[var_info.id].captures);
+                println!(
+                    "{:?} {:?}",
+                    var_info.id, self.proc.vars[var_info.id].captures
+                );
                 if !self.proc.vars[var_info.id].captures.is_empty() {
                     // TODO: clean this way up
-                    continue
+                    continue;
                 }
                 let decl_scope = if let Some(opidx) = var_info.decl_op {
                     self.proc.blocks[opidx.block].scope
@@ -258,8 +267,8 @@ impl<'a> ProcAnalysis<'a> {
         runner.run(&mut self.proc);
     }
 
-    fn fold_consts(&mut self, order: &[BlockId]) -> bool {
-        let mut changed = false;
+    fn fold_consts(&mut self, _order: &[BlockId]) -> bool {
+        let changed = false;
         /*for block_id in order.iter() {
             let block = &self.proc.blocks[*block_id];
             for op in block.ops.iter() {
@@ -452,8 +461,8 @@ impl InferRunner {
                 match op {
                     Op::Store(var, local) => {
                         subs.push((self.local_ikey[*local], self.var_ikey[*var]));
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
         }
@@ -507,10 +516,10 @@ impl InferRunner {
                         self.rollback_to(&checkpoint).unwrap();
                         start_block = checkpoint.block;
                         start_op = checkpoint.op;
-                    }
+                    },
                     None => {
                         panic!("out of checkpoints, still erroring");
-                    }
+                    },
                 },
             }
         }
@@ -527,10 +536,7 @@ impl InferRunner {
     }
 
     fn run_types_from(
-        &mut self,
-        proc: &mut cfg::Function,
-        start_block: usize,
-        start_op: usize,
+        &mut self, proc: &mut cfg::Function, start_block: usize, start_op: usize,
     ) -> Result<(), infer::InferUnifyError> {
         for block_idx in start_block..self.block_order.len() {
             let block_id = self.block_order[block_idx];
@@ -549,43 +555,40 @@ impl InferRunner {
     }
 
     fn process_op(
-        &mut self,
-        op: &cfg::Op,
-        block_idx: usize,
-        op_idx: usize,
+        &mut self, op: &cfg::Op, block_idx: usize, op_idx: usize,
     ) -> Result<(), infer::InferUnifyError> {
         match op {
-            Op::Noop => {}
+            Op::Noop => {},
             Op::Literal(local, lit) => {
                 self.apply_rule(&infer::Rule::Const(self.local_ikey[*local], lit.get_ty()))?;
-            }
-            Op::MkVar(_) => {} // TODO: consider better types for vars
+            },
+            Op::MkVar(_) => {}, // TODO: consider better types for vars
             Op::Load(local, var) => {
                 self.apply_rule(&infer::Rule::Equals(
                     self.local_ikey[*local],
                     self.var_ikey[*var],
                 ))?;
-            }
+            },
             Op::Store(_, _) => {
                 // handled by sub rule
-            }
-            Op::Put(_) => {}
+            },
+            Op::Put(_) => {},
             Op::Call(out_l, _, _) => {
                 self.apply_rule(&infer::Rule::Const(
                     self.local_ikey[*out_l],
                     ty::Complex::Any,
                 ))?;
-            }
+            },
             Op::Cast(out_l, _, ty) => {
                 self.apply_rule(&infer::Rule::Const(self.local_ikey[*out_l], (*ty).into()))?;
-            }
+            },
             Op::AllocDatum(out_l, _) => {
                 // TODO: handle datum types
                 self.apply_rule(&infer::Rule::Const(
                     self.local_ikey[*out_l],
                     ty::Primitive::Ref(None).into(),
                 ))?;
-            }
+            },
             Op::DatumLoadVar(out_l, datum_l, _) => {
                 // TODO: in future, with hard datums, we can set out_l's ty
                 self.apply_rule(&infer::Rule::Const(
@@ -596,13 +599,13 @@ impl InferRunner {
                     self.local_ikey[*datum_l],
                     ty::Primitive::Ref(None).into(),
                 ))?;
-            }
+            },
             Op::DatumStoreVar(datum_l, _, _) => {
                 self.apply_rule(&infer::Rule::Const(
                     self.local_ikey[*datum_l],
                     ty::Primitive::Ref(None).into(),
                 ))?;
-            }
+            },
             Op::DatumCallProc(out_l, datum_l, _, _) => {
                 self.apply_rule(&infer::Rule::Const(
                     self.local_ikey[*out_l],
@@ -612,8 +615,8 @@ impl InferRunner {
                     self.local_ikey[*datum_l],
                     ty::Primitive::Ref(None).into(),
                 ))?;
-            }
-            Op::Throw(_) => {}
+            },
+            Op::Throw(_) => {},
             Op::CatchException(maybe_except_v) => {
                 if let Some(except_v) = maybe_except_v {
                     self.apply_rule(&infer::Rule::Const(
@@ -621,7 +624,7 @@ impl InferRunner {
                         ty::Complex::Any,
                     ))?;
                 }
-            }
+            },
             Op::Spawn(_, _) => {},
             Op::Sleep(_) => {},
 
@@ -675,8 +678,8 @@ impl InferRunner {
                                 hardened = true;
                             }
                         }
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 };
                 if !hardened {
                     self.apply_rule(&infer::Rule::Const(
@@ -684,7 +687,7 @@ impl InferRunner {
                         ty::Complex::Any,
                     ))?;
                 }
-            }
+            },
             _ => unimplemented!("unhandled op: {:?}", op),
         };
         Ok(())
@@ -820,9 +823,7 @@ impl ProcPatch {
     }
 
     fn rewrite_locals(
-        &self,
-        proc: &mut cfg::Function,
-        map: impl caer_util::traits::Map<LocalId, LocalId>,
+        &self, proc: &mut cfg::Function, map: impl caer_util::traits::Map<LocalId, LocalId>,
     ) {
         let map_fn = |old: &_| {
             if let Some(new) = map.map_get(old) {
@@ -853,7 +854,9 @@ impl ProcPatch {
     }
 
     // bad copypaste, TODO: nicer visitor
-    fn rewrite_vars(&self, proc: &mut cfg::Function, map: impl caer_util::traits::Map<VarId, VarId>) {
+    fn rewrite_vars(
+        &self, proc: &mut cfg::Function, map: impl caer_util::traits::Map<VarId, VarId>,
+    ) {
         let map_fn = |old: &_| {
             if let Some(new) = map.map_get(old) {
                 *new

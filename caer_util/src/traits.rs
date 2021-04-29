@@ -1,6 +1,7 @@
-use index_vec::{IndexVec, Idx};
 use std::collections::HashMap;
 use std::hash::Hash;
+
+use index_vec::{Idx, IndexVec};
 
 pub trait Map<K, V> {
     fn map_get(&self, index: &K) -> Option<&V>;

@@ -1,10 +1,8 @@
 //use futures::Async;
-use futures::stream::{Fuse, Stream};
-use snowflake::ProcessUniqueId;
-use futures::StreamExt;
 use aed_common::messages;
-use futures::task::Poll;
-use futures::Future;
+use futures::stream::Stream;
+use snowflake::ProcessUniqueId;
+
 use crate::server;
 
 // cribbed from futures tests, used as we have no way to propagate notifications to DM
@@ -25,7 +23,7 @@ pub struct Runtime {
 
     msg_in: Box<dyn Stream<Item = (ProcessUniqueId, messages::Client)> + Unpin>,
 
-    proc: unsafe extern fn(),
+    proc: unsafe extern "C" fn(),
 }
 
 //#[expose_c_stubs(runtime)]

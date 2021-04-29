@@ -1,12 +1,11 @@
-use super::func_builder::FuncBuilder;
-use super::proc_builder::ProcBuilder;
 use caer_ir::cfg;
 use caer_ir::id::{BlockId, ClosureSlotId, LocalId, ScopeId, VarId};
 use caer_types::id::{StringId, TypeId};
 use caer_types::op::BinaryOp;
 use caer_types::ty;
 use dreammaker::ast;
-use std::marker::PhantomData;
+
+use super::func_builder::FuncBuilder;
 
 // TODO: split this up! somehow
 
@@ -63,8 +62,7 @@ impl<'f> BlockBuilder {
     }
 
     pub fn build_stmts(
-        &mut self,
-        fb: &mut FuncBuilder<'f>,
+        &mut self, fb: &mut FuncBuilder<'f>,
         stmts: impl Iterator<Item = &'f ast::Spanned<ast::Statement>>,
     ) {
         for stmt in stmts {
@@ -86,30 +84,30 @@ impl<'f> BlockBuilder {
                     let var_id = fb.lookup_var(self.block.scope, name_id);
                     self.block.push_op(cfg::Op::Store(var_id, null));
                 }
-            }
+            },
 
             ast::Statement::Expr(expr) => match expr {
                 ast::Expression::AssignOp { op: _, lhs, rhs } => {
                     let (base, var) = self.build_expr_lhs(fb, lhs.as_ref());
                     self.build_assign(fb, base, var, &*rhs);
-                }
+                },
 
                 ast::Expression::BinaryOp { op, lhs: _, rhs } => {
                     let res = self.build_expr(fb, rhs);
                     match op {
                         ast::BinaryOp::LShift => {
                             self.block.push_op(cfg::Op::Put(res));
-                        }
+                        },
                         _ => {
                             println!("uh oh {:#?}", expr);
                             unimplemented!();
-                        }
+                        },
                     };
-                }
+                },
 
                 expr => {
                     self.build_expr(fb, expr);
-                }
+                },
             },
 
             ast::Statement::Return(val) => {
@@ -121,7 +119,7 @@ impl<'f> BlockBuilder {
                     // create an unreachable block and continue? need a more robust builder
                     return;
                 }
-            }
+            },
 
             ast::Statement::If { arms, else_arm } => {
                 let if_end = fb.new_block(self.block.scope);
@@ -162,7 +160,7 @@ impl<'f> BlockBuilder {
                 self.block.terminator = cfg::Terminator::Jump(next);
 
                 self.cur_block_done(fb, if_end);
-            }
+            },
 
             ast::Statement::While { condition, block } => {
                 let cond_scope = fb.new_scope(self.block.scope);
@@ -188,7 +186,7 @@ impl<'f> BlockBuilder {
 
                 cond_bb.finalize(fb);
                 self.cur_block_done(fb, while_end);
-            }
+            },
 
             ast::Statement::ForLoop {
                 init,
@@ -237,7 +235,7 @@ impl<'f> BlockBuilder {
                 inc_bb.finalize(fb);
                 fb.finalize_block(exit_block);
                 self.cur_block_done(fb, continuation);
-            }
+            },
 
             ast::Statement::TryCatch {
                 try_block,
@@ -269,12 +267,12 @@ impl<'f> BlockBuilder {
 
                 catch_bb.finalize(fb);
                 self.cur_block_done(fb, continuation);
-            }
+            },
 
             ast::Statement::Throw(throw_expr) => {
                 let throw_val = self.build_expr(fb, throw_expr);
                 self.block.push_op(cfg::Op::Throw(throw_val));
-            }
+            },
 
             ast::Statement::Spawn { delay, block } => {
                 /*let closure = ClosureEnvironment::new(fb, self.block.scope);
@@ -289,17 +287,14 @@ impl<'f> BlockBuilder {
                 let delay_val = delay.as_ref().map(|d| self.build_expr(fb, d));
                 self.block.push_op(cfg::Op::Spawn(slot, delay_val));
                 //return Some((slot, block));
-            }
+            },
 
             _ => unimplemented!(),
         }
     }
 
     fn add_var(
-        &mut self,
-        fb: &mut FuncBuilder<'f>,
-        var_type: &ast::VarType,
-        var_name: &str,
+        &mut self, fb: &mut FuncBuilder<'f>, var_type: &ast::VarType, var_name: &str,
     ) -> VarId {
         // TODO: care about var flags?
         let name_id = fb.env.intern_string(var_name);
@@ -312,7 +307,7 @@ impl<'f> BlockBuilder {
                 None => {
                     // TODO: ERRH(C)
                     panic!("no such type {:?}", var_type.type_path);
-                }
+                },
             };
 
             // TODO: encapsulate type_tree
@@ -324,11 +319,8 @@ impl<'f> BlockBuilder {
     }
 
     fn build_expr_base(
-        &mut self,
-        fb: &mut FuncBuilder<'f>,
-        term: &ast::Spanned<ast::Term>,
-        unary_ops: &[ast::UnaryOp],
-        follow: &[ast::Spanned<ast::Follow>],
+        &mut self, fb: &mut FuncBuilder<'f>, term: &ast::Spanned<ast::Term>,
+        unary_ops: &[ast::UnaryOp], follow: &[ast::Spanned<ast::Follow>],
     ) -> LocalId {
         let mut local = self.build_term(fb, &term.elem);
         assert!(unary_ops.is_empty());
@@ -341,29 +333,24 @@ impl<'f> BlockBuilder {
     }
 
     fn build_follow(
-        &mut self,
-        fb: &mut FuncBuilder<'f>,
-        local: LocalId,
-        follow: &ast::Spanned<ast::Follow>,
+        &mut self, fb: &mut FuncBuilder<'f>, local: LocalId, follow: &ast::Spanned<ast::Follow>,
     ) -> LocalId {
         match &follow.elem {
             ast::Follow::Field(kind, field) => {
                 let field_id = fb.env.intern_string(field);
                 self.build_datum_load(fb, local, field_id, *kind)
-            }
+            },
             ast::Follow::Call(kind, proc_name, args) => {
                 let proc_name_id = fb.env.intern_string(proc_name);
                 let arg_exprs: Vec<_> = args.iter().map(|expr| self.build_expr(fb, expr)).collect();
                 self.build_datum_call(fb, local, proc_name_id, arg_exprs, *kind)
-            }
+            },
             f => unimplemented!("follow: {:?}", f),
         }
     }
 
     fn build_expr_lhs(
-        &mut self,
-        fb: &mut FuncBuilder<'f>,
-        expr: &ast::Expression,
+        &mut self, fb: &mut FuncBuilder<'f>, expr: &ast::Expression,
     ) -> (Option<LocalId>, StringId) {
         match expr {
             ast::Expression::Base {
@@ -393,21 +380,18 @@ impl<'f> BlockBuilder {
                         let field_id = fb.env.intern_string(field);
                         self.validate_datum_index(fb, base, field_id, *kind);
                         (Some(base), field_id)
-                    }
+                    },
                     // TODO: handle indexes
                     f => panic!("bad follow on lhs: {:?}", f),
                 }
-            }
+            },
 
             _ => unimplemented!(),
         }
     }
 
     fn build_assign(
-        &mut self,
-        fb: &mut FuncBuilder<'f>,
-        base: Option<LocalId>,
-        var: StringId,
+        &mut self, fb: &mut FuncBuilder<'f>, base: Option<LocalId>, var: StringId,
         expr: &ast::Expression,
     ) {
         let asg_expr = self.build_expr(fb, expr);
@@ -415,11 +399,11 @@ impl<'f> BlockBuilder {
             None => {
                 let var_id = fb.lookup_var(self.block.scope, var);
                 self.block.push_op(cfg::Op::Store(var_id, asg_expr));
-            }
+            },
             Some(datum_id) => {
                 self.block
                     .push_op(cfg::Op::DatumStoreVar(datum_id, var, asg_expr));
-            }
+            },
         }
     }
 
@@ -435,10 +419,7 @@ impl<'f> BlockBuilder {
 
     // TODO: ERRH(fe)
     fn build_datum_load(
-        &mut self,
-        fb: &mut FuncBuilder<'f>,
-        datum_local: LocalId,
-        var: StringId,
+        &mut self, fb: &mut FuncBuilder<'f>, datum_local: LocalId, var: StringId,
         index_kind: ast::IndexKind,
     ) -> LocalId {
         let field_dty_id = self.validate_datum_index(fb, datum_local, var, index_kind);
@@ -453,15 +434,11 @@ impl<'f> BlockBuilder {
     }
 
     fn build_datum_call(
-        &mut self,
-        fb: &mut FuncBuilder<'f>,
-        datum_local: LocalId,
-        proc_name: StringId,
-        args: Vec<LocalId>,
-        index_kind: ast::IndexKind,
+        &mut self, fb: &mut FuncBuilder<'f>, datum_local: LocalId, proc_name: StringId,
+        args: Vec<LocalId>, index_kind: ast::IndexKind,
     ) -> LocalId {
         match index_kind {
-            ast::IndexKind::Colon | ast::IndexKind::SafeColon => {}
+            ast::IndexKind::Colon | ast::IndexKind::SafeColon => {},
             ast::IndexKind::Dot | ast::IndexKind::SafeDot => {
                 let dty_id = match fb.func.get_assoc_dty(datum_local) {
                     Some(id) => id,
@@ -480,7 +457,7 @@ impl<'f> BlockBuilder {
                         fb.env.string_table.get(proc_name)
                     );
                 }
-            }
+            },
         }
 
         let res_local = fb.func.add_local(self.block.scope, ty::Complex::Any);
@@ -496,10 +473,7 @@ impl<'f> BlockBuilder {
     // TODO: ERRH(fe)
     /// Returns the dtype ID of the indexed field, if indexed with a .-like operator
     fn validate_datum_index(
-        &mut self,
-        fb: &mut FuncBuilder<'f>,
-        datum_local: LocalId,
-        var: StringId,
+        &mut self, fb: &mut FuncBuilder<'f>, datum_local: LocalId, var: StringId,
         index_kind: ast::IndexKind,
     ) -> Option<TypeId> {
         match index_kind {
@@ -524,7 +498,7 @@ impl<'f> BlockBuilder {
                         fb.env.string_table.get(var)
                     );
                 }
-            }
+            },
         }
     }
 
@@ -572,7 +546,7 @@ impl<'f> BlockBuilder {
                     .push_op(cfg::Op::Binary(res_local, l_op, lhs_expr, rhs_expr));
 
                 res_local
-            }
+            },
 
             _ => unimplemented!("{:?}", expr),
         }
@@ -580,10 +554,7 @@ impl<'f> BlockBuilder {
 
     // build a binop with short-circuiting
     fn build_logical_binop(
-        &mut self,
-        fb: &mut FuncBuilder<'f>,
-        lhs: &ast::Expression,
-        rhs: &ast::Expression,
+        &mut self, fb: &mut FuncBuilder<'f>, lhs: &ast::Expression, rhs: &ast::Expression,
         op: &ast::BinaryOp,
     ) -> LocalId {
         // TODO: nameless vars
@@ -647,12 +618,12 @@ impl<'f> BlockBuilder {
                 // TODO this cloning is bad, too lazy to fix lifetimes
                 let str_id = fb.env.intern_string(s.clone());
                 self.build_literal(fb, cfg::Literal::String(str_id))
-            }
+            },
             ast::Term::Ident(var_name) => {
                 let name_id = fb.env.intern_string(var_name);
                 let var_id = fb.lookup_var(self.block.scope, name_id);
                 self.build_var_load(fb, var_id)
-            }
+            },
             ast::Term::Call(name, args) => {
                 let res = fb.add_local(self.block.scope, ty::Complex::Any);
 
@@ -665,7 +636,7 @@ impl<'f> BlockBuilder {
                 self.block.push_op(cfg::Op::Call(res, name_id, arg_exprs));
 
                 res
-            }
+            },
             ast::Term::InterpString(ls, es_pairs) => {
                 // TODO fix postfix formatting: text("hello []", 2) => "hello 2"
                 // TODO more efficient building, repeated concat bad
@@ -704,7 +675,7 @@ impl<'f> BlockBuilder {
                 }
 
                 built
-            }
+            },
             ast::Term::New { type_: newty, args } => {
                 assert!(args.is_none());
 
@@ -715,7 +686,7 @@ impl<'f> BlockBuilder {
                         let pf_ty = fb.objtree.root().navigate_path(&pf.path).unwrap().ty();
 
                         fb.env.type_tree.type_by_node_id[&(pf_ty.index().index() as u64)]
-                    }
+                    },
                     _ => unimplemented!("new with newty {:?}", newty),
                 };
 
@@ -725,7 +696,7 @@ impl<'f> BlockBuilder {
                 self.block.push_op(cfg::Op::AllocDatum(ref_local, ty_id));
 
                 ref_local
-            }
+            },
             _ => unimplemented!("{:?}", term),
         }
     }

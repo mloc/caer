@@ -1,7 +1,9 @@
-use crate::id::TypeId;
-use index_vec::define_index_type;
 use std::collections::BTreeSet;
+
+use index_vec::define_index_type;
 use serde::Serialize;
+
+use crate::id::TypeId;
 
 define_index_type! {pub struct TyId = u32;}
 
@@ -48,10 +50,10 @@ impl Complex {
                 Complex::Any => return Complex::Any,
                 Complex::OneOf(oset) => {
                     set.extend(oset.iter().cloned());
-                }
+                },
                 _ => {
                     set.insert(ty.clone());
-                }
+                },
             }
         }
 

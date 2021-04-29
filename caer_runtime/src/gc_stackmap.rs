@@ -1,7 +1,8 @@
-use caer_types::layout::GC_STACKMAP_ID;
-use llvm_stackmaps::{LittleEndian, Location, Parser};
-pub use llvm_stackmaps::LocationPointer;
 use std::collections::{HashMap, HashSet};
+
+use caer_types::layout::GC_STACKMAP_ID;
+pub use llvm_stackmaps::LocationPointer;
+use llvm_stackmaps::{LittleEndian, Location, Parser};
 
 #[derive(Debug, Clone)]
 pub struct GcStackmap {

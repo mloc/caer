@@ -1,11 +1,14 @@
-use super::id::*;
-use caer_types::{func::{CallingSpec, ClosureSpec, FuncInfo}, id::{FuncId, StringId, TypeId}};
-use caer_types::ty;
-use index_vec::IndexVec;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{Seek, SeekFrom, Write};
+
+use caer_types::func::{CallingSpec, ClosureSpec, FuncInfo};
+use caer_types::id::{FuncId, StringId, TypeId};
+use caer_types::ty;
+use index_vec::IndexVec;
 use serde::Serialize;
+
+use super::id::*;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Local {
@@ -197,7 +200,13 @@ impl<'a> Function {
     }
 
     pub fn add_block(&mut self, block: Block) {
-        assert_eq!(block.id, self.blocks.next_idx(), "must add blocks in sequential ID order; got {:?} but expected {:?}", block.id, self.blocks.next_idx());
+        assert_eq!(
+            block.id,
+            self.blocks.next_idx(),
+            "must add blocks in sequential ID order; got {:?} but expected {:?}",
+            block.id,
+            self.blocks.next_idx()
+        );
         self.scopes[block.scope].blocks.push(block.id);
         self.blocks.push(block);
     }
@@ -237,74 +246,74 @@ impl<'a> Function {
         for block in self.blocks.iter() {
             for op in block.ops.iter() {
                 match op {
-                    Op::Noop => {}
+                    Op::Noop => {},
 
                     Op::Literal(_, _) => {
                         // hmmm
-                    }
+                    },
 
-                    Op::MkVar(_) => {}
+                    Op::MkVar(_) => {},
 
-                    Op::Load(_, _) => {}
+                    Op::Load(_, _) => {},
 
-                    Op::Store(_, _) => {}
+                    Op::Store(_, _) => {},
 
                     Op::Put(src) => {
                         flow[*src].reads += 1;
-                    }
+                    },
 
                     Op::Binary(_, _, lhs, rhs) => {
                         flow[*lhs].reads += 1;
                         flow[*rhs].reads += 1;
-                    }
+                    },
 
                     Op::HardBinary(_, _, lhs, rhs) => {
                         flow[*lhs].reads += 1;
                         flow[*rhs].reads += 1;
-                    }
+                    },
 
                     Op::Call(_, _, args) => {
                         for arg in args.iter() {
                             flow[*arg].reads += 1;
                         }
-                    }
+                    },
 
                     Op::Cast(_, src, _) => {
                         flow[*src].reads += 1;
-                    }
+                    },
 
-                    Op::AllocDatum(_, _) => {}
+                    Op::AllocDatum(_, _) => {},
 
                     Op::DatumLoadVar(_, src, _) => {
                         flow[*src].reads += 1;
-                    }
+                    },
 
                     Op::DatumStoreVar(_, _, src) => {
                         flow[*src].reads += 1;
-                    }
+                    },
 
                     Op::DatumCallProc(_, dl, _, args) => {
                         flow[*dl].reads += 1;
                         for arg in args.iter() {
                             flow[*arg].reads += 1;
                         }
-                    }
+                    },
 
                     Op::Throw(src) => {
                         flow[*src].reads += 1;
-                    }
+                    },
 
-                    Op::CatchException(_) => {}
+                    Op::CatchException(_) => {},
 
                     Op::Spawn(_, Some(src)) => {
                         flow[*src].reads += 1;
-                    }
-                    Op::Spawn(_, None) => {}
+                    },
+                    Op::Spawn(_, None) => {},
 
                     Op::Sleep(Some(src)) => {
                         flow[*src].reads += 1;
-                    }
-                    Op::Sleep(None) => {}
+                    },
+                    Op::Sleep(None) => {},
                 }
             }
 
@@ -315,8 +324,8 @@ impl<'a> Function {
                     default: _,
                 } => {
                     flow[discriminant].reads += 1;
-                }
-                Terminator::Return | Terminator::Jump(_) | Terminator::TryCatch { .. } => {}
+                },
+                Terminator::Return | Terminator::Jump(_) | Terminator::TryCatch { .. } => {},
             }
         }
 
@@ -346,12 +355,14 @@ impl<'a> Function {
                 env_size: closure.captured.len() as _,
             })
         } else {
-            calling_spec = self.calling_spec.as_ref().expect("func has no calling spec, but func spec was requested").clone();
+            calling_spec = self
+                .calling_spec
+                .as_ref()
+                .expect("func has no calling spec, but func spec was requested")
+                .clone();
         }
 
-        FuncInfo {
-            calling_spec,
-        }
+        FuncInfo { calling_spec }
     }
 
     pub fn dot(&self, name: &str) {
@@ -359,7 +370,11 @@ impl<'a> Function {
         fs::create_dir_all("dbgout/dot/tino_cfg/").unwrap();
         fs::create_dir_all("dbgout/ir/").unwrap();
         // TODO: better string format for CFG
-        serde_json::to_writer_pretty(File::create(format!("dbgout/ir/cfg_{}.json", name)).unwrap(), self).unwrap();
+        serde_json::to_writer_pretty(
+            File::create(format!("dbgout/ir/cfg_{}.json", name)).unwrap(),
+            self,
+        )
+        .unwrap();
         // TODO: replace proc-name here with some better repr
         let mut f = File::create(format!("dbgout/dot/tino_cfg/cfg_{}.dot", name)).unwrap();
         dot::render(self, &mut f).unwrap();
@@ -510,7 +525,7 @@ impl<'a> dot::GraphWalk<'a, BlockId, (BlockId, BlockId, String)> for Function {
                     }
 
                     out
-                }
+                },
                 Terminator::TryCatch {
                     try_block,
                     catch_block,
@@ -705,7 +720,7 @@ impl Op {
                 let mut v = args.clone();
                 v.push(*src);
                 v
-            }
+            },
             Op::Throw(src) => vec![*src],
             Op::CatchException(_) => vec![],
             // hm, this should probably source all the captured vars..
@@ -728,15 +743,15 @@ impl Op {
             Op::AllocDatum(dst, _) => f(dst),
             Op::DatumLoadVar(dst, _, _) => f(dst),
             Op::DatumCallProc(dst, _, _, _) => f(dst),
-            Op::Noop => {}
-            Op::MkVar(_) => {}
-            Op::Store(_, _) => {}
-            Op::Put(_) => {}
-            Op::DatumStoreVar(_, _, _) => {}
-            Op::Throw(_) => {}
-            Op::CatchException(_) => {}
-            Op::Spawn(_, _) => {}
-            Op::Sleep(_) => {}
+            Op::Noop => {},
+            Op::MkVar(_) => {},
+            Op::Store(_, _) => {},
+            Op::Put(_) => {},
+            Op::DatumStoreVar(_, _, _) => {},
+            Op::Throw(_) => {},
+            Op::CatchException(_) => {},
+            Op::Spawn(_, _) => {},
+            Op::Sleep(_) => {},
         }
     }
 
@@ -747,34 +762,38 @@ impl Op {
             Op::Binary(_, _, lhs, rhs) => {
                 f(lhs);
                 f(rhs)
-            }
+            },
             Op::HardBinary(_, _, lhs, rhs) => {
                 f(lhs);
                 f(rhs)
-            }
+            },
             Op::Call(_, _, args) => args.iter_mut().for_each(f),
             Op::Cast(_, src, _) => f(src),
             Op::DatumLoadVar(_, src, _) => f(src),
             Op::DatumStoreVar(dsrc, _, src) => {
                 f(dsrc);
                 f(src)
-            }
+            },
             Op::DatumCallProc(_, src, _, args) => {
                 f(src);
                 args.iter_mut().for_each(f);
-            }
+            },
             Op::Throw(src) => f(src),
-            Op::Noop => {}
-            Op::Literal(_, _) => {}
-            Op::MkVar(_) => {}
-            Op::Load(_, _) => {}
-            Op::AllocDatum(_, _) => {}
-            Op::CatchException(_) => {}
+            Op::Noop => {},
+            Op::Literal(_, _) => {},
+            Op::MkVar(_) => {},
+            Op::Load(_, _) => {},
+            Op::AllocDatum(_, _) => {},
+            Op::CatchException(_) => {},
             // ditto
-            Op::Spawn(_, Some(delay)) => {f(delay);}
-            Op::Spawn(_, None) => {}
-            Op::Sleep(Some(delay)) => {f(delay);}
-            Op::Sleep(None) => {}
+            Op::Spawn(_, Some(delay)) => {
+                f(delay);
+            },
+            Op::Spawn(_, None) => {},
+            Op::Sleep(Some(delay)) => {
+                f(delay);
+            },
+            Op::Sleep(None) => {},
         }
     }
 
@@ -784,7 +803,7 @@ impl Op {
             Op::Load(_, var) => f(var),
             Op::Store(var, _) => f(var),
             Op::CatchException(Some(var)) => f(var),
-            _ => {}
+            _ => {},
         }
     }
 }
@@ -832,8 +851,8 @@ impl Terminator {
                 default: _,
             } => {
                 f(disc);
-            }
-            Terminator::Return | Terminator::Jump(_) | Terminator::TryCatch { .. } => {}
+            },
+            Terminator::Return | Terminator::Jump(_) | Terminator::TryCatch { .. } => {},
         }
     }
 }
