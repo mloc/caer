@@ -161,7 +161,9 @@ impl Server {
     pub fn send_all(&self, msg: &messages::Server) {
         let enc = BytesMut::from(serde_cbor::ser::to_vec(msg).unwrap().as_slice()); // TODO error type
         for client in self.shared.clients.read().unwrap().values() {
-            client.unbounded_send(enc.clone().into()).unwrap();
+            if let Err(e) = client.unbounded_send(enc.clone().into()) {
+                println!("send to client failed: {:?}", e);
+            }
         }
     }
 }

@@ -1,3 +1,5 @@
+use std::sync::atomic::{fence, Ordering};
+
 use crate::coro::Coro;
 use crate::stack::Stack;
 
@@ -39,7 +41,10 @@ impl Context {
             (*coro.handle).is_end == 0,
             "attemped to resume finished coroutine"
         );
+
+        fence(Ordering::SeqCst);
         aco_sys::aco_resume(coro.handle);
+        fence(Ordering::SeqCst);
 
         coro.is_end()
     }

@@ -130,8 +130,6 @@ impl Runtime {
         #[allow(clippy::drop_ref)]
         std::mem::drop(self);
 
-        // TODO: barrier? in aco?
-
         unsafe { aco::yield_to_main() }
     }
 

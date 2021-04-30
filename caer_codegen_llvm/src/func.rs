@@ -21,6 +21,7 @@ pub struct FuncEmit<'a, 'p, 'ctx> {
 
     var_allocs: IndexVec<VarId, StackValue<'ctx>>,
     locals: IndexVec<LocalId, Option<BasicValueEnum<'ctx>>>,
+    jumper: Option<InstructionValue<'ctx>>,
     blocks: IndexVec<BlockId, BasicBlock<'ctx>>,
     ll_func: FunctionValue<'ctx>,
 }
@@ -37,6 +38,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
 
             var_allocs: IndexVec::new(),
             locals: IndexVec::new(),
+            jumper: None,
             blocks: IndexVec::new(),
             ll_func,
         }
@@ -54,9 +56,11 @@ impl<'a, 'p, 'ctx> WalkActor for FuncEmit<'a, 'p, 'ctx> {
             self.blocks.push(block);
         }
         self.ctx.builder.position_at_end(entry_bb);
-        self.ctx
-            .builder
-            .build_unconditional_branch(self.blocks[BlockId::new(0)]);
+        self.jumper = Some(
+            self.ctx
+                .builder
+                .build_unconditional_branch(self.blocks[BlockId::new(0)]),
+        );
     }
 
     fn block_start(&mut self, _: &CFGWalker, id: BlockId) {
@@ -76,8 +80,22 @@ impl<'a, 'p, 'ctx> WalkActor for FuncEmit<'a, 'p, 'ctx> {
 }
 
 impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
+    fn build_alloca(&self, ty: impl BasicType<'ctx> + Copy, name: &str) -> PointerValue<'ctx> {
+        match self.jumper {
+            // Not set- we're still in setup + in the entry block, safe to just emit
+            None => self.ctx.builder.build_alloca(ty, name),
+            Some(jumper) => {
+                let cur_block = self.ctx.builder.get_insert_block().unwrap();
+                self.ctx.builder.position_before(&jumper);
+                let alloca = self.ctx.builder.build_alloca(ty, name);
+                self.ctx.builder.position_at_end(cur_block);
+                alloca
+            },
+        }
+    }
+
     fn build_gc_alloca(&self, ty: impl BasicType<'ctx> + Copy, name: &str) -> PointerValue<'ctx> {
-        let alloca = self.ctx.builder.build_alloca(ty, name);
+        let alloca = self.build_alloca(ty, name);
         self.ctx
             .builder
             .build_address_space_cast(alloca, ty.ptr_type(GC_ADDRESS_SPACE), "")
@@ -100,7 +118,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         }
     }
 
-    fn emit_entry_block(&mut self) -> BasicBlock<'a> {
+    fn emit_entry_block(&mut self) -> BasicBlock<'ctx> {
         let block = self.ctx.llvm_ctx.append_basic_block(self.ll_func, "entry");
         self.ctx.builder.position_at_end(block);
 
@@ -1267,10 +1285,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             self.conv_local_any_into(*arg, ptr);
         }
 
-        let argpack = self
-            .ctx
-            .builder
-            .build_alloca(self.ctx.rt.ty.arg_pack_type, "argpack");
+        let argpack = self.build_alloca(self.ctx.rt.ty.arg_pack_type, "argpack");
         unsafe {
             self.gep_insertvalue(argpack, &[0, 0], n_val.into());
             self.gep_insertvalue(argpack, &[0, 1], argpack_unnamed.into());

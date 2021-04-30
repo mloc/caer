@@ -163,9 +163,14 @@
 /proc/run_forever()
 	spawn
 		var/i = 0
+		var/y
 		while(1) {
 			world.log << "still here after [i] cycles"
+			//y = "foo"
 			i = i + 1
+			//if(i > 10000)
+				//sleep(10/1000000)
+				//i = 0
 			sleep(10)
 		}
 

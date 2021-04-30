@@ -174,6 +174,8 @@ impl CoroCtx {
     }
 }
 
+// The current implementation of this is pretty bad, but it needs to be replaced with something
+// smarter anyway.
 #[derive(Debug)]
 struct Queue {
     queue: Vec<(FibreId, TickTime)>,

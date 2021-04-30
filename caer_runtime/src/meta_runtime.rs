@@ -93,6 +93,7 @@ impl MetaRuntime {
                 crate::gc::run(self.dmrt);
                 break;
             }
+            crate::gc::run(self.dmrt);
             self.handle_messages(None);
         }
     }
