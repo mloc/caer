@@ -50,6 +50,9 @@ pub unsafe extern "C" fn rt_runtime_init(
     global_rt: &'static mut Runtime, stackmap_start: *const u8, stackmap_end: *const u8,
     vtable_ptr: *const vtable::Entry, funcs_ptr: *const vtable::FuncPtr, entry_proc: FuncId,
 ) {
+    // TODO: improve. Can be removed if we use rust-init
+    assert!(libc::signal(libc::SIGPIPE, libc::SIG_IGN) != libc::SIG_ERR);
+
     // TODO: env checksums in binary
     let init_st = StringTable::deserialize(File::open("stringtable.bincode").unwrap());
     let env: RtEnv = bincode::deserialize_from(File::open("environment.bincode").unwrap()).unwrap();
