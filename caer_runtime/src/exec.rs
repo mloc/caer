@@ -1,14 +1,17 @@
 use std::collections::HashMap;
 use std::ptr::NonNull;
 
+use index_vec::{define_index_type, IndexVec};
+
 use crate::arg_pack::{CallBundle, ClosureArgs, ProcArgs};
 use crate::meta_runtime;
 use crate::runtime::Runtime;
 use crate::val::Val;
 use crate::vtable::{ClosurePtr, ProcPtr};
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
-struct FibreId(usize);
+const STACK_SIZE: u64 = 8 * 1024 * 1024; // 8M
+
+define_index_type! {pub struct FibreId = u32;}
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, PartialOrd, Ord)]
 pub struct TickTime(pub u64);
@@ -27,14 +30,14 @@ impl Executor {
         Self {
             coro_ctx: CoroCtx::create(),
             fibres: HashMap::new(),
-            next_fibre_id: FibreId(0),
+            next_fibre_id: FibreId::new(0),
             run_queue: Queue::new(),
         }
     }
 
     pub fn queue_func(&mut self, bundle: CallBundle, at_time: TickTime) {
         let fibre_id = self.next_fibre_id;
-        self.next_fibre_id.0 += 1;
+        self.next_fibre_id += 1;
 
         let fibre = FibreRecord {
             id: fibre_id,
@@ -58,31 +61,24 @@ impl Executor {
         let (next_id, _) = self.run_queue.pop().unwrap();
         let next_fibre = self.fibres.get_mut(&next_id).unwrap();
 
-        let coro = match &next_fibre.state {
-            FibreState::Running(coro) => {
+        match &next_fibre.state {
+            FibreState::Running => {
                 println!("[EXEC] Resuming {:?}", next_id);
-                coro
             },
             FibreState::Created(bundle) => {
                 println!("[EXEC] Starting {:?} with {:?}", next_id, bundle);
-                let coro = self.coro_ctx.spawn_coro(rt, bundle);
-                next_fibre.state = FibreState::Running(coro);
-
-                // TODO: is there a better way to do this?
-                if let FibreState::Running(ref coro_ref) = next_fibre.state {
-                    coro_ref
-                } else {
-                    unreachable!();
-                }
+                self.coro_ctx.spawn_coro(next_id, rt, bundle);
+                next_fibre.state = FibreState::Running;
             },
             FibreState::Finished => panic!("finished fibre in queue: {:?}", next_id),
         };
 
-        let ended = unsafe { self.coro_ctx.resume_coro(coro) };
+        let ended = self.coro_ctx.resume_coro(next_id);
 
         if ended {
             println!("[EXEC] Coro {:?} finished", next_id);
             next_fibre.state = FibreState::Finished;
+            self.coro_ctx.destroy_coro(next_id);
         }
 
         if !ended {
@@ -118,24 +114,37 @@ pub struct FibreRecord {
 #[derive(Debug)]
 pub enum FibreState {
     Created(CallBundle),
-    Running(aco::Coro),
+    Running,
     Finished,
+}
+
+#[derive(Debug)]
+struct Coro {
+    id: FibreId,
+    // This order matters for Drop
+    handle: aco::Coro,
+    stack: aco::Stack,
 }
 
 #[derive(Debug)]
 struct CoroCtx {
     ctx: aco::Context,
-    stack: aco::Stack,
+    // TODO: maybe not a hashmap
+    coros: HashMap<FibreId, Coro>,
 }
 
 impl CoroCtx {
     fn create() -> Self {
         let ctx = aco::Context::create();
-        let stack = ctx.make_stack();
-        Self { ctx, stack }
+        Self {
+            ctx,
+            coros: HashMap::new(),
+        }
     }
 
-    fn spawn_coro(&self, rt: &mut Runtime, bundle: &CallBundle) -> aco::Coro {
+    // TODO(ERRH)
+    fn spawn_coro(&mut self, id: FibreId, rt: &mut Runtime, bundle: &CallBundle) {
+        assert!(!self.coros.contains_key(&id));
         fn proc_entry(cargs: (ProcPtr, ProcArgs, NonNull<Runtime>)) {
             let mut ret = Val::Null;
             let pack = (&cargs.1.as_pack()) as *const _;
@@ -147,12 +156,13 @@ impl CoroCtx {
             cargs.0(env, cargs.2, (&mut ret) as *mut _);
         }
 
-        match bundle {
+        let stack = self.ctx.create_stack(Some(STACK_SIZE));
+        let handle = match bundle {
             CallBundle::Proc((func, args)) => {
                 let ptr = unsafe { rt.vtable.lookup_func(*func).unwrap().as_proc() };
                 aco::Coro::new(
                     &self.ctx,
-                    &self.stack,
+                    &stack,
                     proc_entry,
                     (ptr, args.clone(), NonNull::new(rt as *mut Runtime).unwrap()),
                 )
@@ -161,16 +171,27 @@ impl CoroCtx {
                 let ptr = unsafe { rt.vtable.lookup_func(*func).unwrap().as_closure() };
                 aco::Coro::new(
                     &self.ctx,
-                    &self.stack,
+                    &stack,
                     closure_entry,
                     (ptr, args.clone(), NonNull::new(rt as *mut Runtime).unwrap()),
                 )
             },
-        }
+        };
+
+        let coro = Coro { id, handle, stack };
+
+        self.coros.insert(id, coro);
     }
 
-    unsafe fn resume_coro(&self, coro: &aco::Coro) -> bool {
-        self.ctx.resume(coro)
+    // TODO(ERRH)
+    fn resume_coro(&self, id: FibreId) -> bool {
+        let handle = &self.coros[&id].handle;
+        unsafe { self.ctx.resume(handle) }
+    }
+
+    // TODO(ERRH)
+    fn destroy_coro(&mut self, id: FibreId) {
+        self.coros.remove(&id).expect("no such coro");
     }
 }
 

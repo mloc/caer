@@ -7,6 +7,7 @@ pub struct Coro {
 }
 
 impl Coro {
+    // Stack ownership is a bit weird
     pub fn new<A, F>(ctx: &Context, stack: &Stack, entry: F, arg: A) -> Coro
     where
         F: FnOnce(A),

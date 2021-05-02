@@ -4,7 +4,7 @@ fn print(n: i32) {
 
 fn main() {
     let ctx = aco::Context::create();
-    let stack = ctx.make_stack();
+    let stack = ctx.create_stack(None);
 
     let mut coros = Vec::new();
 

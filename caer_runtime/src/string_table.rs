@@ -29,8 +29,8 @@ pub struct StringTable {
 impl StringTable {
     pub fn new() -> Self {
         Self {
-            strings: HashMap::new(),
-            ids: HashMap::new(),
+            strings: HashMap::with_capacity(67108864),
+            ids: HashMap::with_capacity(67108864),
             next_id: 1,
         }
     }
@@ -76,8 +76,8 @@ impl StringTable {
     pub fn deserialize(reader: impl Read) -> StringTable {
         let flat: Vec<(StringId, String)> = bincode::deserialize_from(reader).unwrap();
 
-        let mut strings = HashMap::new();
-        let mut ids = HashMap::new();
+        let mut strings = HashMap::with_capacity(67108864);
+        let mut ids = HashMap::with_capacity(67108864);
         let mut next_id = 0;
 
         for (id, s) in flat {

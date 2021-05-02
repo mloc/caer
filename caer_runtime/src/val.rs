@@ -84,7 +84,7 @@ pub extern "C" fn rt_val_print(val: &Val, rt: &mut Runtime) {
             rt.string_table.get(sid).into()
         },
     };
-    println!("{}", s);
+    //println!("{}", s);
     rt.send_message(&messages::Server::Message(s));
 }
 

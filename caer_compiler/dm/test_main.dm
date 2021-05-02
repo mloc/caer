@@ -164,7 +164,7 @@
 	spawn
 		var/i = 0
 		var/y
-		while(1) {
+		while(1)
 			world.log << "still here after [i] cycles"
 			//y = "foo"
 			i = i + 1
@@ -172,6 +172,5 @@
 				//sleep(10/1000000)
 				//i = 0
 			sleep(10)
-		}
 
 //#include "badty.dm"
