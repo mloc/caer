@@ -25,7 +25,7 @@ impl Context {
     }
 
     pub fn create_stack(&self, size: Option<u64>) -> Stack {
-        let handle = unsafe { aco_sys::aco_share_stack_new(size.unwrap_or(0)) };
+        let handle = unsafe { aco_sys::aco_share_stack_new(size.unwrap_or(0) as _) };
 
         Stack { handle }
     }

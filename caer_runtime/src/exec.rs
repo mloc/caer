@@ -59,27 +59,7 @@ impl Executor {
         }
 
         let (next_id, _) = self.run_queue.pop().unwrap();
-        let next_fibre = self.fibres.get_mut(&next_id).unwrap();
-
-        match &next_fibre.state {
-            FibreState::Running => {
-                println!("[EXEC] Resuming {:?}", next_id);
-            },
-            FibreState::Created(bundle) => {
-                println!("[EXEC] Starting {:?} with {:?}", next_id, bundle);
-                self.coro_ctx.spawn_coro(next_id, rt, bundle);
-                next_fibre.state = FibreState::Running;
-            },
-            FibreState::Finished => panic!("finished fibre in queue: {:?}", next_id),
-        };
-
-        let ended = self.coro_ctx.resume_coro(next_id);
-
-        if ended {
-            println!("[EXEC] Coro {:?} finished", next_id);
-            next_fibre.state = FibreState::Finished;
-            self.coro_ctx.destroy_coro(next_id);
-        }
+        let ended = self.run(rt, next_id);
 
         if !ended {
             println!("[EXEC] Coro {:?} suspended", next_id);
@@ -102,6 +82,43 @@ impl Executor {
         }
 
         true
+    }
+
+    pub fn wake_all_once(&mut self, rt: &mut Runtime) {
+        // TODO: wrangle this
+        for rid in 0..self.next_fibre_id.raw() {
+            let id = FibreId::new(rid as _);
+            if matches!(self.fibres[&id].state, FibreState::Finished) {
+                continue;
+            }
+            self.run(rt, id);
+        }
+    }
+
+    pub fn run(&mut self, rt: &mut Runtime, id: FibreId) -> bool {
+        let rec = self.fibres.get_mut(&id).unwrap();
+
+        match &rec.state {
+            FibreState::Running => {
+                println!("[EXEC] Resuming {:?}", id);
+            },
+            FibreState::Created(bundle) => {
+                println!("[EXEC] Starting {:?} with {:?}", id, bundle);
+                self.coro_ctx.spawn_coro(id, rt, bundle);
+                rec.state = FibreState::Running;
+            },
+            FibreState::Finished => panic!("tried to resume finished fibre: {:?}", id),
+        };
+
+        let ended = self.coro_ctx.resume_coro(id);
+
+        if ended {
+            println!("[EXEC] Coro {:?} finished", id);
+            rec.state = FibreState::Finished;
+            self.coro_ctx.destroy_coro(id);
+        }
+
+        ended
     }
 }
 
@@ -145,12 +162,14 @@ impl CoroCtx {
     // TODO(ERRH)
     fn spawn_coro(&mut self, id: FibreId, rt: &mut Runtime, bundle: &CallBundle) {
         assert!(!self.coros.contains_key(&id));
-        fn proc_entry(cargs: (ProcPtr, ProcArgs, NonNull<Runtime>)) {
+        fn proc_entry(mut cargs: (ProcPtr, ProcArgs, NonNull<Runtime>)) {
+            unsafe { cargs.2.as_mut().on_wake() };
             let mut ret = Val::Null;
             let pack = (&cargs.1.as_pack()) as *const _;
             cargs.0(pack, cargs.2, (&mut ret) as *mut _);
         }
-        fn closure_entry(cargs: (ClosurePtr, ClosureArgs, NonNull<Runtime>)) {
+        fn closure_entry(mut cargs: (ClosurePtr, ClosureArgs, NonNull<Runtime>)) {
+            unsafe { cargs.2.as_mut().on_wake() };
             let mut ret = Val::Null;
             let env = cargs.1.environment.as_ptr();
             cargs.0(env, cargs.2, (&mut ret) as *mut _);

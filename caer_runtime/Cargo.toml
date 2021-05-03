@@ -18,10 +18,10 @@ leb128 = "0.2.4"
 libc = "0.2.76"
 caer_types = { path = "../caer_types" }
 aco = { path = "../aco" }
-unwind = "0.3.0"
 num-traits = "0.2.12"
 aed_server = { path = "../aed_server" }
 aed_common = { path = "../aed_common" }
+libunwind-rs = "0.3.1"
 
 [dependencies.llvm_stackmaps]
 path = "../llvm_stackmaps"

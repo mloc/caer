@@ -5,7 +5,7 @@ use aed_server::server::ClientId;
 use caer_types::id::FuncId;
 use exec::TickTime;
 
-use crate::{exec, runtime, sync};
+use crate::{exec, gc, runtime, sync};
 
 pub const TICK_LAG: time::Duration = time::Duration::from_millis(1000);
 
@@ -16,7 +16,7 @@ pub const TICK_LAG: time::Duration = time::Duration::from_millis(1000);
 // the lie that keeps the world running
 pub struct MetaRuntime {
     executor: exec::Executor,
-    dmrt: &'static mut runtime::Runtime,
+    pub dmrt: &'static mut runtime::Runtime,
     sync_server: sync::SyncServer,
 
     // Scheduling stuff
@@ -90,10 +90,10 @@ impl MetaRuntime {
             println!("running next proc");
             if !self.run_one() {
                 println!("no procs left to run, GCing");
-                crate::gc::run(self.dmrt);
+                crate::gc::run(self);
                 break;
             }
-            crate::gc::run(self.dmrt);
+            crate::gc::run(self);
             self.handle_messages(None);
         }
     }
@@ -123,5 +123,13 @@ impl MetaRuntime {
 
     fn handle_message(&mut self, id: ClientId, msg: messages::Client) {
         println!("{:?}: msg: {:?}", id, msg);
+    }
+
+    // TODO: take state by ref when rtcontext does
+    pub fn gc_mark_fibres(&mut self, state: gc::State) -> gc::State {
+        assert!(self.dmrt.scan_state.is_none());
+        self.dmrt.scan_state = Some(state);
+        self.executor.wake_all_once(self.dmrt);
+        self.dmrt.scan_state.take().unwrap()
     }
 }

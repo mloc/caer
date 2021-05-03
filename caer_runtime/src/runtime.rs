@@ -17,7 +17,7 @@ use crate::meta_runtime::MetaRuntime;
 use crate::string_table::StringTable;
 use crate::sync::SyncServer;
 use crate::val::Val;
-use crate::vtable;
+use crate::{gc, vtable};
 
 #[derive(Debug)]
 pub struct Runtime {
@@ -34,6 +34,9 @@ pub struct Runtime {
     // TODO: encapsulate somewhere else
     pub(crate) queued_funcs: Vec<(CallBundle, u64)>,
     pub(crate) sleep_duration: OrderedFloat<f32>,
+
+    // TODO: move into rtcontext
+    pub(crate) scan_state: Option<gc::State>,
 
     // TEMPORARY
     // TODO: replace with better message plumbing
@@ -84,6 +87,7 @@ pub unsafe extern "C" fn rt_runtime_init(
         world_time: 0,
         queued_funcs: Vec::new(),
         sleep_duration: 0f32.into(),
+        scan_state: None,
         sync_send: sync_server.get_sync_send(),
     };
 
@@ -110,6 +114,25 @@ impl Runtime {
     pub fn send_message(&self, msg: &messages::Server) {
         self.sync_send.send_all(msg)
     }
+
+    // TODO: mvoe into rtcontext
+    pub fn yield_to_meta(&mut self) {
+        unsafe { aco::yield_to_main() };
+        self.on_wake();
+    }
+
+    pub fn on_wake(&mut self) {
+        loop {
+            // If scan_state is populated, we've been woken up just to do a GC scan
+            if let Some(ref mut gc_state) = self.scan_state {
+                gc::scan_stack(gc_state, &self.gc_stackmap)
+            } else {
+                break;
+            }
+
+            unsafe { aco::yield_to_main() };
+        }
+    }
 }
 
 impl Runtime {
@@ -128,12 +151,7 @@ impl Runtime {
             _ => panic!("invalid val for sleep(): {:?}", sleep_duration),
         };
 
-        // Is this necessary?
-        // To be on the safe side, we end the ref on self.
-        #[allow(clippy::drop_ref)]
-        std::mem::drop(self);
-
-        unsafe { aco::yield_to_main() }
+        self.yield_to_meta();
     }
 
     #[no_mangle]
