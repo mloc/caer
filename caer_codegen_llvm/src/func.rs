@@ -518,7 +518,10 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             }
         }
         for live_var in live.var.iter().copied() {
-            stack_ptrs.push(self.var_allocs[live_var].val.into());
+            let var_ty = &self.ir_func.vars[live_var].ty;
+            if var_ty.is_any() || matches!(var_ty, ty::Complex::Primitive(ty::Primitive::Ref(..))) {
+                stack_ptrs.push(self.var_allocs[live_var].val.into());
+            }
         }
 
         let mut sp_args = Vec::with_capacity(7 + args.len() + stack_ptrs.len() * 2);
