@@ -5,7 +5,8 @@ use caer_types::layout;
 use caer_types::type_tree::Specialization;
 
 use super::state::State;
-use crate::datum::{Datum, GcMarker};
+use crate::datum::Datum;
+use crate::heap_object::{GcMarker, HeapKind};
 use crate::list::List;
 use crate::runtime::Runtime;
 use crate::val::Val;
@@ -59,8 +60,10 @@ impl<'rt> Mark<'rt> {
             "pointer {:?} is not tracked by runtime",
             datum_ptr
         );
+        let datum_ref = unsafe { datum_ptr.as_mut() };
+        assert!(matches!(datum_ref.heap_header.kind, HeapKind::Datum));
 
-        let gc_marker = unsafe { &mut datum_ptr.as_mut().gc_marker };
+        let gc_marker = &mut datum_ref.heap_header.gc_marker;
         // TODO: incremental, use grey
         match *gc_marker {
             GcMarker::Black => {

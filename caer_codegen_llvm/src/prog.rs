@@ -109,6 +109,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         self.populate_datum_types();
         self.emit_vtable();
         self.emit_ftable();
+        self.emit_string_table();
         let main_block = self.emit_main();
 
         for (ir_func, ll_func) in self.funcs.drain(..).collect::<Vec<_>>() {
@@ -251,11 +252,26 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         for ty in self.env.type_tree.types.iter() {
             let vars_field_ty = self.ctx.rt.ty.val_type.array_type(ty.vars.len() as u32);
             let datum_ty = self.ctx.llvm_ctx.struct_type(
-                &[self.ctx.llvm_ctx.i32_type().into(), vars_field_ty.into()],
+                &[
+                    self.ctx.rt.ty.datum_common_type.into(),
+                    vars_field_ty.into(),
+                ],
                 false,
             );
             assert_eq!(ty.id.index(), self.datum_types.len());
             self.datum_types.push(datum_ty);
+        }
+    }
+
+    fn emit_string_table(&mut self) {
+        {
+            let s = self.ctx.llvm_ctx.const_string(b"hello, world", false);
+            let g = self
+                .ctx
+                .module
+                .add_global(s.get_type(), None, "test_string");
+            g.set_initializer(&s);
+            g.set_constant(true);
         }
     }
 
@@ -575,6 +591,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             Some(inkwell::AddressSpace::Generic),
             &format!("ty_{}_proc_lookup_tbl", ty.id.index()),
         );
+        proc_lookup_tbl_global.set_constant(true);
         proc_lookup_tbl_global.set_initializer(&ret_ty.const_array(proc_lookup_vals.as_slice()));
 
         self.ctx.builder.position_at_end(entry_block);

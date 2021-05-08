@@ -1,5 +1,6 @@
 use crate::alloc::Alloc;
-use crate::datum::{Datum, GcMarker};
+use crate::datum::Datum;
+use crate::heap_object::{GcMarker, HeapKind};
 
 pub struct Sweep<'rt> {
     alloc: &'rt mut Alloc,
@@ -18,9 +19,10 @@ impl<'rt> Sweep<'rt> {
             println!("sweeping {:?}", ptr);
             let mut datum_ptr = ptr.cast();
             let datum_ref: &mut Datum = unsafe { datum_ptr.as_mut() };
-            println!("marker is {:?}", datum_ref.gc_marker);
-            match datum_ref.gc_marker {
-                GcMarker::Black => datum_ref.gc_marker = GcMarker::White,
+            assert!(matches!(datum_ref.heap_header.kind, HeapKind::Datum));
+            println!("marker is {:?}", datum_ref.heap_header.gc_marker);
+            match datum_ref.heap_header.gc_marker {
+                GcMarker::Black => datum_ref.heap_header.gc_marker = GcMarker::White,
                 GcMarker::Grey => panic!("should have no grey left during sweep?"),
                 GcMarker::White => to_free.push(ptr),
             }

@@ -106,6 +106,7 @@ pub struct RtFuncTyBundle<'ctx> {
     pub proc_type: inkwell::types::FunctionType<'ctx>,
     pub closure_type: inkwell::types::FunctionType<'ctx>,
 
+    pub heap_header_type: inkwell::types::StructType<'ctx>,
     pub datum_common_type: inkwell::types::StructType<'ctx>,
     pub datum_common_type_ptr: inkwell::types::PointerType<'ctx>,
 
@@ -160,8 +161,19 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             false,
         );
 
+        let heap_header_type = ctx.struct_type(
+            &[
+                // kind
+                ctx.i8_type().into(),
+                // gc marker
+                ctx.i8_type().into(),
+            ],
+            false,
+        );
+
         let datum_common_type = ctx.struct_type(
             &[
+                heap_header_type.into(),
                 // ref
                 ctx.i32_type().into(),
             ],
@@ -230,6 +242,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             arg_pack_tuple_type,
             proc_type,
             closure_type,
+            heap_header_type,
             datum_common_type,
             datum_common_type_ptr,
             rt_type,

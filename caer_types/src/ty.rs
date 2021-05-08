@@ -43,9 +43,6 @@ impl Complex {
         let mut set = BTreeSet::new();
 
         for ty in iter {
-            /*if ty == Complex::Any {
-                return Complex::Any;
-            }*/
             match ty {
                 Complex::Any => return Complex::Any,
                 Complex::OneOf(oset) => {

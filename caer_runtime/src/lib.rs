@@ -11,6 +11,7 @@ mod exec;
 pub mod ffi;
 mod gc;
 mod gc_stackmap;
+mod heap_object;
 pub mod list;
 mod meta_runtime;
 pub mod runtime;

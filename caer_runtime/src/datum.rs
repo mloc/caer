@@ -2,6 +2,7 @@ use std::slice::from_raw_parts_mut;
 
 use caer_types::id::TypeId;
 
+use crate::heap_object::HeapObject;
 use crate::runtime::Runtime;
 use crate::val::Val;
 
@@ -10,16 +11,17 @@ use crate::val::Val;
 /// Represents the statically-sized part of a datum struct.
 /// Datums in the runtime are DSTs due to their var array
 #[derive(Debug, Clone)]
+#[repr(C)]
 pub struct Datum {
+    pub heap_header: HeapObject,
     pub ty: TypeId,
-    pub gc_marker: GcMarker,
 }
 
 impl Datum {
     pub fn new(ty: TypeId) -> Self {
         Self {
+            heap_header: HeapObject::datum(),
             ty,
-            gc_marker: GcMarker::White,
         }
     }
 
@@ -31,12 +33,4 @@ impl Datum {
             from_raw_parts_mut(vars_start, n_vars)
         }
     }
-}
-
-#[derive(Debug, Clone)]
-#[repr(u32)]
-pub enum GcMarker {
-    White = 0,
-    Grey,
-    Black,
 }
