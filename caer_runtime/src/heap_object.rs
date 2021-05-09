@@ -7,22 +7,30 @@ pub struct HeapObject {
 }
 
 impl HeapObject {
-    pub fn datum() -> Self {
+    fn with_kind(kind: HeapKind) -> Self {
         Self {
-            kind: HeapKind::Datum,
+            kind,
             gc_marker: GcMarker::White,
         }
     }
+
+    pub fn datum() -> Self {
+        Self::with_kind(HeapKind::Datum)
+    }
+
+    pub fn string() -> Self {
+        Self::with_kind(HeapKind::String)
+    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum HeapKind {
     Datum = 0,
     String = 1,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum GcMarker {
     White = 0,

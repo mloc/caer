@@ -264,15 +264,62 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     fn emit_string_table(&mut self) {
-        {
-            let s = self.ctx.llvm_ctx.const_string(b"hello, world", false);
-            let g = self
-                .ctx
-                .module
-                .add_global(s.get_type(), None, "test_string");
-            g.set_initializer(&s);
-            g.set_constant(true);
-        }
+        let string_globals: IndexVec<StringId, _> = self
+            .env
+            .string_table
+            .iter()
+            .map(|(id, s)| {
+                let cs = self.ctx.llvm_ctx.const_string(s.as_bytes(), false);
+                let g = self.ctx.module.add_global(
+                    cs.get_type(),
+                    None,
+                    &format!("string_{}", id.raw()),
+                );
+                g.set_initializer(&cs);
+                g.set_constant(true);
+                (g, s.len())
+            })
+            .collect();
+
+        // This is split into two passes to make the resulting IR look a bit nicer
+        string_globals
+            .into_iter_enumerated()
+            .for_each(|(id, (string_global, len))| {
+                let alloc_string = self.ctx.rt.ty.string_type.const_named_struct(&[
+                    self.ctx
+                        .rt
+                        .ty
+                        .heap_header_type
+                        .const_named_struct(&[
+                            self.ctx.llvm_ctx.i8_type().const_int(1, false).into(),
+                            self.ctx.llvm_ctx.i8_type().const_int(0, false).into(),
+                        ])
+                        .into(),
+                    self.ctx
+                        .llvm_ctx
+                        .i64_type()
+                        .const_int(len as _, false)
+                        .into(),
+                    unsafe {
+                        self.ctx.builder.build_in_bounds_gep(
+                            string_global.as_pointer_value(),
+                            &[
+                                self.ctx.llvm_ctx.i32_type().const_zero(),
+                                self.ctx.llvm_ctx.i32_type().const_zero(),
+                            ],
+                            "",
+                        )
+                    }
+                    .into(),
+                ]);
+                let asg = self.ctx.module.add_global(
+                    self.ctx.rt.ty.string_type,
+                    None,
+                    &format!("alloc_string_{}", id.raw()),
+                );
+                asg.set_initializer(&alloc_string);
+                asg.set_constant(true);
+            });
     }
 
     fn emit_ftable(&mut self) {

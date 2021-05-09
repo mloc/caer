@@ -58,6 +58,12 @@ impl StringTable {
         let flat: Vec<(StringId, &String)> = self.strings.iter_enumerated().collect();
         bincode::serialize_into(writer, &flat).unwrap();
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = (StringId, &str)> + ExactSizeIterator + '_ {
+        self.strings
+            .indices()
+            .map(move |id| (id, self.strings[id].as_str()))
+    }
 }
 
 impl Default for StringTable {

@@ -94,6 +94,13 @@ impl StringTable {
             next_id,
         }
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = (StringId, &str)> + ExactSizeIterator + '_ {
+        (0..self.next_id).map(move |i| {
+            let id = StringId::new(i);
+            (id, self.strings[&id].as_str())
+        })
+    }
 }
 
 impl Default for StringTable {

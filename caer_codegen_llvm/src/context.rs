@@ -109,6 +109,8 @@ pub struct RtFuncTyBundle<'ctx> {
     pub heap_header_type: inkwell::types::StructType<'ctx>,
     pub datum_common_type: inkwell::types::StructType<'ctx>,
     pub datum_common_type_ptr: inkwell::types::PointerType<'ctx>,
+    pub string_type: inkwell::types::StructType<'ctx>,
+    pub string_type_ptr: inkwell::types::PointerType<'ctx>,
 
     pub rt_type: inkwell::types::ArrayType<'ctx>,
     pub vt_entry_type: inkwell::types::StructType<'ctx>,
@@ -181,6 +183,20 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
         );
         let datum_common_type_ptr = datum_common_type.ptr_type(GC_ADDRESS_SPACE);
 
+        let string_type = ctx.struct_type(
+            &[
+                heap_header_type.into(),
+                // size
+                ctx.i64_type().into(),
+                // ptr
+                ctx.i8_type()
+                    .ptr_type(inkwell::AddressSpace::Generic)
+                    .into(),
+            ],
+            false,
+        );
+        let string_type_ptr = datum_common_type.ptr_type(GC_ADDRESS_SPACE);
+
         let vt_entry_type = ctx.struct_type(
             &[
                 // size
@@ -245,6 +261,8 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             heap_header_type,
             datum_common_type,
             datum_common_type_ptr,
+            string_type,
+            string_type_ptr,
             rt_type,
             vt_entry_type,
             landingpad_type,
