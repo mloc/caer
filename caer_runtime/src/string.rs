@@ -20,13 +20,19 @@ impl RtString {
     }
 
     // TODO: allocator?
-    pub fn from_str(rt: &mut Runtime, s: &str) -> Self {
-        let ptr = unsafe { NonNull::new_unchecked(Box::into_raw(s.to_owned().into_boxed_str())) };
+    pub fn from_str(s: impl Into<Box<str>>) -> Self {
+        let s = s.into();
+        let size = s.len() as u64;
+        let ptr = unsafe { NonNull::new_unchecked(Box::into_raw(s)) };
         Self {
             heap_header: HeapObject::string(),
-            size: s.len() as u64,
+            size,
             ptr: ptr.cast(),
         }
+    }
+
+    pub fn heapify(self) -> NonNull<Self> {
+        unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(self))) }
     }
 }
 
@@ -39,5 +45,12 @@ impl Drop for RtString {
             ))
         };
         std::mem::drop(boxed);
+    }
+}
+
+pub fn resolve_string<'a>(s: Option<NonNull<RtString>>) -> &'a str {
+    match s {
+        None => "",
+        Some(ptr) => unsafe { ptr.as_ref().as_str() },
     }
 }

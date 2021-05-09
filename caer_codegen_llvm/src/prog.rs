@@ -27,6 +27,7 @@ pub struct ProgEmit<'a, 'ctx> {
     pub vt_lookup: Vec<inkwell::values::FunctionValue<'ctx>>,
     pub datum_types: IndexVec<TypeId, inkwell::types::StructType<'ctx>>,
     pub sym: IndexVec<FuncId, inkwell::values::FunctionValue<'ctx>>,
+    pub string_allocs: IndexVec<StringId, inkwell::values::PointerValue<'ctx>>,
 }
 
 impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
@@ -64,6 +65,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             vt_lookup: ctx.make_vtable_lookup(vt_global),
             datum_types: IndexVec::new(),
             sym: IndexVec::new(),
+            string_allocs: IndexVec::new(),
         }
     }
 
@@ -282,9 +284,9 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             .collect();
 
         // This is split into two passes to make the resulting IR look a bit nicer
-        string_globals
+        self.string_allocs = string_globals
             .into_iter_enumerated()
-            .for_each(|(id, (string_global, len))| {
+            .map(|(id, (string_global, len))| {
                 let alloc_string = self.ctx.rt.ty.string_type.const_named_struct(&[
                     self.ctx
                         .rt
@@ -314,12 +316,14 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
                 ]);
                 let asg = self.ctx.module.add_global(
                     self.ctx.rt.ty.string_type,
-                    None,
+                    Some(GC_ADDRESS_SPACE),
                     &format!("alloc_string_{}", id.raw()),
                 );
                 asg.set_initializer(&alloc_string);
                 asg.set_constant(true);
-            });
+                asg.as_pointer_value()
+            })
+            .collect();
     }
 
     fn emit_ftable(&mut self) {

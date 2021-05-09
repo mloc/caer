@@ -195,7 +195,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             ],
             false,
         );
-        let string_type_ptr = datum_common_type.ptr_type(GC_ADDRESS_SPACE);
+        let string_type_ptr = string_type.ptr_type(GC_ADDRESS_SPACE);
 
         let vt_entry_type = ctx.struct_type(
             &[
@@ -334,6 +334,10 @@ macro_rules! rt_funcs {
         rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
     );
 
+    ( @genty $ctx:ident $spec:ident $tyb:ident string_type $ty:ident) => (
+        rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
+    );
+
     ( @genty $ctx:ident $spec:ident $tyb:ident proc_type $ty:ident) => (
         rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
     );
@@ -363,12 +367,12 @@ rt_funcs! {
         (rt_val_print, void_type~val, [val_type~ptr, rt_type~gptr]),
         (rt_val_cloned, void_type~val, [val_type~ptr]),
         (rt_val_drop, void_type~val, [val_type~ptr]),
-        (rt_val_cast_string_val, i64_type~val, [val_type~ptr, rt_type~gptr]),
+        (rt_val_cast_string_val, string_type~ptr, [val_type~ptr, rt_type~gptr]),
         (rt_val_call_proc, void_type~val, [val_type~ptr, i64_type~val, arg_pack_type~ptr, rt_type~gptr, val_type~ptr]),
 
         (rt_runtime_init, void_type~val, [rt_type~gptr, i8_type~gptr, i8_type~gptr, vt_entry_type~gptr, opaque_type_ptr~gptr, i64_type~val]),
         (rt_runtime_alloc_datum, datum_common_type~ptr, [rt_type~gptr, i32_type~val]),
-        (rt_runtime_concat_strings, i64_type~val, [rt_type~gptr, i64_type~val, i64_type~val]),
+        (rt_runtime_concat_strings, string_type~ptr, [rt_type~gptr, string_type~ptr, string_type~ptr]),
         (rt_runtime_suspend, void_type~val, [rt_type~gptr, val_type~ptr]),
         (rt_runtime_spawn_closure, void_type~val, [
             rt_type~gptr,

@@ -105,7 +105,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         match ty {
             ty::Complex::Primitive(prim) => match prim {
                 ty::Primitive::Float => self.build_gc_alloca(self.ctx.llvm_ctx.f32_type(), ""),
-                ty::Primitive::String => self.build_gc_alloca(self.ctx.llvm_ctx.i64_type(), ""),
+                ty::Primitive::String => self.build_gc_alloca(self.ctx.rt.ty.string_type_ptr, ""),
                 ty::Primitive::Ref(_) => {
                     self.build_gc_alloca(self.ctx.rt.ty.datum_common_type_ptr, "")
                 },
@@ -226,12 +226,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
     fn build_literal(&mut self, lit: &Literal) -> BasicValueEnum<'ctx> {
         let val: BasicValueEnum = match lit {
             Literal::Num(x) => self.ctx.llvm_ctx.f32_type().const_float(*x as f64).into(),
-            Literal::String(id) => self
-                .ctx
-                .llvm_ctx
-                .i64_type()
-                .const_int(id.index() as u64, false)
-                .into(),
+            Literal::String(id) => self.prog_emit.string_allocs[*id].into(),
             Literal::Null => self.ctx.llvm_ctx.i64_type().const_zero().into(),
             _ => unimplemented!("{:?}", lit),
         };
@@ -286,15 +281,15 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 (layout::VAL_DISCRIM_FLOAT, val_as_i64)
             },
             ty::Primitive::String => {
-                let val_as_int = self
-                    .ctx
-                    .builder
-                    .build_bitcast(src_local, self.ctx.llvm_ctx.i64_type(), "pack_val")
-                    .into_int_value();
+                let val_as_int = self.ctx.builder.build_ptr_to_int(
+                    src_local.into_pointer_value(),
+                    self.ctx.llvm_ctx.i64_type(),
+                    "pack_val",
+                );
                 (layout::VAL_DISCRIM_STRING, val_as_int)
             },
             ty::Primitive::Ref(_) => {
-                let val_as_int: IntValue = self.ctx.builder.build_ptr_to_int(
+                let val_as_int = self.ctx.builder.build_ptr_to_int(
                     src_local.into_pointer_value(),
                     self.ctx.llvm_ctx.i64_type(),
                     "pack_val",

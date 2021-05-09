@@ -11,6 +11,7 @@ use crate::arg_pack::ProcPack;
 use crate::datum::Datum;
 use crate::list::List;
 use crate::runtime::Runtime;
+use crate::string::{resolve_string, RtString};
 use crate::string_table::StringTable;
 
 // null must be first
@@ -20,7 +21,7 @@ use crate::string_table::StringTable;
 pub enum Val {
     Null = layout::VAL_DISCRIM_NULL,
     Float(OrderedFloat<f32>) = layout::VAL_DISCRIM_FLOAT,
-    String(StringId) = layout::VAL_DISCRIM_STRING,
+    String(Option<NonNull<RtString>>) = layout::VAL_DISCRIM_STRING,
     Ref(Option<NonNull<Datum>>) = layout::VAL_DISCRIM_REF,
 }
 
@@ -51,7 +52,9 @@ pub extern "C" fn rt_val_binary_op(
             }
             // TODO reconsider this, DM doesn't allow "e" + 2
             let rval = rhs.cast_string(rt);
-            Val::String(rt.string_table.concat(lval, rval))
+            Val::String(Some(
+                RtString::from_str(format!("{}{}", resolve_string(lval), rval)).heapify(),
+            ))
         },
         Val::Ref(_) => unimplemented!("overloads"),
     }
@@ -59,8 +62,8 @@ pub extern "C" fn rt_val_binary_op(
 
 // bad, needed for now
 #[no_mangle]
-pub extern "C" fn rt_val_cast_string_val(val: &Val, rt: &mut Runtime) -> StringId {
-    val.cast_string(rt)
+pub extern "C" fn rt_val_cast_string_val(val: &Val, rt: &mut Runtime) -> NonNull<RtString> {
+    RtString::from_str(val.cast_string(rt)).heapify()
 }
 
 #[no_mangle]
@@ -68,7 +71,8 @@ pub extern "C" fn rt_val_to_switch_disc(val: &Val) -> u32 {
     match val {
         Val::Float(val) => (val.into_inner() != 0.0) as u32,
         Val::Null => 0,
-        Val::String(s) => (s.index() != 0) as u32,
+        Val::String(None) => 0,
+        Val::String(Some(s)) => !(unsafe { s.as_ref() }.as_str().is_empty()) as u32,
         Val::Ref(ptr) => ptr.is_some() as u32,
     }
 }
@@ -78,13 +82,11 @@ pub extern "C" fn rt_val_print(val: &Val, rt: &mut Runtime) {
     let s = match val {
         Val::Null | Val::Ref(None) => "null".into(),
         Val::Float(n) => format!("{}", n),
-        Val::String(s) => format!("{:?}", rt.string_table.get(*s)),
-        _ => {
-            let sid = val.cast_string(rt);
-            rt.string_table.get(sid).into()
-        },
+        Val::String(None) => "".into(),
+        Val::String(Some(s)) => unsafe { s.as_ref() }.as_str().into(),
+        _ => val.cast_string(rt).into(),
     };
-    //println!("{}", s);
+    println!("{}", s);
     rt.send_message(&messages::Server::Message(s));
 }
 
@@ -129,16 +131,17 @@ impl Val {
 
     fn basic_eq(lhs: Val, rhs: Val) -> bool {
         #[derive(PartialEq)]
-        enum Equatable {
+        enum Equatable<'a> {
             Null,
             Float(OrderedFloat<f32>),
-            String(StringId),
+            String(&'a str),
         }
 
         let to_equatable = |v| match v {
             Val::Null => Some(Equatable::Null),
             Val::Float(n) => Some(Equatable::Float(n)),
-            Val::String(id) => Some(Equatable::String(id)),
+            Val::String(None) => Some(Equatable::String("")),
+            Val::String(Some(s)) => Some(Equatable::String(unsafe { s.as_ref() }.as_str())),
             _ => None,
         };
 
@@ -162,7 +165,8 @@ impl Val {
     }
 
     pub fn binary_op_const(op: op::BinaryOp, lhs: &Val, rhs: &Val, st: &mut StringTable) -> Val {
-        let mut lhs = *lhs;
+        unimplemented!();
+        /*let mut lhs = *lhs;
 
         if let Val::Null = lhs {
             lhs = rhs.zero_value();
@@ -182,7 +186,7 @@ impl Val {
                 Val::String(st.concat(lval, rval))
             },
             Val::Ref(_) => unimplemented!(),
-        }
+        }*/
     }
 
     fn wrap_bitop(f: impl FnOnce(u32, u32) -> u32) -> impl FnOnce(f32, f32) -> f32 {
@@ -252,13 +256,13 @@ impl Val {
             .unwrap_or_else(|| unimplemented!("RTE badcast: {:?} -> i", self))
     }
 
-    fn cast_string(&self, rt: &mut Runtime) -> StringId {
+    // TODO: use cow
+    fn cast_string(&self, rt: &mut Runtime) -> String {
         match self {
-            Val::Null => rt.string_table.put("null"),
-            Val::Float(n) => rt.string_table.put(n.to_string()),
+            Val::Null | Val::Ref(None) => "null".into(),
+            Val::Float(n) => n.to_string(),
             //Val::Int(n) => n.to_string(),
-            Val::String(s) => *s,
-            Val::Ref(None) => rt.string_table.put("null"),
+            Val::String(s) => resolve_string(*s).into(),
             Val::Ref(Some(dp)) => {
                 let datum = unsafe { dp.as_ref() };
                 let dty = datum.ty;
@@ -266,9 +270,9 @@ impl Val {
                     Specialization::List => {
                         let list_ptr = dp.cast();
                         let list: &List = unsafe { list_ptr.as_ref() };
-                        rt.string_table.put(format!("{:?}", list))
+                        format!("{:?}", list)
                     },
-                    Specialization::Datum => rt.env.type_tree.types[dty].path_str,
+                    Specialization::Datum => rt.env.type_tree.types[dty].path_string.clone(),
                 }
             },
         }
@@ -278,7 +282,7 @@ impl Val {
         match self {
             Val::Null => st.put("null"),
             Val::Float(n) => st.put(n.to_string()),
-            Val::String(s) => *s,
+            Val::String(s) => st.put(resolve_string(*s)),
             Val::Ref(_dp) => unimplemented!(),
         }
     }
@@ -287,7 +291,7 @@ impl Val {
         match self {
             Val::Null => Val::Null,
             Val::Float(_) => Val::Float(0f32.into()),
-            Val::String(_) => Val::String(StringId::new(0)),
+            Val::String(_) => Val::String(None),
             // TODO: rip and tear, ptr in ref is Bad
             Val::Ref(_) => Val::Ref(None),
         }

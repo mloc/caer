@@ -14,6 +14,7 @@ use crate::datum::Datum;
 use crate::gc_stackmap::GcStackmap;
 use crate::list::List;
 use crate::meta_runtime::MetaRuntime;
+use crate::string::{resolve_string, RtString};
 use crate::string_table::StringTable;
 use crate::sync::SyncServer;
 use crate::val::Val;
@@ -138,9 +139,9 @@ impl Runtime {
 impl Runtime {
     #[no_mangle]
     pub extern "C" fn rt_runtime_concat_strings(
-        &mut self, lhs: StringId, rhs: StringId,
-    ) -> StringId {
-        self.string_table.concat(lhs, rhs)
+        &mut self, lhs: Option<NonNull<RtString>>, rhs: Option<NonNull<RtString>>,
+    ) -> NonNull<RtString> {
+        RtString::from_str(format!("{}{}", resolve_string(lhs), resolve_string(rhs))).heapify()
     }
 
     #[no_mangle]

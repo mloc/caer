@@ -55,11 +55,11 @@ impl<'rt> Mark<'rt> {
 
     // TODO: the name "datum" is overloaded, as is "type". split it up.
     fn mark_gdatum(&mut self, mut datum_ptr: NonNull<Datum>) {
-        assert!(
-            self.runtime.alloc.contains(datum_ptr.cast()),
-            "pointer {:?} is not tracked by runtime",
-            datum_ptr
-        );
+        if !self.runtime.alloc.contains(datum_ptr.cast()) {
+            // Likely a constant string
+            // TODO: specifically skip const strings
+            return;
+        }
         let datum_ref = unsafe { datum_ptr.as_mut() };
         assert!(matches!(datum_ref.heap_header.kind, HeapKind::Datum));
 
