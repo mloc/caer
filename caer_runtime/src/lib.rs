@@ -1,6 +1,7 @@
 #![feature(arbitrary_enum_discriminant)]
 #![feature(unwind_attributes)]
 #![feature(c_unwind)]
+#![feature(allocator_api)]
 
 mod alloc;
 pub mod arg_pack;

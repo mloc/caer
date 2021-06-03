@@ -53,7 +53,7 @@ pub extern "C" fn rt_val_binary_op(
             // TODO reconsider this, DM doesn't allow "e" + 2
             let rval = rhs.cast_string(rt);
             Val::String(Some(
-                RtString::from_str(format!("{}{}", resolve_string(lval), rval)).heapify(),
+                RtString::from_str(format!("{}{}", resolve_string(lval), rval)).heapify(&rt.alloc),
             ))
         },
         Val::Ref(_) => unimplemented!("overloads"),
@@ -63,7 +63,7 @@ pub extern "C" fn rt_val_binary_op(
 // bad, needed for now
 #[no_mangle]
 pub extern "C" fn rt_val_cast_string_val(val: &Val, rt: &mut Runtime) -> NonNull<RtString> {
-    RtString::from_str(val.cast_string(rt)).heapify()
+    RtString::from_str(val.cast_string(rt)).heapify(&rt.alloc)
 }
 
 #[no_mangle]

@@ -26,6 +26,8 @@ impl<'rt> Mark<'rt> {
         }
     }
 
+    // Roots are pointers to something on the stack.
+    // BEFORE SLEEP: wtf; stack objs no longer follow the structure! why does this work!!
     fn mark_root(&mut self, root: NonNull<u32>) {
         let disc = unsafe { *root.as_ref() };
 
@@ -43,9 +45,12 @@ impl<'rt> Mark<'rt> {
     }
 
     fn mark_val(&mut self, val: &Val) {
+        dbg!(val);
         match val {
-            // TODO: string GC
-            Val::String(_) => {},
+            Val::String(Some(string_ptr)) => {
+                // Strings are gdatums for now.
+                self.mark_gdatum(string_ptr.cast());
+            },
             Val::Ref(Some(datum_ptr)) => {
                 self.mark_gdatum(*datum_ptr);
             },
@@ -55,12 +60,14 @@ impl<'rt> Mark<'rt> {
 
     // TODO: the name "datum" is overloaded, as is "type". split it up.
     fn mark_gdatum(&mut self, mut datum_ptr: NonNull<Datum>) {
+        dbg!(unsafe { datum_ptr.as_mut() });
         if !self.runtime.alloc.contains(datum_ptr.cast()) {
             // Likely a constant string
             // TODO: specifically skip const strings
             return;
         }
         let datum_ref = unsafe { datum_ptr.as_mut() };
+        dbg!(datum_ref.heap_header.kind);
         assert!(matches!(datum_ref.heap_header.kind, HeapKind::Datum));
 
         let gc_marker = &mut datum_ref.heap_header.gc_marker;
@@ -69,6 +76,7 @@ impl<'rt> Mark<'rt> {
             GcMarker::Black => {
                 return;
             },
+            // Grey is implicit in the stack right now
             GcMarker::Grey => unimplemented!("grey unimplemented, no incremental"),
             GcMarker::White => {
                 *gc_marker = GcMarker::Black;

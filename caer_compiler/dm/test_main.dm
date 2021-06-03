@@ -155,6 +155,10 @@
 			world << i + j*/
 
 /proc/closure()
+	var/z = "coot"
+	sleep(0)
+	world.log << z
+
 	var/x = 8
 	var/y = 9
 	spawn

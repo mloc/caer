@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use caer_ir::cfg;
 use caer_ir::env::Env;
 use caer_types::id::{FuncId, StringId};
@@ -47,7 +45,7 @@ impl<'a> IrBuilder<'a> {
         }
     }
 
-    pub fn add_string<'s>(&mut self, s: impl Into<Cow<'s, str>>) -> StringId {
+    pub fn add_string(&mut self, s: impl Into<String> + AsRef<str>) -> StringId {
         self.env.string_table.put(s)
     }
 }

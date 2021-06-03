@@ -1,7 +1,7 @@
+use std::alloc::Allocator;
 use std::ptr::NonNull;
 
 use crate::heap_object::HeapObject;
-use crate::runtime::Runtime;
 
 #[derive(Debug, Clone)]
 #[repr(C)]
@@ -31,8 +31,8 @@ impl RtString {
         }
     }
 
-    pub fn heapify(self) -> NonNull<Self> {
-        unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(self))) }
+    pub fn heapify(self, alloc: impl Allocator) -> NonNull<Self> {
+        unsafe { NonNull::new_unchecked(Box::into_raw(Box::new_in(self, alloc))) }
     }
 }
 

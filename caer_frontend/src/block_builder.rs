@@ -100,7 +100,7 @@ impl<'f> BlockBuilder {
                         },
                         _ => {
                             println!("uh oh {:#?}", expr);
-                            unimplemented!();
+                            unimplemented!("{:?}", op);
                         },
                     };
                 },

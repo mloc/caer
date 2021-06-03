@@ -13,9 +13,8 @@ impl<'rt> Sweep<'rt> {
 
     pub fn sweep(&mut self) {
         let mut to_free = Vec::new();
-        let iter = self.alloc.iter_allocations();
-        println!("sweeping {} allocations", iter.len());
-        for ptr in iter {
+        //println!("sweeping {} allocations", iter.len());
+        self.alloc.for_each(|ptr| {
             println!("sweeping {:?}", ptr);
             let mut datum_ptr = ptr.cast();
             let datum_ref: &mut Datum = unsafe { datum_ptr.as_mut() };
@@ -26,7 +25,7 @@ impl<'rt> Sweep<'rt> {
                 GcMarker::Grey => panic!("should have no grey left during sweep?"),
                 GcMarker::White => to_free.push(ptr),
             }
-        }
+        });
 
         unsafe {
             for ptr in to_free {

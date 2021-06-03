@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 use caer_types::id::{FuncId, StringId};
@@ -39,7 +38,7 @@ impl Env {
         self.funcs.insert(func.id, func);
     }
 
-    pub fn intern_string<'s>(&mut self, s: impl Into<Cow<'s, str>>) -> StringId {
+    pub fn intern_string(&mut self, s: impl Into<String> + AsRef<str>) -> StringId {
         self.string_table.put(s)
     }
 

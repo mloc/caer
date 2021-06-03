@@ -172,7 +172,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             let mut cvars = closure.captured.clone();
             cvars.sort_unstable_by_key(|(_, id)| *id);
             let env_arg = self.ll_func.get_params()[0].into_pointer_value();
-            for (i, (_, var_id)) in cvars.into_iter().enumerate() {
+            for (i, (var_id, _)) in cvars.into_iter().enumerate() {
                 let ptr = unsafe { self.gep(env_arg, &[i as u64]) };
                 self.copy_val(ptr, self.var_allocs[var_id].val);
             }
@@ -769,29 +769,33 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             },
 
             Op::DatumLoadVar(dst, src, var_id) => {
+                assert!(self.ir_func.locals[*dst].ty.is_any());
+
                 let rval_ptr = self.get_local_any_ro(*src);
                 let ref_ptr = self.build_extract_ref_ptr(rval_ptr);
                 let var_get_ptr = self
                     .build_vtable_lookup(block, ref_ptr, layout::VTABLE_VAR_GET_FIELD_OFFSET)
                     .into_pointer_value();
+                dbg!(rval_ptr, ref_ptr);
 
                 // TODO: drop/cloned
 
-                let var_val = self
-                    .build_call_catching(
-                        block,
-                        var_get_ptr,
-                        &[
-                            ref_ptr.into(),
-                            self.ctx
-                                .llvm_ctx
-                                .i64_type()
-                                .const_int(var_id.index() as u64, false)
-                                .into(),
-                        ],
-                    )
-                    .unwrap();
-                self.set_local(*dst, var_val);
+                dbg!(var_get_ptr);
+                let loaded_alloca = self.build_gc_alloca(self.ctx.rt.ty.val_type, "");
+                self.build_call_catching(
+                    block,
+                    var_get_ptr,
+                    &[
+                        ref_ptr.into(),
+                        self.ctx
+                            .llvm_ctx
+                            .i64_type()
+                            .const_int(var_id.index() as u64, false)
+                            .into(),
+                        loaded_alloca.into(),
+                    ],
+                );
+                self.set_local(*dst, loaded_alloca.into());
             },
 
             Op::DatumStoreVar(dst, var_id, src) => {
