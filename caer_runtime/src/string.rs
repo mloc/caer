@@ -1,12 +1,12 @@
 use std::ptr::NonNull;
 
-use crate::heap_object::HeapObject;
-use crate::runtime::Runtime;
+use crate::alloc::Alloc;
+use crate::heap_object::HeapHeader;
 
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub struct RtString {
-    pub heap_header: HeapObject,
+    pub heap_header: HeapHeader,
     size: u64,
     ptr: NonNull<u8>,
 }
@@ -25,14 +25,14 @@ impl RtString {
         let size = s.len() as u64;
         let ptr = unsafe { NonNull::new_unchecked(Box::into_raw(s)) };
         Self {
-            heap_header: HeapObject::string(),
+            heap_header: HeapHeader::string(),
             size,
             ptr: ptr.cast(),
         }
     }
 
-    pub fn heapify(self) -> NonNull<Self> {
-        unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(self))) }
+    pub fn heapify(self, alloc: &Alloc) -> NonNull<Self> {
+        alloc.alloc_emplace(self)
     }
 }
 

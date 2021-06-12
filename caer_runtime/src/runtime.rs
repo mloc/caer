@@ -141,7 +141,8 @@ impl Runtime {
     pub extern "C" fn rt_runtime_concat_strings(
         &mut self, lhs: Option<NonNull<RtString>>, rhs: Option<NonNull<RtString>>,
     ) -> NonNull<RtString> {
-        RtString::from_str(format!("{}{}", resolve_string(lhs), resolve_string(rhs))).heapify()
+        RtString::from_str(format!("{}{}", resolve_string(lhs), resolve_string(rhs)))
+            .heapify(&self.alloc)
     }
 
     #[no_mangle]

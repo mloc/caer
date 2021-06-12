@@ -2,7 +2,7 @@ use std::slice::from_raw_parts_mut;
 
 use caer_types::id::TypeId;
 
-use crate::heap_object::HeapObject;
+use crate::heap_object::HeapHeader;
 use crate::runtime::Runtime;
 use crate::val::Val;
 
@@ -13,14 +13,14 @@ use crate::val::Val;
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub struct Datum {
-    pub heap_header: HeapObject,
+    pub heap_header: HeapHeader,
     pub ty: TypeId,
 }
 
 impl Datum {
     pub fn new(ty: TypeId) -> Self {
         Self {
-            heap_header: HeapObject::datum(),
+            heap_header: HeapHeader::datum(),
             ty,
         }
     }

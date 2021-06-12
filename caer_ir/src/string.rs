@@ -1,7 +1,6 @@
 // string interner for IR
 // has serializer for format compatible with runtime stringtable
 
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Write;
 
@@ -33,17 +32,17 @@ impl StringTable {
         self.ids.get(s.as_ref()).copied()
     }
 
-    pub fn put<'a>(&mut self, s: impl Into<Cow<'a, str>>) -> StringId {
-        let s = s.into();
-        if s.is_empty() {
+    pub fn put(&mut self, s: impl Into<String> + AsRef<str>) -> StringId {
+        let s_ref = s.as_ref();
+        if s_ref.is_empty() {
             return StringId::new(0);
         }
 
-        if let Some(id) = self.ids.get(s.as_ref()) {
+        if let Some(id) = self.ids.get(s_ref) {
             return *id;
         }
 
-        let s_owned = s.into_owned();
+        let s_owned = s.into();
 
         let id = self.strings.next_idx();
 

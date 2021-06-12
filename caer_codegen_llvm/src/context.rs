@@ -176,7 +176,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
         let datum_common_type = ctx.struct_type(
             &[
                 heap_header_type.into(),
-                // ref
+                // ty id
                 ctx.i32_type().into(),
             ],
             false,

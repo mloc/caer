@@ -345,6 +345,12 @@ impl List {
     }
 }
 
+impl Drop for List {
+    fn drop(&mut self) {
+        println!("AAAAAAAAAAAAAAAAAAA list dropped!");
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn rt_list_var_get(list: &mut List, var: StringId, out: &mut Val) {
     *out = list.var_get(var)
