@@ -1,27 +1,28 @@
 use caer_ir::cfg;
 use caer_ir::cfg::Function;
-use caer_ir::env::Env;
+use caer_ir::module::Module;
 use caer_types::func::{CallingSpec, ProcSpec};
-use caer_types::id::FuncId;
+use caer_types::id::{FuncId, TYPE_ID_ANY};
 use caer_types::ty;
 use dreammaker::objtree::{self, ProcValue};
 
 use super::func_builder::FuncBuilder;
+use crate::objtree_wrapper::ObjtreeWrapper;
 
 pub struct ProcBuilder<'a> {
     // should be ProcId, eventually
     pub id: FuncId,
-    pub env: &'a mut Env,
-    pub objtree: &'a objtree::ObjectTree,
+    pub ir: &'a mut Module,
+    pub objtree: &'a ObjtreeWrapper<'a>,
 }
 
 impl<'a> ProcBuilder<'a> {
     pub fn build(
-        func: Function, env: &'a mut Env, objtree: &'a objtree::ObjectTree, body: &'a ProcBody,
+        func: Function, ir: &'a mut Module, objtree: &'a ObjtreeWrapper<'a>, body: &'a ProcBody,
     ) -> FuncId {
         let pb = Self {
             id: func.id,
-            env,
+            ir,
             objtree,
         };
 
@@ -42,8 +43,8 @@ impl<'a> ProcBuilder<'a> {
 
         for (i, param) in pv.parameters.iter().enumerate() {
             // TODO: need to record name separately for keyword args?
-            let name_id = self.env.intern_string(&param.name);
-            let var_id = func.add_var(func.global_scope, ty::Complex::Any, name_id);
+            let name_id = self.ir.intern_string(&param.name);
+            let var_id = func.add_var(func.global_scope, TYPE_ID_ANY, name_id);
             func.params.push(var_id);
 
             proc_spec.params.push(name_id);
@@ -52,7 +53,7 @@ impl<'a> ProcBuilder<'a> {
         proc_spec.names.sort_unstable_by_key(|(ref s, _)| *s);
         func.calling_spec = Some(CallingSpec::Proc(proc_spec));
 
-        let mut func_builder = FuncBuilder::for_proc(&mut self.env, &self.objtree, func);
+        let mut func_builder = FuncBuilder::for_proc(&mut self.ir, self.objtree, func);
 
         let body = if let objtree::Code::Present(ref b) = pv.code {
             b
@@ -66,15 +67,15 @@ impl<'a> ProcBuilder<'a> {
     fn build_builtin(&mut self, mut func: Function, builtin: &BuiltinProc) -> FuncId {
         match builtin {
             BuiltinProc::Sleep => {
-                let s_delay = self.env.intern_string("delay");
+                let s_delay = self.ir.intern_string("delay");
                 // TODO: handle args better
-                let id = func.add_var(func.global_scope, ty::Complex::Any, s_delay);
+                let id = func.add_var(func.global_scope, TYPE_ID_ANY, s_delay);
                 func.params.push(id);
                 let mut proc_spec = ProcSpec::default();
                 proc_spec.params.push(s_delay);
                 proc_spec.names.push((s_delay, 0));
                 func.calling_spec = Some(CallingSpec::Proc(proc_spec));
-                let mut func_builder = FuncBuilder::for_proc(&mut self.env, &self.objtree, func);
+                let mut func_builder = FuncBuilder::for_proc(&mut self.ir, self.objtree, func);
                 func_builder.build_raw_sleep(id);
                 func_builder.func.builtin = true;
                 func_builder.finalize()

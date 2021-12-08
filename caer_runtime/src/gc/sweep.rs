@@ -1,25 +1,28 @@
 use std::mem::ManuallyDrop;
 use std::ptr::NonNull;
 
-use crate::alloc::Alloc;
-use crate::datum::Datum;
-use crate::heap_object::{GcMarker, HeapHeader, HeapKind};
+use caer_types::id::{InstanceTypeId, TypeId};
+use caer_types::ty::Type;
+use caer_types::type_tree::Specialization;
+
+use crate::heap_object::{GcMarker, HeapHeader};
 use crate::list::List;
+use crate::runtime::Runtime;
 use crate::string::RtString;
 
 pub struct Sweep<'rt> {
-    alloc: &'rt mut Alloc,
+    runtime: &'rt mut Runtime,
 }
 
 impl<'rt> Sweep<'rt> {
-    pub fn new(alloc: &'rt mut Alloc) -> Self {
-        Self { alloc }
+    pub fn new(runtime: &'rt mut Runtime) -> Self {
+        Self { runtime }
     }
 
     pub fn sweep(&mut self) {
         let mut to_free = Vec::new();
         //println!("sweeping {} allocations", iter.len());
-        self.alloc.for_each(|ptr| {
+        self.runtime.alloc.for_each(|ptr, ty_id| {
             println!("sweeping {:?}", ptr);
             let mut object_ptr = ptr.cast();
             let object_ref: &mut HeapHeader = unsafe { object_ptr.as_mut() };
@@ -27,37 +30,36 @@ impl<'rt> Sweep<'rt> {
             match object_ref.gc_marker {
                 GcMarker::Black => object_ref.gc_marker = GcMarker::White,
                 GcMarker::Grey => panic!("should have no grey left during sweep?"),
-                GcMarker::White => to_free.push(object_ptr),
+                GcMarker::White => to_free.push((object_ptr, ty_id)),
             }
         });
 
-        for ptr in to_free {
-            self.drop_ptr(ptr);
+        for (ptr, ty_id) in to_free {
+            self.drop_ptr(ptr, ty_id);
         }
     }
 
     // Runs drop glue, then deallocs
-    fn drop_ptr(&mut self, ptr: NonNull<HeapHeader>) {
-        // Lots of special casing here :/
-        let header = unsafe { ptr.as_ref() };
-        match header.kind {
-            HeapKind::String => {
+    fn drop_ptr(&mut self, ptr: NonNull<HeapHeader>, ty_id: InstanceTypeId) {
+        match self.runtime.env.get_type_spec(ty_id) {
+            Specialization::String => {
                 let string: &mut ManuallyDrop<RtString> = unsafe { ptr.cast().as_mut() };
                 unsafe { ManuallyDrop::drop(string) };
             },
-            HeapKind::List => {
+            Specialization::Datum => {
+                // TODO: call finalizers w/ associated logic, revival checking
+            },
+            Specialization::List => {
                 // List Is Not A Datum
                 // /Del isn't called, even if hooked. sorry.
                 // TODO(generics): handling for generic list dtors
                 let list: &mut ManuallyDrop<List> = unsafe { ptr.cast().as_mut() };
                 unsafe { ManuallyDrop::drop(list) };
             },
-            HeapKind::Datum => {
-                // TODO: call finalizers w/ associated logic, revival checking
-            },
+            _ => todo!("{:?}", ty_id),
         }
 
-        println!("freeing {:?} / {:?}", ptr, header.kind);
-        unsafe { self.alloc.dealloc(ptr.cast()) };
+        println!("freeing {:?} / {:?}", ptr, ty_id);
+        unsafe { self.runtime.alloc.dealloc(ptr.cast()) };
     }
 }

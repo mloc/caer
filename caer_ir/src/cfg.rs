@@ -3,23 +3,24 @@ use std::fs::{self, File};
 use std::io::{Seek, SeekFrom, Write};
 
 use caer_types::func::{CallingSpec, ClosureSpec, FuncInfo};
-use caer_types::id::{FuncId, StringId, TypeId};
-use caer_types::ty;
+use caer_types::id::{FuncId, InstanceTypeId, PathTypeId, StringId, TypeId, TYPE_ID_ANY};
+use caer_types::ty::{self, RefType};
 use index_vec::IndexVec;
 use serde::Serialize;
+use ty::Type;
 
 use super::id::*;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Local {
     pub id: LocalId,
-    pub ty: ty::Complex,
+    pub ty: TypeId,
     pub movable: bool,
     pub construct_scope: ScopeId,
     // if a value is moved, it won't be destructed with this local
     pub destruct_scope: Option<ScopeId>,
     // DM-style "compile-time" typepath
-    pub assoc_dty: Option<TypeId>,
+    pub assoc_dty: Option<PathTypeId>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -27,10 +28,10 @@ pub struct Var {
     pub id: VarId,
     pub name: StringId,
     pub scope: ScopeId,
-    pub ty: ty::Complex,
+    pub ty: TypeId,
     // DM-style "compile-time" typepath, only used for error checking safe deref ops
     // TODO: maybe fold into ty?
-    pub assoc_dty: Option<TypeId>,
+    pub assoc_dty: Option<PathTypeId>,
 
     pub captures: HashMap<FuncId, VarId>,
 }
@@ -119,7 +120,7 @@ impl<'a> Function {
         };
 
         // TODO: compile time intern, "."
-        new.add_var(new.global_scope, ty::Complex::Any, StringId::new(0)); // return var
+        new.add_var(new.global_scope, TYPE_ID_ANY, StringId::new(0)); // return var
         new
     }
 
@@ -136,7 +137,7 @@ impl<'a> Function {
         });
     }
 
-    pub fn add_local(&mut self, scope: ScopeId, ty: ty::Complex) -> LocalId {
+    pub fn add_local(&mut self, scope: ScopeId, ty: TypeId) -> LocalId {
         let id = self.locals.next_idx();
 
         let local = Local {
@@ -156,16 +157,16 @@ impl<'a> Function {
     }
 
     // TODO: localref
-    pub fn set_assoc_dty(&mut self, local: LocalId, dty: TypeId) {
+    pub fn set_assoc_dty(&mut self, local: LocalId, dty: PathTypeId) {
         self.locals[local].assoc_dty = Some(dty);
     }
 
-    pub fn get_assoc_dty(&self, local: LocalId) -> Option<TypeId> {
+    pub fn get_assoc_dty(&self, local: LocalId) -> Option<PathTypeId> {
         self.locals[local].assoc_dty
     }
 
     // TODO: ERRH(C), duplicate vars
-    pub fn add_var(&mut self, scope: ScopeId, ty: ty::Complex, name: StringId) -> VarId {
+    pub fn add_var(&mut self, scope: ScopeId, ty: TypeId, name: StringId) -> VarId {
         let id = self.vars.next_idx();
         let var_info = Var {
             id,
@@ -185,7 +186,7 @@ impl<'a> Function {
 
     pub fn add_captured_var(&mut self, name: StringId, to_cap: VarId) -> VarId {
         // captured vars exist at the global scope, are always soft (for now)
-        let id = self.add_var(self.global_scope, ty::Complex::Any, name);
+        let id = self.add_var(self.global_scope, TYPE_ID_ANY, name);
 
         match &mut self.closure {
             None => panic!("can only capture variables if proc is marked as a closure"),
@@ -654,12 +655,12 @@ pub enum Op {
     //Call(LocalId, StringId, Vec<LocalId>, Vec<(StringId, LocalId)>),
     Call(LocalId, StringId, Vec<LocalId>),
 
-    Cast(LocalId, LocalId, ty::Primitive),
+    Cast(LocalId, LocalId, TypeId),
 
     // TODO: move into an "RTOP" variant? or datum-op, idk
     // TODO: handle args to New()
     // TODO: handle prefabs: PathId? PrefabId?
-    AllocDatum(LocalId, TypeId),
+    AllocDatum(LocalId, PathTypeId),
     DatumLoadVar(LocalId, LocalId, StringId), // local1 = local2.var
     DatumStoreVar(LocalId, StringId, LocalId), // local1.var = local2
     DatumCallProc(LocalId, LocalId, StringId, Vec<LocalId>), // local1 = local2.proc(args)
@@ -814,11 +815,11 @@ pub enum Literal {
 }
 
 impl Literal {
-    pub fn get_ty(&self) -> ty::Complex {
+    pub fn get_ty(&self) -> Type {
         match self {
-            Literal::Null => ty::Primitive::Null.into(),
-            Literal::Num(_) => ty::Primitive::Float.into(),
-            Literal::String(_) => ty::Primitive::String.into(),
+            Literal::Null => Type::Null,
+            Literal::Num(_) => Type::Float,
+            Literal::String(_) => Type::Ref(RefType::String),
             _ => unimplemented!(),
         }
     }

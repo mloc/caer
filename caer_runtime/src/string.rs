@@ -1,5 +1,7 @@
 use std::ptr::NonNull;
 
+use caer_types::id::INSTANCE_TYPE_ID_STRING;
+
 use crate::alloc::Alloc;
 use crate::heap_object::HeapHeader;
 
@@ -25,14 +27,14 @@ impl RtString {
         let size = s.len() as u64;
         let ptr = unsafe { NonNull::new_unchecked(Box::into_raw(s)) };
         Self {
-            heap_header: HeapHeader::string(),
+            heap_header: HeapHeader::new(),
             size,
             ptr: ptr.cast(),
         }
     }
 
     pub fn heapify(self, alloc: &Alloc) -> NonNull<Self> {
-        alloc.alloc_emplace(self)
+        alloc.alloc_emplace(self, INSTANCE_TYPE_ID_STRING)
     }
 }
 

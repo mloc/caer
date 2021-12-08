@@ -1,12 +1,13 @@
+use std::fmt::Debug;
 use std::ops::Index;
-use std::ptr::NonNull;
 use std::slice::from_raw_parts;
 
-use caer_types::id::{FuncId, StringId, TypeId};
+use caer_types::id::{FuncId, InstanceTypeId};
 
 use crate::arg_pack::ProcPack;
 use crate::datum::Datum;
 use crate::runtime::Runtime;
+use crate::string::RtString;
 use crate::val::Val;
 
 /// Convenience wrapper around the global static vtable
@@ -28,12 +29,16 @@ impl Vtable {
     pub fn lookup_func(&self, func: FuncId) -> Option<FuncPtr> {
         self.funcs.get(func.index()).copied()
     }
+
+    pub fn lookup(&self, id: InstanceTypeId) -> &'static Entry {
+        &self.table[id.index()]
+    }
 }
 
-impl Index<TypeId> for Vtable {
+impl Index<InstanceTypeId> for Vtable {
     type Output = Entry;
 
-    fn index(&self, id: TypeId) -> &'static Self::Output {
+    fn index(&self, id: InstanceTypeId) -> &'static Self::Output {
         &self.table[id.index()]
     }
 }
@@ -43,8 +48,8 @@ impl Index<TypeId> for Vtable {
 pub struct FuncPtr {
     ptr: *const std::ffi::c_void,
 }
-pub type ProcPtr = extern "C" fn(arg_pack: *const ProcPack, rt: NonNull<Runtime>, out: *mut Val);
-pub type ClosurePtr = extern "C" fn(arg_pack: *const Val, rt: NonNull<Runtime>, out: *mut Val);
+pub type ProcPtr = extern "C" fn(arg_pack: *const ProcPack, rt: &mut Runtime, out: *mut Val);
+pub type ClosurePtr = extern "C" fn(arg_pack: *const Val, rt: &mut Runtime, out: *mut Val);
 
 impl FuncPtr {
     pub unsafe fn as_proc(self) -> ProcPtr {
@@ -58,10 +63,19 @@ impl FuncPtr {
 
 /// A single vtable entry for a type
 /// **MUST BE KEPT IN SYNC WITH LLVM TYPE**; if not, Bad Things will happen
-#[derive(Debug)]
+#[derive(Clone, Copy)]
+#[repr(C)]
 pub struct Entry {
+    pub id: InstanceTypeId, // i32
     pub size: i64,
-    pub var_get: extern "C" fn(datum: *mut Datum, var: u64, out: *mut Val),
-    pub var_set: extern "C" fn(datum: *mut Datum, var: u64, val: *const Val),
-    pub proc_lookup: extern "C" fn(var: StringId, rt: NonNull<Runtime>) -> ProcPtr,
+    pub var_get: extern "C" fn(datum: *mut Datum, var: &RtString, out: *mut Val),
+    pub var_set: extern "C" fn(datum: *mut Datum, var: &RtString, val: *const Val),
+    pub proc_lookup: extern "C" fn(proc: &RtString, rt: &mut Runtime) -> ProcPtr,
+}
+
+impl Debug for Entry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // TODO: proper formatter
+        Ok(())
+    }
 }

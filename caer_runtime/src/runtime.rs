@@ -3,28 +3,29 @@ use std::mem;
 use std::ptr::NonNull;
 
 use aed_common::messages;
-use caer_types::id::{FuncId, StringId, TypeId};
-use caer_types::rt_env::RtEnv;
+use caer_types::id::{
+    FuncId, InstanceTypeId, PathTypeId, StringId, TypeId, INSTANCE_TYPE_ID_LIST, TYPE_ID_LIST,
+};
+use caer_types::rt_env::RtEnvBundle;
 use caer_types::type_tree::Specialization;
 use ordered_float::OrderedFloat;
 
 use crate::alloc::Alloc;
 use crate::arg_pack::CallBundle;
 use crate::datum::Datum;
+use crate::environment::Environment;
 use crate::gc_stackmap::GcStackmap;
 use crate::list::List;
 use crate::meta_runtime::MetaRuntime;
 use crate::string::{resolve_string, RtString};
-use crate::string_table::StringTable;
 use crate::sync::SyncServer;
 use crate::val::Val;
 use crate::{gc, vtable};
 
 #[derive(Debug)]
 pub struct Runtime {
-    pub(crate) string_table: StringTable,
     pub(crate) vtable: vtable::Vtable,
-    pub(crate) env: RtEnv,
+    pub(crate) env: Environment,
     pub(crate) gc_stackmap: GcStackmap,
     pub(crate) alloc: Alloc,
     // Updated by executor
@@ -58,13 +59,13 @@ pub unsafe extern "C" fn rt_runtime_init(
     assert!(libc::signal(libc::SIGPIPE, libc::SIG_IGN) != libc::SIG_ERR);
 
     // TODO: env checksums in binary
-    let init_st = StringTable::deserialize(File::open("stringtable.bincode").unwrap());
-    let env: RtEnv = bincode::deserialize_from(File::open("environment.bincode").unwrap()).unwrap();
+    let bundle: RtEnvBundle =
+        bincode::deserialize_from(File::open("environment.bincode").unwrap()).unwrap();
     let vtable = vtable::Vtable::from_static(
         vtable_ptr,
-        env.type_tree.types.len(),
+        bundle.type_tree.len(),
         funcs_ptr,
-        env.func_specs.len(),
+        bundle.func_specs.len(),
     );
 
     let stackmaps_raw = {
@@ -80,9 +81,8 @@ pub unsafe extern "C" fn rt_runtime_init(
     let sync_server = SyncServer::setup();
 
     let new = Runtime {
-        string_table: init_st,
         vtable,
-        env,
+        env: Environment::from_rt_env(bundle),
         gc_stackmap,
         alloc: Alloc::new(),
         world_time: 0,
@@ -102,14 +102,14 @@ pub unsafe extern "C" fn rt_runtime_init(
 impl Runtime {
     // TODO: fix lifetimes
     #[deprecated]
-    pub fn new_datum(&mut self, ty: TypeId) -> &mut Datum {
+    pub fn new_datum(&mut self, ty: PathTypeId) -> &mut Datum {
         unsafe { &mut *self.rt_runtime_alloc_datum(ty.index() as u32).as_ptr() }
     }
 
     // TODO: genericify? + break out of Runtime
     pub fn alloc_list(&mut self) -> NonNull<List> {
         let size = mem::size_of::<List>();
-        self.alloc.alloc(size).cast()
+        self.alloc.alloc(size, INSTANCE_TYPE_ID_LIST).cast()
     }
 
     pub fn send_message(&self, msg: &messages::Server) {
@@ -158,19 +158,18 @@ impl Runtime {
 
     #[no_mangle]
     pub extern "C" fn rt_runtime_alloc_datum(&mut self, ty: u32) -> NonNull<Datum> {
-        let ty = TypeId::new(ty as usize);
+        let ty = InstanceTypeId::new(ty as usize);
         let ventry = &self.vtable[ty];
         // TODO: put spec in ventry?
-        let spec = self.env.type_tree.types[ty].specialization;
+        let ity = self.env.instances.lookup_instance(ty).unwrap();
 
-        match spec {
+        match ity.pty.specialization {
             Specialization::Datum => {
                 unsafe {
-                    let mut ptr: NonNull<Datum> = self.alloc.alloc(ventry.size as usize).cast();
-                    ptr.as_mut().ty = ty;
+                    let mut ptr: NonNull<Datum> = self.alloc.alloc(ventry.size as usize, ty).cast();
 
                     // TODO: init vars instead of nulling
-                    for val in ptr.as_mut().get_vars(self) {
+                    for val in Datum::get_vars(ptr.as_mut(), ty, self) {
                         *val = crate::val::Val::Null;
                     }
 
@@ -180,10 +179,11 @@ impl Runtime {
             Specialization::List => {
                 let mut ptr = self.alloc_list();
                 unsafe {
-                    *ptr.as_mut() = List::new(ty);
+                    *ptr.as_mut() = List::new();
                 }
                 ptr.cast()
             },
+            _ => panic!("cannot alloc {:?} / {:?}", ity.pty.specialization, ty),
         }
     }
 

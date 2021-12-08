@@ -1,51 +1,54 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use caer_infer as infer;
-use caer_types::id::FuncId;
+use caer_types::id::{FuncId, TypeId, TYPE_ID_ANY, TYPE_ID_FLOAT, TYPE_ID_REF_ANY};
 use caer_types::op::BinaryOp;
 use caer_types::ty;
+use caer_types::type_tree::TypeTree;
 use index_vec::IndexVec;
+use ty::Type;
 
 use crate::cfg::{self, Op};
 use crate::const_val::ConstVal;
-use crate::env::Env;
 use crate::id::{BlockId, LocalId, VarId};
+use crate::module::Module;
+use crate::type_repo::TypeRepo;
 
-// modifies a clone of the proc, for now. proc-level cfg opts
-pub struct ProcAnalysis<'a> {
-    env: &'a mut Env,
-    proc: cfg::Function,
+// modifies a clone of the func, for now. func-level cfg opts
+pub struct FuncAnalysis<'a> {
+    env: &'a mut Module,
+    func: cfg::Function,
     local_info: IndexVec<LocalId, LocalInfo>,
     var_info: IndexVec<VarId, VarInfo>,
 }
 
-impl<'a> ProcAnalysis<'a> {
-    pub fn analyse_proc(env: &'a mut Env, proc_id: FuncId) -> IndexVec<LocalId, LocalInfo> {
-        let proc = env.funcs[&proc_id].clone();
+impl<'a> FuncAnalysis<'a> {
+    pub fn analyse_proc(env: &'a mut Module, func_id: FuncId) -> IndexVec<LocalId, LocalInfo> {
+        let proc = env.funcs[&func_id].clone();
         let initial_local_info = proc.locals.indices().map(LocalInfo::new).collect();
         let initial_var_info = proc.vars.indices().map(VarInfo::new).collect();
 
-        let mut pa = ProcAnalysis {
+        let mut pa = FuncAnalysis {
             env,
-            proc,
+            func: proc,
             local_info: initial_local_info,
             var_info: initial_var_info,
         };
 
         pa.do_analyse();
 
-        pa.env.funcs.insert(proc_id, pa.proc);
+        pa.env.funcs.insert(func_id, pa.func);
 
         pa.local_info
     }
 
     // TODO: ERRH(an)
     fn do_analyse(&mut self) {
-        let mut visited = self.proc.blocks.iter().map(|_| false).collect();
+        let mut visited = self.func.blocks.iter().map(|_| false).collect();
         let mut postorder = Vec::new();
         self.build_orders(
             None,
-            &self.proc.blocks.first().unwrap(),
+            &self.func.blocks.first().unwrap(),
             &mut visited,
             &mut postorder,
         );
@@ -53,7 +56,7 @@ impl<'a> ProcAnalysis<'a> {
         assert_eq!(visited.len(), postorder.len());
 
         for (_, block_id) in postorder.iter() {
-            let block = &self.proc.blocks[*block_id];
+            let block = &self.func.blocks[*block_id];
             for (i, op) in block.ops.iter().enumerate() {
                 let dest = op.dest_local();
                 let idx = OpIndex::new(block.id, i, dest);
@@ -113,21 +116,6 @@ impl<'a> ProcAnalysis<'a> {
         );
     }
 
-    // nasty but handy
-    fn get_op(&self, index: impl Into<RefIndex>) -> &cfg::Op {
-        match index.into() {
-            RefIndex::Op(idx) => &self.proc.blocks[idx.block].ops[idx.op_offset],
-            RefIndex::Terminator(_) => panic!(),
-        }
-    }
-
-    fn get_op_mut(&mut self, index: impl Into<RefIndex>) -> &mut cfg::Op {
-        match index.into() {
-            RefIndex::Op(idx) => &mut self.proc.blocks[idx.block].ops[idx.op_offset],
-            RefIndex::Terminator(_) => panic!(),
-        }
-    }
-
     fn build_orders(
         &self, pred: Option<BlockId>, block: &cfg::Block, visited: &mut IndexVec<BlockId, bool>,
         postorder: &mut Vec<(Option<BlockId>, BlockId)>,
@@ -138,7 +126,7 @@ impl<'a> ProcAnalysis<'a> {
         visited[block.id] = true;
 
         for id in block.iter_successors() {
-            self.build_orders(Some(block.id), &self.proc.blocks[id], visited, postorder);
+            self.build_orders(Some(block.id), &self.func.blocks[id], visited, postorder);
         }
         postorder.push((pred, block.id));
     }
@@ -149,13 +137,13 @@ impl<'a> ProcAnalysis<'a> {
             if local_info.decl_op.is_none() {
                 continue;
             }
-            let op = self.get_op(local_info.decl_op.unwrap()).clone();
+            let op = local_info.decl_op.unwrap().fetch(&self.func).clone();
             if let cfg::Op::Binary(dst, op, lhs, rhs) = op {
-                let lhs_ty = &self.proc.locals[lhs].ty;
-                let rhs_ty = &self.proc.locals[rhs].ty;
+                let lhs_ty = &self.func.locals[lhs].ty;
+                let rhs_ty = &self.func.locals[rhs].ty;
 
                 let mut infer_type = None;
-                if lhs_ty == rhs_ty && lhs_ty == &ty::Primitive::Float.into() {
+                if lhs_ty == rhs_ty && *lhs_ty == TYPE_ID_FLOAT {
                     match op {
                         BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
                             infer_type = Some(lhs_ty.clone());
@@ -165,7 +153,7 @@ impl<'a> ProcAnalysis<'a> {
                 }
 
                 if let Some(newty) = infer_type {
-                    self.proc.locals[dst].ty = newty;
+                    self.func.locals[dst].ty = newty;
                 }
             }
         }
@@ -176,46 +164,47 @@ impl<'a> ProcAnalysis<'a> {
     // it to an ssa local
     // this works on the assumption that a mkvar is fused to a pure store
     fn demote_vars(&mut self) {
-        let mut patch = ProcPatch::new(self.proc.id, self.proc.blocks.len());
+        let mut patch = FuncPatch::new(self.func.id, self.func.blocks.len());
 
         let mut to_demote = Vec::new();
         for var_info in self.var_info.iter() {
             if !var_info.stores.is_empty() {
                 // shouldn't be here
                 // TODO: move into own pass or something
-                if self.proc.vars[var_info.id].ty == ty::Complex::Any {
+                if self.func.vars[var_info.id].ty == TYPE_ID_ANY {
+                    let func = &self.func; // Captured for closure
                     let tys = var_info.stores.iter().flat_map(|idx| {
-                        self.get_op(*idx)
+                        idx.fetch(func)
                             .source_locals()
                             .into_iter()
-                            .map(|id| &self.proc.locals[id].ty)
+                            .map(|id| func.locals[id].ty)
                     });
-                    let new_ty = ty::Complex::unify(tys);
-                    self.proc.vars[var_info.id].ty = new_ty;
+                    let new_ty = unify_types(&mut self.env.types, tys);
+                    self.func.vars[var_info.id].ty = new_ty;
                 }
             }
 
             if var_info.stores.len() == 1 {
                 println!(
                     "{:?} {:?}",
-                    var_info.id, self.proc.vars[var_info.id].captures
+                    var_info.id, self.func.vars[var_info.id].captures
                 );
-                if !self.proc.vars[var_info.id].captures.is_empty() {
+                if !self.func.vars[var_info.id].captures.is_empty() {
                     // TODO: clean this way up
                     continue;
                 }
                 let decl_scope = if let Some(opidx) = var_info.decl_op {
-                    self.proc.blocks[opidx.block].scope
+                    self.func.blocks[opidx.block].scope
                 } else {
                     assert!(var_info.id.index() == 0);
                     continue;
                 };
                 // safety net for return var and params
                 // not needed?
-                if decl_scope == self.proc.global_scope {
+                if decl_scope == self.func.global_scope {
                     continue;
                 }
-                let store_scope = self.proc.blocks[var_info.stores[0].block].scope;
+                let store_scope = self.func.blocks[var_info.stores[0].block].scope;
                 if decl_scope == store_scope {
                     to_demote.push(var_info.id);
                 }
@@ -229,12 +218,12 @@ impl<'a> ProcAnalysis<'a> {
             let equiv_local = {
                 let opidx = self.var_info[var_id].stores[0];
                 patch.remove_op(opidx);
-                let op = self.get_op(opidx);
+                let op = opidx.fetch(&self.func);
                 if let Op::Store(v, l) = op {
                     assert_eq!(*v, var_id);
                     assert_eq!(
-                        self.proc.locals[*l].construct_scope,
-                        self.proc.vars[*v].scope
+                        self.func.locals[*l].construct_scope,
+                        self.func.vars[*v].scope
                     );
                     *l
                 } else {
@@ -244,7 +233,7 @@ impl<'a> ProcAnalysis<'a> {
 
             for load_idx in self.var_info[var_id].loads.iter() {
                 patch.remove_op(*load_idx);
-                let dest_l = if let Op::Load(l, v) = self.get_op(*load_idx) {
+                let dest_l = if let Op::Load(l, v) = load_idx.fetch(&self.func) {
                     assert_eq!(*v, var_id);
                     *l
                 } else {
@@ -255,16 +244,21 @@ impl<'a> ProcAnalysis<'a> {
         }
 
         patch.normalize();
-        patch.resolve_ops(&mut self.proc);
-        patch.rewrite_locals(&mut self.proc, &patch.subst_locals);
-        patch.gc_locals(&mut self.proc);
-        patch.gc_vars(&mut self.proc);
+        patch.resolve_ops(&mut self.func);
+        patch.rewrite_locals(&mut self.func, &patch.subst_locals);
+        patch.gc_locals(&mut self.func);
+        patch.gc_vars(&mut self.func);
     }
 
     fn infer_types(&mut self, order: &[BlockId]) {
-        println!("RUNNING type inference for {:?}", self.proc.id);
-        let mut runner = InferRunner::create(&mut self.proc, order.to_owned());
-        runner.run(&mut self.proc);
+        println!("RUNNING type inference for {:?}", self.func.id);
+        let mut runner = InferRunner::create(
+            &mut self.env.types,
+            &self.env.type_tree,
+            &mut self.func,
+            order.to_owned(),
+        );
+        runner.run(&mut self.func);
     }
 
     fn fold_consts(&mut self, _order: &[BlockId]) -> bool {
@@ -316,6 +310,23 @@ pub enum RefIndex {
     Terminator(BlockId),
 }
 
+impl RefIndex {
+    // nasty but handy
+    fn fetch(self, func: &cfg::Function) -> &cfg::Op {
+        match self {
+            RefIndex::Op(idx) => &func.blocks[idx.block].ops[idx.op_offset],
+            RefIndex::Terminator(_) => panic!(),
+        }
+    }
+
+    fn fetch_mut(self, func: &mut cfg::Function) -> &mut cfg::Op {
+        match self {
+            RefIndex::Op(idx) => &mut func.blocks[idx.block].ops[idx.op_offset],
+            RefIndex::Terminator(_) => panic!(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct OpIndex {
     pub block: BlockId,
@@ -330,6 +341,14 @@ impl OpIndex {
             op_offset,
             result_local,
         }
+    }
+
+    fn fetch(self, func: &cfg::Function) -> &cfg::Op {
+        RefIndex::from(self).fetch(func)
+    }
+
+    fn fetch_mut(self, func: &mut cfg::Function) -> &mut cfg::Op {
+        RefIndex::from(self).fetch_mut(func)
     }
 }
 
@@ -407,7 +426,10 @@ enum InferRef {
     Var(VarId),
 }
 
-struct InferRunner {
+struct InferRunner<'ty> {
+    types: &'ty mut TypeRepo,
+    type_tree: &'ty TypeTree,
+
     // reverse postorder of the CFG
     block_order: Vec<BlockId>,
 
@@ -421,8 +443,11 @@ struct InferRunner {
     overload_attempted: Vec<(usize, usize)>,
 }
 
-impl InferRunner {
-    fn create(proc: &mut cfg::Function, block_order: Vec<BlockId>) -> Self {
+impl<'ty> InferRunner<'ty> {
+    fn create(
+        types: &'ty mut TypeRepo, type_tree: &'ty TypeTree, proc: &mut cfg::Function,
+        block_order: Vec<BlockId>,
+    ) -> Self {
         let mut engine = infer::InferEngine::new();
 
         let local_ikey: IndexVec<_, _> = proc.locals.indices().map(|_| engine.add_var()).collect();
@@ -441,6 +466,8 @@ impl InferRunner {
         }
 
         Self {
+            types,
+            type_tree,
             block_order,
             engine,
             local_ikey,
@@ -529,8 +556,10 @@ impl InferRunner {
         }
         for (k, assign) in self.engine.resolve_assignments().into_iter_enumerated() {
             match self.key_to_ref[k] {
-                InferRef::Local(lid) => proc.locals[lid].ty = assign.as_ty(),
-                InferRef::Var(vid) => proc.vars[vid].ty = assign.as_ty(),
+                InferRef::Local(lid) => {
+                    proc.locals[lid].ty = self.types.insert_sum(assign.as_tys())
+                },
+                InferRef::Var(vid) => proc.vars[vid].ty = self.types.insert_sum(assign.as_tys()),
             }
         }
     }
@@ -560,7 +589,8 @@ impl InferRunner {
         match op {
             Op::Noop => {},
             Op::Literal(local, lit) => {
-                self.apply_rule(&infer::Rule::Const(self.local_ikey[*local], lit.get_ty()))?;
+                let lit_ty = self.types.insert(lit.get_ty());
+                self.apply_rule(&infer::Rule::Const(self.local_ikey[*local], lit_ty))?;
             },
             Op::MkVar(_) => {}, // TODO: consider better types for vars
             Op::Load(local, var) => {
@@ -574,10 +604,7 @@ impl InferRunner {
             },
             Op::Put(_) => {},
             Op::Call(out_l, _, _) => {
-                self.apply_rule(&infer::Rule::Const(
-                    self.local_ikey[*out_l],
-                    ty::Complex::Any,
-                ))?;
+                self.apply_rule(&infer::Rule::Const(self.local_ikey[*out_l], TYPE_ID_ANY))?;
             },
             Op::Cast(out_l, _, ty) => {
                 self.apply_rule(&infer::Rule::Const(self.local_ikey[*out_l], (*ty).into()))?;
@@ -586,43 +613,34 @@ impl InferRunner {
                 // TODO: handle datum types
                 self.apply_rule(&infer::Rule::Const(
                     self.local_ikey[*out_l],
-                    ty::Primitive::Ref(None).into(),
+                    TYPE_ID_REF_ANY,
                 ))?;
             },
             Op::DatumLoadVar(out_l, datum_l, _) => {
                 // TODO: in future, with hard datums, we can set out_l's ty
-                self.apply_rule(&infer::Rule::Const(
-                    self.local_ikey[*out_l],
-                    ty::Complex::Any,
-                ))?;
+                self.apply_rule(&infer::Rule::Const(self.local_ikey[*out_l], TYPE_ID_ANY))?;
                 self.apply_rule(&infer::Rule::Const(
                     self.local_ikey[*datum_l],
-                    ty::Primitive::Ref(None).into(),
+                    TYPE_ID_REF_ANY,
                 ))?;
             },
             Op::DatumStoreVar(datum_l, _, _) => {
                 self.apply_rule(&infer::Rule::Const(
                     self.local_ikey[*datum_l],
-                    ty::Primitive::Ref(None).into(),
+                    TYPE_ID_REF_ANY,
                 ))?;
             },
             Op::DatumCallProc(out_l, datum_l, _, _) => {
-                self.apply_rule(&infer::Rule::Const(
-                    self.local_ikey[*out_l],
-                    ty::Complex::Any,
-                ))?;
+                self.apply_rule(&infer::Rule::Const(self.local_ikey[*out_l], TYPE_ID_ANY))?;
                 self.apply_rule(&infer::Rule::Const(
                     self.local_ikey[*datum_l],
-                    ty::Primitive::Ref(None).into(),
+                    TYPE_ID_REF_ANY,
                 ))?;
             },
             Op::Throw(_) => {},
             Op::CatchException(maybe_except_v) => {
                 if let Some(except_v) = maybe_except_v {
-                    self.apply_rule(&infer::Rule::Const(
-                        self.var_ikey[*except_v],
-                        ty::Complex::Any,
-                    ))?;
+                    self.apply_rule(&infer::Rule::Const(self.var_ikey[*except_v], TYPE_ID_ANY))?;
                 }
             },
             Op::Spawn(_, _) => {},
@@ -632,60 +650,52 @@ impl InferRunner {
             Op::Binary(out_l, binop, lhs_l, rhs_l) => {
                 self.engine.propogate_subs()?;
                 let mut hardened = false;
-                match (
+
+                let lhs_ty = self.types.insert_sum(
                     self.engine
                         .probe_assignment(self.local_ikey[*lhs_l])
-                        .as_primitive(),
+                        .as_tys(),
+                );
+                let rhs_ty = self.types.insert_sum(
                     self.engine
                         .probe_assignment(self.local_ikey[*rhs_l])
-                        .as_primitive(),
-                ) {
-                    (Some(lhs_ty), Some(rhs_ty)) => {
-                        if self
-                            .overload_attempted
-                            .last()
-                            .map_or(true, |t| *t != (block_idx, op_idx))
-                        {
-                            if let Some(hard_op) =
-                                caer_types::op::HardBinary::from_in_ty(*binop, (lhs_ty, rhs_ty))
-                            {
-                                self.overload_attempted.push((block_idx, op_idx));
-                                self.checkpoint(
-                                    block_idx,
-                                    op_idx,
-                                    vec![infer::Rule::Const(
-                                        self.local_ikey[*out_l],
-                                        ty::Complex::Any,
-                                    )],
-                                );
-                                self.interest.push((
-                                    block_idx,
-                                    op_idx,
-                                    cfg::Op::HardBinary(*out_l, hard_op, *lhs_l, *rhs_l),
-                                ));
-                                self.apply_rule(&infer::Rule::Const(
-                                    self.local_ikey[*out_l],
-                                    hard_op.out_ty(),
-                                ))?;
-                                self.apply_rule(&infer::Rule::ConstFreeze(
-                                    self.local_ikey[*lhs_l],
-                                    lhs_ty.into(),
-                                ))?;
-                                self.apply_rule(&infer::Rule::ConstFreeze(
-                                    self.local_ikey[*rhs_l],
-                                    rhs_ty.into(),
-                                ))?;
-                                hardened = true;
-                            }
-                        }
-                    },
-                    _ => {},
-                };
+                        .as_tys(),
+                );
+                if self
+                    .overload_attempted
+                    .last()
+                    .map_or(true, |t| *t != (block_idx, op_idx))
+                {
+                    if let Some(hard_op) = caer_types::op::HardBinary::from_in_ty(
+                        *binop,
+                        (self.types.get(lhs_ty), self.types.get(rhs_ty)),
+                    ) {
+                        self.overload_attempted.push((block_idx, op_idx));
+                        self.checkpoint(
+                            block_idx,
+                            op_idx,
+                            vec![infer::Rule::Const(self.local_ikey[*out_l], TYPE_ID_ANY)],
+                        );
+                        self.interest.push((
+                            block_idx,
+                            op_idx,
+                            cfg::Op::HardBinary(*out_l, hard_op, *lhs_l, *rhs_l),
+                        ));
+                        let out_ty = self.types.insert(hard_op.out_ty());
+                        self.apply_rule(&infer::Rule::Const(self.local_ikey[*out_l], out_ty))?;
+                        self.apply_rule(&infer::Rule::ConstFreeze(
+                            self.local_ikey[*lhs_l],
+                            lhs_ty,
+                        ))?;
+                        self.apply_rule(&infer::Rule::ConstFreeze(
+                            self.local_ikey[*rhs_l],
+                            rhs_ty,
+                        ))?;
+                        hardened = true;
+                    }
+                }
                 if !hardened {
-                    self.apply_rule(&infer::Rule::Const(
-                        self.local_ikey[*out_l],
-                        ty::Complex::Any,
-                    ))?;
+                    self.apply_rule(&infer::Rule::Const(self.local_ikey[*out_l], TYPE_ID_ANY))?;
                 }
             },
             _ => unimplemented!("unhandled op: {:?}", op),
@@ -695,7 +705,7 @@ impl InferRunner {
 }
 
 #[derive(Debug, Clone)]
-struct ProcPatch {
+struct FuncPatch {
     // redundant, here for sanity check
     proc: FuncId,
 
@@ -706,7 +716,7 @@ struct ProcPatch {
     subst_locals: HashMap<LocalId, LocalId>,
 }
 
-impl ProcPatch {
+impl FuncPatch {
     fn new(id: FuncId, n_blocks: usize) -> Self {
         Self {
             proc: id,
@@ -895,5 +905,28 @@ impl ProcPatch {
         proc.params.sort_unstable();
         // do a check instead, dups are bad
         //scope.vars.dedup();
+    }
+}
+
+pub fn unify_types(repo: &mut TypeRepo, iter: impl Iterator<Item = TypeId>) -> TypeId {
+    let mut set = BTreeSet::new();
+
+    for id in iter {
+        match repo.get(id) {
+            Type::Any => return id,
+            Type::OneOf(oset) => {
+                set.extend(oset.iter().cloned());
+            },
+            _ => {
+                // TODO: intern types, use id
+                set.insert(id);
+            },
+        }
+    }
+
+    match set.len() {
+        0 => panic!("oneof with no types?"),
+        1 => set.into_iter().next().unwrap(),
+        _ => repo.insert_sum(set),
     }
 }

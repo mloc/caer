@@ -1,14 +1,16 @@
 use std::fs::{self, File};
 
 use caer_ir::cfg::*;
-use caer_ir::env::Env;
+use caer_ir::module::Module;
 use caer_ir::walker::CFGWalker;
-use caer_types::id::{FuncId, StringId, TypeId};
-use caer_types::rt_env::RtEnv;
-use caer_types::type_tree::{DType, Specialization};
+use caer_types::id::{FuncId, InstanceTypeId, PathTypeId, StringId};
+use caer_types::instance::InstanceType;
+use caer_types::rt_env::RtEnvBundle;
+use caer_types::type_tree::{PathType, Specialization};
 use caer_types::{layout, ty};
 use index_vec::IndexVec;
-use inkwell::values::{AnyValueEnum, PointerValue};
+use inkwell::types::FunctionType;
+use inkwell::values::{AnyValueEnum, FunctionValue, PointerValue};
 
 use super::context::Context;
 use super::func::FuncEmit;
@@ -17,21 +19,21 @@ use crate::context::GC_ADDRESS_SPACE;
 #[derive(Debug)]
 pub struct ProgEmit<'a, 'ctx> {
     pub ctx: &'a Context<'a, 'ctx>,
-    pub env: &'a Env,
-    pub funcs: Vec<(&'a Function, inkwell::values::FunctionValue<'ctx>)>,
+    pub env: &'a Module,
+    pub funcs: Vec<(&'a Function, FunctionValue<'ctx>)>,
     pub rt_global: inkwell::values::GlobalValue<'ctx>,
     // vtable global
     pub vt_global: inkwell::values::GlobalValue<'ctx>,
     // Func table global
     pub ft_global: inkwell::values::GlobalValue<'ctx>,
-    pub vt_lookup: Vec<inkwell::values::FunctionValue<'ctx>>,
-    pub datum_types: IndexVec<TypeId, inkwell::types::StructType<'ctx>>,
-    pub sym: IndexVec<FuncId, inkwell::values::FunctionValue<'ctx>>,
+    pub vt_lookup: Vec<FunctionValue<'ctx>>,
+    pub datum_types: IndexVec<InstanceTypeId, inkwell::types::StructType<'ctx>>,
+    pub sym: IndexVec<FuncId, FunctionValue<'ctx>>,
     pub string_allocs: IndexVec<StringId, inkwell::values::PointerValue<'ctx>>,
 }
 
 impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
-    pub fn new(ctx: &'a Context<'a, 'ctx>, env: &'a Env) -> Self {
+    pub fn new(ctx: &'a Context<'a, 'ctx>, env: &'a Module) -> Self {
         let rt_global = ctx.module.add_global(
             ctx.rt.ty.rt_type,
             Some(inkwell::AddressSpace::Generic),
@@ -44,7 +46,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             .rt
             .ty
             .vt_entry_type
-            .array_type(env.type_tree.types.len() as u32);
+            .array_type(env.type_tree.len() as u32);
         let vt_global =
             ctx.module
                 .add_global(vt_global_ty, Some(inkwell::AddressSpace::Generic), "vtable");
@@ -77,7 +79,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     // TODO: ERRH
-    pub fn resolve_func(&self, id: FuncId) -> inkwell::values::FunctionValue<'ctx> {
+    pub fn resolve_func(&self, id: FuncId) -> FunctionValue<'ctx> {
         self.sym[id]
     }
 
@@ -161,7 +163,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
                 self.ctx
                     .llvm_ctx
                     .i64_type()
-                    .const_int(ty::Complex::Any.get_store_size(), false)
+                    .const_int(ty::Type::Any.get_store_size(), false)
                     .into(),
                 self.ctx.llvm_ctx.bool_type().const_zero().into(),
             ],
@@ -178,9 +180,11 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         }
 
         // TODO: move file emit to a better place
-        let rt_env = RtEnv {
+        let rt_env = RtEnvBundle {
             type_tree: self.env.type_tree.clone(),
+            instances: self.env.instances.clone(),
             func_specs,
+            types: self.env.types.get_all(),
         };
         self.env
             .string_table
@@ -251,14 +255,15 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     fn populate_datum_types(&mut self) {
-        for ty in self.env.type_tree.types.iter() {
+        for ty in self.env.type_tree.iter() {
             let vars_field_ty = self.ctx.rt.ty.val_type.array_type(ty.vars.len() as u32);
-            let datum_ty = self.ctx.llvm_ctx.struct_type(
+            let datum_ty = self.ctx.llvm_ctx.named_struct_type(
                 &[
                     self.ctx.rt.ty.datum_common_type.into(),
                     vars_field_ty.into(),
                 ],
                 false,
+                &format!("datum_{}", ty.id.index()),
             );
             assert_eq!(ty.id.index(), self.datum_types.len());
             self.datum_types.push(datum_ty);
@@ -342,29 +347,57 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 
     fn emit_vtable(&mut self) {
         let mut vt_entries = Vec::new();
-        // yuck, TODO: encapsulate typetree
-        for ty in self.env.type_tree.types.iter() {
-            let size_val = self.datum_types[ty.id]
+        for instance in self.env.instances.iter() {
+            let size_val = self.datum_types[instance.id]
                 .size_of()
                 .unwrap()
                 .const_cast(self.ctx.llvm_ctx.i64_type(), false);
-
-            let entries = &match ty.specialization {
+            let ity = self.env.instances.lookup_instance(instance.id).unwrap();
+            let entries = match self.env.get_type_spec(instance.id) {
                 Specialization::Datum => {
-                    let var_index_fn = self.make_var_index_func(ty);
+                    let var_index_fn = self.make_var_index_func(&ity.pty);
                     [
+                        self.ctx
+                            .llvm_ctx
+                            .i32_type()
+                            .const_int(ity.id.raw() as _, false)
+                            .into(),
                         size_val.into(),
-                        self.make_get_var_func(ty, var_index_fn).into(),
-                        self.make_set_var_func(ty, var_index_fn).into(),
-                        self.make_proc_lookup_func(ty).into(),
+                        self.make_get_var_func(&ity, var_index_fn).into(),
+                        self.make_set_var_func(&ity, var_index_fn).into(),
+                        self.make_proc_lookup_func(&ity).into(),
                     ]
                 },
                 Specialization::List => [
+                    self.ctx
+                        .llvm_ctx
+                        .i32_type()
+                        .const_int(ity.id.raw() as _, false)
+                        .into(),
                     size_val.into(),
                     self.ctx.rt.rt_list_var_get.into(),
                     self.ctx.rt.rt_list_var_set.into(),
                     self.ctx.rt.rt_list_proc_lookup.into(),
                 ],
+                x => todo!("{:?}", x), /*{
+                                           let field_tys = self.ctx.rt.ty.vt_entry_type.get_field_types();
+                                           [
+                                               self.ctx.llvm_ctx.i32_type().const_int(id.raw() as _, false),
+                                               self.ctx.llvm_ctx.i64_type().const_int(1 << 60, false), // lol
+                                               self.make_trapping_func(
+                                                   field_tys[1],
+                                                   format!("ty_{}_var_get_TRAP", id.index()),
+                                               ),
+                                               self.make_trapping_func(
+                                                   field_tys[2],
+                                                   format!("ty_{}_var_set_TRAP", id.index()),
+                                               ),
+                                               self.make_trapping_func(
+                                                   field_tys[3],
+                                                   format!("ty_{}_proc_lookup_get_TRAP", id.index()),
+                                               ),
+                                           ]
+                                       },*/
             };
 
             let field_tys = self.ctx.rt.ty.vt_entry_type.get_field_types();
@@ -395,7 +428,19 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             .set_initializer(&self.ctx.rt.ty.vt_entry_type.const_array(&vt_entries));
     }
 
-    fn make_var_index_func(&mut self, ty: &DType) -> inkwell::values::FunctionValue<'ctx> {
+    fn make_trapping_func(&mut self, ty: FunctionType<'ctx>, name: &str) -> FunctionValue<'ctx> {
+        let func = self.ctx.module.add_function(name, ty, None);
+        let trap_fn = self.get_intrinsic(Intrinsic::Trap);
+        let block = self.ctx.llvm_ctx.append_basic_block(func, "trap");
+
+        self.ctx.builder.position_at_end(block);
+        self.ctx.builder.build_call(trap_fn, &[], "");
+        self.ctx.builder.build_unreachable();
+
+        func
+    }
+
+    fn make_var_index_func(&mut self, ty: &PathType) -> FunctionValue<'ctx> {
         let func_ty = self
             .ctx
             .llvm_ctx
@@ -482,8 +527,8 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     fn make_get_var_func(
-        &self, ty: &DType, index_func: inkwell::values::FunctionValue<'ctx>,
-    ) -> inkwell::values::FunctionValue<'ctx> {
+        &self, ty: &InstanceType, index_func: FunctionValue<'ctx>,
+    ) -> FunctionValue<'ctx> {
         let datum_type_ptr = self.datum_types[ty.id].ptr_type(GC_ADDRESS_SPACE);
         let func_ty = self.ctx.llvm_ctx.void_type().fn_type(
             &[
@@ -536,8 +581,8 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     fn make_set_var_func(
-        &self, ty: &DType, index_func: inkwell::values::FunctionValue<'ctx>,
-    ) -> inkwell::values::FunctionValue<'ctx> {
+        &self, ty: &InstanceType, index_func: FunctionValue<'ctx>,
+    ) -> FunctionValue<'ctx> {
         let datum_type_ptr = self.datum_types[ty.id].ptr_type(GC_ADDRESS_SPACE);
         let func_ty = self.ctx.llvm_ctx.void_type().fn_type(
             &[
@@ -588,7 +633,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         func
     }
 
-    fn make_proc_lookup_func(&mut self, ty: &DType) -> inkwell::values::FunctionValue<'ctx> {
+    fn make_proc_lookup_func(&mut self, ty: &InstanceType) -> FunctionValue<'ctx> {
         let ret_ty = self
             .ctx
             .rt
@@ -615,7 +660,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         let mut cases = Vec::new();
         let mut phi_incoming = Vec::new();
         let mut proc_lookup_vals = Vec::new();
-        for (i, proc_name) in ty.procs.iter().enumerate() {
+        for (i, proc_name) in ty.pty.procs.iter().enumerate() {
             let case_block = self
                 .ctx
                 .llvm_ctx
@@ -631,7 +676,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             cases.push((disc_val, case_block));
             phi_incoming.push((proc_index_val, case_block));
             proc_lookup_vals.push(
-                self.sym[ty.proc_lookup[proc_name].top_proc]
+                self.sym[ty.pty.proc_lookup[proc_name].top_proc]
                     .as_global_value()
                     .as_pointer_value(),
             );
@@ -719,7 +764,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         assert!(success);
     }
 
-    pub fn get_intrinsic(&self, intrinsic: Intrinsic) -> inkwell::values::FunctionValue<'ctx> {
+    pub fn get_intrinsic(&self, intrinsic: Intrinsic) -> FunctionValue<'ctx> {
         // TODO: cache?
         let ty_f32 = self.ctx.llvm_ctx.f32_type().into();
 

@@ -1,8 +1,8 @@
 use caer_ir::cfg;
 use caer_ir::id::{BlockId, ClosureSlotId, LocalId, ScopeId, VarId};
-use caer_types::id::{StringId, TypeId};
+use caer_types::id::{PathTypeId, StringId, TYPE_ID_ANY, TYPE_ID_STRING};
 use caer_types::op::BinaryOp;
-use caer_types::ty;
+use caer_types::ty::{self, RefType, Type};
 use dreammaker::ast;
 
 use super::func_builder::FuncBuilder;
@@ -76,7 +76,7 @@ impl<'f> BlockBuilder {
                 let var = self.add_var(fb, &v.var_type, &v.name);
                 self.block.push_op(cfg::Op::MkVar(var));
 
-                let name_id = fb.env.intern_string(&v.name);
+                let name_id = fb.ir.intern_string(&v.name);
                 if let Some(expr) = &v.value {
                     self.build_assign(fb, None, name_id, expr);
                 } else {
@@ -297,12 +297,12 @@ impl<'f> BlockBuilder {
         &mut self, fb: &mut FuncBuilder<'f>, var_type: &ast::VarType, var_name: &str,
     ) -> VarId {
         // TODO: care about var flags?
-        let name_id = fb.env.intern_string(var_name);
+        let name_id = fb.ir.intern_string(var_name);
         let var = fb.add_var(self.block.scope, name_id);
 
         if !var_type.type_path.is_empty() {
             // TODO: handle list types
-            let var_ty = match fb.objtree.type_by_path(&var_type.type_path) {
+            let var_ty = match fb.objtree.resolve_path(&var_type.type_path) {
                 Some(ty) => ty,
                 None => {
                     // TODO: ERRH(C)
@@ -311,7 +311,7 @@ impl<'f> BlockBuilder {
             };
 
             // TODO: encapsulate type_tree
-            let dty_id = fb.env.type_tree.type_by_node_id[&(var_ty.index().index() as u64)];
+            let dty_id = fb.objtree.lookup_type(var_ty).unwrap();
             fb.set_var_dty(var, dty_id);
         }
 
@@ -337,11 +337,11 @@ impl<'f> BlockBuilder {
     ) -> LocalId {
         match &follow.elem {
             ast::Follow::Field(kind, field) => {
-                let field_id = fb.env.intern_string(field);
+                let field_id = fb.ir.intern_string(field);
                 self.build_datum_load(fb, local, field_id, *kind)
             },
             ast::Follow::Call(kind, proc_name, args) => {
-                let proc_name_id = fb.env.intern_string(proc_name);
+                let proc_name_id = fb.ir.intern_string(proc_name);
                 let arg_exprs: Vec<_> = args.iter().map(|expr| self.build_expr(fb, expr)).collect();
                 self.build_datum_call(fb, local, proc_name_id, arg_exprs, *kind)
             },
@@ -362,7 +362,7 @@ impl<'f> BlockBuilder {
 
                 if follow.is_empty() {
                     match &term.elem {
-                        ast::Term::Ident(ref s) => return (None, fb.env.intern_string(s)),
+                        ast::Term::Ident(ref s) => return (None, fb.ir.intern_string(s)),
                         t => panic!("singleton lhs term must be an ident, not {:?}", t),
                     }
                 };
@@ -377,7 +377,7 @@ impl<'f> BlockBuilder {
 
                 match &follow_last.elem {
                     ast::Follow::Field(kind, field) => {
-                        let field_id = fb.env.intern_string(field);
+                        let field_id = fb.ir.intern_string(field);
                         self.validate_datum_index(fb, base, field_id, *kind);
                         (Some(base), field_id)
                     },
@@ -409,7 +409,7 @@ impl<'f> BlockBuilder {
 
     fn build_var_load(&mut self, fb: &mut FuncBuilder<'f>, var: VarId) -> LocalId {
         // TODO var ty fix
-        let holder = fb.add_local(self.block.scope, ty::Complex::Any);
+        let holder = fb.add_local(self.block.scope, ty::Type::Any);
         if let Some(assoc) = fb.func.vars[var].assoc_dty {
             fb.func.set_assoc_dty(holder, assoc);
         }
@@ -424,7 +424,7 @@ impl<'f> BlockBuilder {
     ) -> LocalId {
         let field_dty_id = self.validate_datum_index(fb, datum_local, var, index_kind);
         // TODO: reconsider the scope here
-        let loaded_local = fb.func.add_local(self.block.scope, ty::Complex::Any);
+        let loaded_local = fb.func.add_local(self.block.scope, TYPE_ID_ANY);
         if let Some(dty_id) = field_dty_id {
             fb.func.set_assoc_dty(loaded_local, dty_id);
         }
@@ -449,18 +449,18 @@ impl<'f> BlockBuilder {
                 };
 
                 // TODO: encap tt
-                let dty = &fb.env.type_tree.types[dty_id];
+                let dty = &fb.ir.type_tree.get_pty(dty_id).unwrap();
                 if !dty.proc_lookup.contains_key(&proc_name) {
                     panic!(
                         "type {} has no proc {}",
-                        fb.env.string_table.get(dty.path_str),
-                        fb.env.string_table.get(proc_name)
+                        fb.ir.string_table.get(dty.path_str),
+                        fb.ir.string_table.get(proc_name)
                     );
                 }
             },
         }
 
-        let res_local = fb.func.add_local(self.block.scope, ty::Complex::Any);
+        let res_local = fb.func.add_local(self.block.scope, TYPE_ID_ANY);
         self.block.push_op(cfg::Op::DatumCallProc(
             res_local,
             datum_local,
@@ -475,7 +475,7 @@ impl<'f> BlockBuilder {
     fn validate_datum_index(
         &mut self, fb: &mut FuncBuilder<'f>, datum_local: LocalId, var: StringId,
         index_kind: ast::IndexKind,
-    ) -> Option<TypeId> {
+    ) -> Option<PathTypeId> {
         match index_kind {
             ast::IndexKind::Colon | ast::IndexKind::SafeColon => None,
             ast::IndexKind::Dot | ast::IndexKind::SafeDot => {
@@ -488,14 +488,14 @@ impl<'f> BlockBuilder {
                 };
 
                 // TODO: encap tt
-                let dty = &fb.env.type_tree.types[dty_id];
+                let dty = &fb.ir.type_tree.get_pty(dty_id).unwrap();
                 if let Some(var_info) = dty.var_lookup.get(&var) {
                     var_info.assoc_dty
                 } else {
                     panic!(
                         "type {} has no var {}",
-                        fb.env.string_table.get(dty.path_str),
-                        fb.env.string_table.get(var)
+                        fb.ir.string_table.get(dty.path_str),
+                        fb.ir.string_table.get(var)
                     );
                 }
             },
@@ -517,7 +517,7 @@ impl<'f> BlockBuilder {
 
                 let lhs_expr = self.build_expr(fb, lhs);
                 let rhs_expr = self.build_expr(fb, rhs);
-                let res_local = fb.add_local(self.block.scope, ty::Complex::Any);
+                let res_local = fb.add_local(self.block.scope, ty::Type::Any);
 
                 let l_op = match op {
                     ast::BinaryOp::Add => BinaryOp::Add,
@@ -558,7 +558,7 @@ impl<'f> BlockBuilder {
         op: &ast::BinaryOp,
     ) -> LocalId {
         // TODO: nameless vars
-        let res_var_name = fb.env.intern_string("__logical_binop_res");
+        let res_var_name = fb.ir.intern_string("__logical_binop_res");
         let res_var = fb.add_var(self.block.scope, res_var_name);
         self.block.push_op(cfg::Op::MkVar(res_var));
         let lhs_expr = self.build_expr(fb, lhs);
@@ -597,7 +597,7 @@ impl<'f> BlockBuilder {
         self.cur_block_done(fb, end_block);
 
         // oneof ty?
-        let res = fb.add_local(self.block.scope, ty::Complex::Any);
+        let res = fb.add_local(self.block.scope, ty::Type::Any);
         self.block.push_op(cfg::Op::Load(res, res_var));
         res
     }
@@ -616,23 +616,23 @@ impl<'f> BlockBuilder {
             ast::Term::Float(x) => self.build_literal(fb, cfg::Literal::Num(*x)),
             ast::Term::String(s) => {
                 // TODO this cloning is bad, too lazy to fix lifetimes
-                let str_id = fb.env.intern_string(s.clone());
+                let str_id = fb.ir.intern_string(s.clone());
                 self.build_literal(fb, cfg::Literal::String(str_id))
             },
             ast::Term::Ident(var_name) => {
-                let name_id = fb.env.intern_string(var_name);
+                let name_id = fb.ir.intern_string(var_name);
                 let var_id = fb.lookup_var(self.block.scope, name_id);
                 self.build_var_load(fb, var_id)
             },
             ast::Term::Call(name, args) => {
-                let res = fb.add_local(self.block.scope, ty::Complex::Any);
+                let res = fb.add_local(self.block.scope, ty::Type::Any);
 
                 let mut arg_exprs = Vec::with_capacity(args.len());
                 for expr in args {
                     arg_exprs.push(self.build_expr(fb, expr));
                 }
 
-                let name_id = fb.env.intern_string(name);
+                let name_id = fb.ir.intern_string(name);
                 self.block.push_op(cfg::Op::Call(res, name_id, arg_exprs));
 
                 res
@@ -640,7 +640,7 @@ impl<'f> BlockBuilder {
             ast::Term::InterpString(ls, es_pairs) => {
                 // TODO fix postfix formatting: text("hello []", 2) => "hello 2"
                 // TODO more efficient building, repeated concat bad
-                let lit = cfg::Literal::String(fb.env.intern_string(ls));
+                let lit = cfg::Literal::String(fb.ir.intern_string(ls));
                 let mut built = self.build_literal(fb, lit);
 
                 for (o_expr, sep) in es_pairs.iter() {
@@ -648,12 +648,12 @@ impl<'f> BlockBuilder {
                         .as_ref()
                         .expect("postfix formatting not supported currently");
                     let expr_l = self.build_expr(fb, expr);
-                    let expr_cast_l = fb.add_local(self.block.scope, ty::Primitive::String.into());
+                    let expr_cast_l = fb.add_local(self.block.scope, RefType::String.into());
                     self.block
-                        .push_op(cfg::Op::Cast(expr_cast_l, expr_l, ty::Primitive::String));
+                        .push_op(cfg::Op::Cast(expr_cast_l, expr_l, TYPE_ID_STRING));
 
                     // TODO: we know this is a string, but Binary doesn't
-                    let new_built = fb.add_local(self.block.scope, ty::Complex::Any);
+                    let new_built = fb.add_local(self.block.scope, ty::Type::Any);
                     self.block.push_op(cfg::Op::Binary(
                         new_built,
                         BinaryOp::Add,
@@ -665,8 +665,8 @@ impl<'f> BlockBuilder {
                     if !sep.is_empty() {
                         // this is a soft concat op. type inference will constrain it into the
                         // appropriate hard op
-                        let new_built = fb.add_local(self.block.scope, ty::Complex::Any);
-                        let lit = cfg::Literal::String(fb.env.intern_string(sep));
+                        let new_built = fb.add_local(self.block.scope, ty::Type::Any);
+                        let lit = cfg::Literal::String(fb.ir.intern_string(sep));
                         let lit_l = self.build_literal(fb, lit);
                         self.block
                             .push_op(cfg::Op::Binary(new_built, BinaryOp::Add, built, lit_l));
@@ -683,15 +683,13 @@ impl<'f> BlockBuilder {
                     ast::NewType::Prefab(pf) => {
                         assert!(pf.vars.is_empty());
                         // TODO: ughhhh, move path resolving into a helper, better encapsulation
-                        let pf_ty = fb.objtree.root().navigate_path(&pf.path).unwrap().ty();
-
-                        fb.env.type_tree.type_by_node_id[&(pf_ty.index().index() as u64)]
+                        let pf_node = fb.objtree.navigate_path(&pf.path).unwrap();
+                        fb.objtree.lookup_type(pf_node).unwrap()
                     },
                     _ => unimplemented!("new with newty {:?}", newty),
                 };
 
-                let ref_local =
-                    fb.add_local(self.block.scope, ty::Primitive::Ref(Some(ty_id)).into());
+                let ref_local = fb.add_local(self.block.scope, RefType::Exact(ty_id).into());
 
                 self.block.push_op(cfg::Op::AllocDatum(ref_local, ty_id));
 

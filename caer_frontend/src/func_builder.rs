@@ -1,19 +1,20 @@
 // naming is hard, TODO: rename some other uses of "proc" to "func"
 
 use caer_ir::cfg;
-use caer_ir::env::Env;
 use caer_ir::id::{BlockId, ClosureSlotId, LocalId, ScopeId, VarId};
-use caer_types::id::{FuncId, StringId, TypeId};
-use caer_types::ty;
+use caer_ir::module::Module;
+use caer_types::id::{FuncId, PathTypeId, StringId, TypeId, TYPE_ID_ANY};
+use caer_types::ty::{self, Type};
 use dreammaker::{ast, objtree};
 use index_vec::IndexVec;
 
 use crate::block_builder::BlockBuilder;
+use crate::objtree_wrapper::ObjtreeWrapper;
 
 pub struct FuncBuilder<'a> {
-    pub(crate) env: &'a mut Env,
+    pub(crate) ir: &'a mut Module,
     // TODO: can we get rid of this?
-    pub(crate) objtree: &'a objtree::ObjectTree,
+    pub(crate) objtree: &'a ObjtreeWrapper<'a>,
     pub(crate) func: cfg::Function,
 
     next_block_id: usize,
@@ -23,10 +24,10 @@ pub struct FuncBuilder<'a> {
 
 impl<'a> FuncBuilder<'a> {
     pub(crate) fn for_proc(
-        env: &'a mut Env, objtree: &'a objtree::ObjectTree, func: cfg::Function,
+        ir: &'a mut Module, objtree: &'a ObjtreeWrapper<'a>, func: cfg::Function,
     ) -> Self {
         Self {
-            env,
+            ir,
             objtree,
             func,
             next_block_id: 0,
@@ -36,12 +37,12 @@ impl<'a> FuncBuilder<'a> {
     }
 
     pub(crate) fn for_closure(
-        env: &'a mut Env, objtree: &'a objtree::ObjectTree, over: FuncId, scope: ScopeId,
+        ir: &'a mut Module, objtree: &'a ObjtreeWrapper<'a>, over: FuncId, scope: ScopeId,
     ) -> Self {
-        let mut func = env.new_func();
+        let mut func = ir.new_func();
         func.set_closure(over, scope);
         Self {
-            env,
+            ir,
             objtree,
             func,
             next_block_id: 0,
@@ -57,16 +58,16 @@ impl<'a> FuncBuilder<'a> {
         }
         self.func.analyze();
         let id = self.func.id;
-        self.env.assimilate_func(self.func);
+        self.ir.assimilate_func(self.func);
 
         let mut closure_funcs = IndexVec::new();
         for (scope, block) in self.closure_slots {
-            let mut closure_builder = FuncBuilder::for_closure(self.env, self.objtree, id, scope);
+            let mut closure_builder = FuncBuilder::for_closure(self.ir, self.objtree, id, scope);
             closure_builder.build_block(block, None, None);
             closure_funcs.push(closure_builder.finalize());
         }
 
-        self.env.funcs.get_mut(&id).unwrap().child_closures = closure_funcs;
+        self.ir.funcs.get_mut(&id).unwrap().child_closures = closure_funcs;
 
         id
     }
@@ -104,7 +105,7 @@ impl<'a> FuncBuilder<'a> {
         loop {
             println!("{:?}, {:?}", cur_func_id, cur_scope);
 
-            let cur_func = self.env.funcs.get_mut(&cur_func_id).unwrap();
+            let cur_func = self.ir.funcs.get_mut(&cur_func_id).unwrap();
             if let Some(match_var) = cur_func.lookup_var(cur_scope, name) {
                 top_var = match_var;
                 break;
@@ -125,16 +126,16 @@ impl<'a> FuncBuilder<'a> {
         let mut cur_parent = cur_func_id;
         for func_id in capture_stack.into_iter().rev() {
             println!("!! {:?}", func_id);
-            let func = self.env.funcs.get_mut(&func_id).unwrap();
+            let func = self.ir.funcs.get_mut(&func_id).unwrap();
             let new_top_var = func.add_captured_var(name, top_var);
-            let parent_func = self.env.funcs.get_mut(&cur_parent).unwrap();
+            let parent_func = self.ir.funcs.get_mut(&cur_parent).unwrap();
             parent_func.mark_var_captured(top_var, func_id, new_top_var);
             top_var = new_top_var;
             cur_parent = func_id;
         }
 
         let final_var = self.func.add_captured_var(name, top_var);
-        let parent_func = self.env.funcs.get_mut(&cur_parent).unwrap();
+        let parent_func = self.ir.funcs.get_mut(&cur_parent).unwrap();
         parent_func.mark_var_captured(top_var, self.func.id, final_var);
 
         Some(final_var)
@@ -176,14 +177,15 @@ impl<'a> FuncBuilder<'a> {
 
     // maybe make helper in BlBu which infers scope
     pub(crate) fn add_var(&mut self, scope: ScopeId, name: StringId) -> VarId {
-        self.func.add_var(scope, ty::Complex::Any, name)
+        self.func.add_var(scope, TYPE_ID_ANY, name)
     }
 
-    pub(crate) fn add_local(&mut self, scope: ScopeId, ty: ty::Complex) -> LocalId {
-        self.func.add_local(scope, ty)
+    pub(crate) fn add_local(&mut self, scope: ScopeId, ty: Type) -> LocalId {
+        let id = self.ir.types.insert(ty);
+        self.func.add_local(scope, id)
     }
 
-    pub(crate) fn set_var_dty(&mut self, var: VarId, dty: TypeId) {
+    pub(crate) fn set_var_dty(&mut self, var: VarId, dty: PathTypeId) {
         self.func.vars[var].assoc_dty = Some(dty)
     }
 
@@ -218,7 +220,7 @@ impl<'a> FuncBuilder<'a> {
     pub fn build_raw_sleep(&mut self, arg: VarId) {
         let scope = self.func.new_scope(self.func.global_scope);
         let mut block = self.new_block(scope);
-        let lid = self.add_local(scope, ty::Complex::Any);
+        let lid = self.add_local(scope, Type::Any);
         block.push_op(cfg::Op::Load(lid, arg));
         block.push_op(cfg::Op::Sleep(lid));
         self.finalize_block(block)

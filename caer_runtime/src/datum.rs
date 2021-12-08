@@ -1,6 +1,6 @@
 use std::slice::from_raw_parts_mut;
 
-use caer_types::id::TypeId;
+use caer_types::id::InstanceTypeId;
 
 use crate::heap_object::HeapHeader;
 use crate::runtime::Runtime;
@@ -14,22 +14,30 @@ use crate::val::Val;
 #[repr(C)]
 pub struct Datum {
     pub heap_header: HeapHeader,
-    pub ty: TypeId,
 }
 
 impl Datum {
-    pub fn new(ty: TypeId) -> Self {
+    pub fn new(ty: InstanceTypeId) -> Self {
         Self {
-            heap_header: HeapHeader::datum(),
-            ty,
+            heap_header: HeapHeader::new(),
         }
     }
 
     // TODO: hacky, not great... should maybe use vtable functions?
-    pub fn get_vars(&mut self, runtime: &Runtime) -> &mut [Val] {
-        let n_vars = runtime.env.type_tree.types[self.ty].vars.len();
+    // should probably also not be doing runtime diving here
+    pub unsafe fn get_vars<'a>(
+        datum: &'a mut Datum, ty: InstanceTypeId, runtime: &Runtime,
+    ) -> &'a mut [Val] {
+        let n_vars = runtime
+            .env
+            .instances
+            .lookup_instance(ty)
+            .unwrap()
+            .pty
+            .vars
+            .len();
         unsafe {
-            let vars_start = (self as *mut Datum as *mut u8).add(8) as *mut Val;
+            let vars_start = (datum as *mut Datum as *mut u8).add(8) as *mut Val;
             from_raw_parts_mut(vars_start, n_vars)
         }
     }

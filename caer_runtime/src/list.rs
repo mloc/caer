@@ -4,19 +4,22 @@ use std::collections::{hash_map, HashMap};
 use std::ptr::NonNull;
 use std::slice;
 
-use caer_types::id::{StringId, TypeId};
+use caer_types::id::{PathTypeId, StringId, TYPE_ID_LIST};
 use caer_types::type_tree::Specialization;
 
 use crate::arg_pack::ProcPack;
 use crate::datum::Datum;
+use crate::heap_object::HeapHeader;
+use crate::rtti::RttiRef;
 use crate::runtime::Runtime;
+use crate::string::RtString;
 use crate::val::{rt_val_drop, Val};
-use crate::vtable::ProcPtr;
+use crate::vtable::{Entry, ProcPtr};
 
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub struct List {
-    datum: Datum,
+    heap_header: HeapHeader,
     vec: Vec<Val>,
     map: Option<HashMap<Val, AssocValue>>,
 }
@@ -74,9 +77,9 @@ impl Default for AssocValue {
 }
 
 impl List {
-    pub fn new(ty: TypeId) -> Self {
+    pub fn new() -> Self {
         Self {
-            datum: Datum::new(ty),
+            heap_header: HeapHeader::new(),
             vec: Vec::new(),
             map: None,
         }
@@ -210,34 +213,33 @@ impl List {
             .update_val(new_val);
     }
 
-    pub fn var_get(&mut self, _var: StringId) -> Val {
+    pub fn var_get(&mut self, _var: &RtString) -> Val {
         unimplemented!("list var get")
     }
 
-    pub fn var_set(&mut self, _var: StringId, _val: Val) {
+    pub fn var_set(&mut self, _var: &RtString, _val: Val) {
         unimplemented!("list var set")
     }
 
-    extern "C" fn proc_add(args: *const ProcPack, mut rt: NonNull<Runtime>, out: *mut Val) {
+    extern "C" fn proc_add(args: *const ProcPack, rt: &mut Runtime, out: *mut Val) {
         let args = unsafe { &*args };
-        let mut list_ptr = unsafe { ensure_list(args.src, rt.as_mut()) };
+        let (mut list_ptr, _) = ensure_list(args.src, rt);
         let list = unsafe { list_ptr.as_mut() };
 
         assert_eq!(args.named.as_slice().len(), 0);
         // TODO: copy assoc too
         for arg in args.unnamed.as_slice().iter() {
             match arg {
-                Val::Ref(Some(sublist_datum_ptr)) => {
-                    let ty = unsafe { sublist_datum_ptr.as_ref().ty };
-                    // TODO: lookup helper; vtable?
-                    if unsafe { rt.as_ref() }.env.type_tree.types[ty].specialization
-                        != Specialization::List
-                    {
+                Val::Ref(rr) => {
+                    let ty_id = rr.vptr.id;
+                    // TODO: maybe put spec in vtable?
+                    let spec = rt.env.get_type_spec(ty_id);
+                    if spec != Specialization::List {
                         list.push(*arg);
                         continue;
                     }
 
-                    let sublist_ptr = sublist_datum_ptr.cast();
+                    let sublist_ptr = rr.ptr.cast();
                     if sublist_ptr.as_ptr() == (list as *mut List) {
                         // if same list, we need to clone the elems first
                         // no need to handle assoc when copying elf
@@ -264,11 +266,9 @@ impl List {
         unsafe { *out = Val::Null };
     }
 
-    extern "C" fn proc_copy(args: *const ProcPack, mut rt: NonNull<Runtime>, out: *mut Val) {
-        let rt = unsafe { rt.as_mut() };
-
+    extern "C" fn proc_copy(args: *const ProcPack, rt: &mut Runtime, out: *mut Val) {
         let args = unsafe { &*args };
-        let mut list_ptr = ensure_list(args.src, rt);
+        let (mut list_ptr, vptr) = ensure_list(args.src, rt);
         let list = unsafe { list_ptr.as_mut() };
 
         let start = args.get(0).and_then(|v| v.try_cast_int()).unwrap_or(1);
@@ -278,12 +278,13 @@ impl List {
 
         if start == 1 && end == 0 {
             // easy case, clone the entire list
-            let newlist_ptr = List::on_gc_heap(rt, list.clone()) as *mut List;
-            unsafe { *out = Val::Ref(NonNull::new(newlist_ptr as _)) };
+            let newlist_ptr =
+                NonNull::new(List::on_gc_heap(rt, list.clone()) as *mut List).unwrap();
+            unsafe { *out = Val::Ref(RttiRef::new(vptr, newlist_ptr.cast())) };
             return;
         }
 
-        let newlist = List::on_gc_heap(rt, List::new(list.datum.ty));
+        let newlist = List::on_gc_heap(rt, List::new());
 
         let range = ((start - 1) as usize)..{
             if end == 0 {
@@ -303,13 +304,13 @@ impl List {
             }
         }
 
-        let newlist_ptr = newlist as *mut List;
-        unsafe { *out = Val::Ref(NonNull::new(newlist_ptr as _)) };
+        let newlist_ptr = NonNull::new(newlist as *mut List).unwrap();
+        unsafe { *out = Val::Ref(RttiRef::new(vptr, newlist_ptr.cast())) };
     }
 
-    extern "C" fn proc_cut(args: *const ProcPack, mut rt: NonNull<Runtime>, out: *mut Val) {
+    extern "C" fn proc_cut(args: *const ProcPack, rt: &mut Runtime, out: *mut Val) {
         let args = unsafe { &*args };
-        let mut list_ptr = unsafe { ensure_list(args.src, rt.as_mut()) };
+        let (mut list_ptr, _) = ensure_list(args.src, rt);
         let list = unsafe { list_ptr.as_mut() };
 
         let start = args.get(0).and_then(|v| v.try_cast_int()).unwrap_or(1);
@@ -352,18 +353,18 @@ impl Drop for List {
 }
 
 #[no_mangle]
-pub extern "C" fn rt_list_var_get(list: &mut List, var: StringId, out: &mut Val) {
+pub extern "C" fn rt_list_var_get(list: &mut List, var: &RtString, out: &mut Val) {
     *out = list.var_get(var)
 }
 
 #[no_mangle]
-pub extern "C" fn rt_list_var_set(list: &mut List, var: StringId, val: &Val) {
+pub extern "C" fn rt_list_var_set(list: &mut List, var: &RtString, val: &Val) {
     list.var_set(var, *val)
 }
 
 #[no_mangle]
-pub extern "C" fn rt_list_proc_lookup(proc: StringId, rt: &mut Runtime) -> ProcPtr {
-    match rt.string_table.get(proc) {
+pub extern "C" fn rt_list_proc_lookup(proc: &RtString, _rt: &mut Runtime) -> ProcPtr {
+    match proc.as_str() {
         "Add" => List::proc_add,
         "Copy" => List::proc_copy,
         "Cut" => List::proc_cut,
@@ -372,15 +373,14 @@ pub extern "C" fn rt_list_proc_lookup(proc: StringId, rt: &mut Runtime) -> ProcP
 }
 
 // TODO: move into val? could be ensure_datum_spec if that opts ok
-fn ensure_list(val: Val, rt: &Runtime) -> NonNull<List> {
+// TODO: Runtime error handling
+fn ensure_list(val: Val, rt: &Runtime) -> (NonNull<List>, &'static Entry) {
     match val {
-        Val::Ref(Some(datum_ptr)) => {
-            let datum = unsafe { datum_ptr.as_ref() };
-            // if specialization is List, we guarantee that ref points to a List instance
-            if rt.env.type_tree.types[datum.ty].specialization != Specialization::List {
+        Val::Ref(rr) => {
+            if rt.env.get_type_spec(rr.vptr.id) != Specialization::List {
                 panic!("RTE ref but not list")
             }
-            datum_ptr.cast()
+            (rr.ptr.cast(), rr.vptr)
         },
         _ => panic!("RTE not list"),
     }
@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn basic() {
-        let mut l = List::new(0.into());
+        let mut l = List::new();
         l.push(Val::Float(1f32.into()));
         l.push(Val::Float(2f32.into()));
         l.insert(2, Val::Float(3f32.into()));
@@ -465,7 +465,7 @@ mod tests {
 
     #[test]
     fn assoc() {
-        let mut l = List::new(0.into());
+        let mut l = List::new();
         l.update_index_assoc(&Val::Float(1f32.into()), Val::Float(10f32.into()));
         assert_eq!(
             l.index_assoc(&Val::Float(1f32.into())),
@@ -499,10 +499,10 @@ mod tests {
         l[1] = "a"
         ```
         */
-        let a_str = Val::String(StringId::new(1));
+        /*let a_str = Val::String(StringId::new(1));
         let foo_str = Val::String(StringId::new(2));
 
-        let mut l = List::new(0.into());
+        let mut l = List::new();
         l.push(a_str);
         l.push(a_str);
 
@@ -513,12 +513,12 @@ mod tests {
         l.update_index_int(1, a_str);
         assert_eq!(l.index_int(1), a_str);
 
-        assert_eq!(l.index_assoc(&a_str), Val::Null);
+        assert_eq!(l.index_assoc(&a_str), Val::Null);*/
     }
 
     #[test]
     fn assoc_append() {
-        let mut l = List::new(0.into());
+        let mut l = List::new();
         l.push(Val::Float(1f32.into()));
         assert_eq!(l.len(), 1);
         l.update_index_assoc(&Val::Float(2f32.into()), Val::Float(20f32.into()));
@@ -530,7 +530,7 @@ mod tests {
 
     #[test]
     fn assoc_no_append() {
-        let mut l = List::new(0.into());
+        let mut l = List::new();
         l.push(Val::Float(1f32.into()));
         assert_eq!(l.len(), 1);
         l.push(Val::Float(2f32.into()));

@@ -1,13 +1,18 @@
 mod block_builder;
 mod func_builder;
 mod ir_builder;
+mod objtree_wrapper;
 mod proc_builder;
-mod tree;
+mod tree_builder;
 
 use std::path::Path;
 
+use caer_ir::module::Module;
+use caer_ir::string::StringTable;
+use ir_builder::IrBuilder;
+
 // temporary
-pub fn build(path: impl AsRef<Path>) -> caer_ir::env::Env {
+pub fn build(path: impl AsRef<Path>) -> caer_ir::module::Module {
     let dm_context = dreammaker::Context::default();
     let preproc =
         dreammaker::preprocessor::Preprocessor::new(&dm_context, path.as_ref().into()).unwrap();
@@ -17,8 +22,13 @@ pub fn build(path: impl AsRef<Path>) -> caer_ir::env::Env {
 
     let tree = parser.parse_object_tree();
 
-    let mut env = caer_ir::env::Env::new();
-    let tb = tree::TreeBuilder::new(&tree, &mut env);
-    tb.build();
-    env
+    let mut strings = StringTable::new();
+    let bundle = tree_builder::TreeBuilder::new(&tree, &mut strings).build();
+
+    let mut module = Module::new(strings, bundle.type_tree, bundle.instances);
+
+    let irb = IrBuilder::new(&mut module, bundle.funcs, &bundle.objtree);
+    irb.build();
+
+    module
 }

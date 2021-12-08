@@ -1,14 +1,15 @@
+use caer_types::id::TypeId;
 use caer_types::ty;
 use inkwell::values::{BasicValue, BasicValueEnum, GlobalValue, IntValue, PointerValue};
 
 #[derive(Debug, Clone)]
 pub struct StackValue<'ctx> {
     pub val: PointerValue<'ctx>,
-    pub ty: ty::Complex,
+    pub ty: TypeId,
 }
 
 impl<'ctx> StackValue<'ctx> {
-    pub fn new(val: PointerValue<'ctx>, ty: ty::Complex) -> Self {
+    pub fn new(val: PointerValue<'ctx>, ty: TypeId) -> Self {
         Self { val, ty }
     }
 }
@@ -16,11 +17,11 @@ impl<'ctx> StackValue<'ctx> {
 #[derive(Debug, Clone)]
 pub struct LocalValue<'ctx> {
     pub val: BasicValueEnum<'ctx>,
-    pub ty: ty::Complex,
+    pub ty: TypeId,
 }
 
 impl<'ctx> LocalValue<'ctx> {
-    pub fn new(val: BasicValueEnum<'ctx>, ty: ty::Complex) -> Self {
+    pub fn new(val: BasicValueEnum<'ctx>, ty: TypeId) -> Self {
         Self { val, ty }
     }
 }

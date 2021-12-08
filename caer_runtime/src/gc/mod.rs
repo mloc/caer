@@ -17,6 +17,6 @@ pub fn run(meta: &mut MetaRuntime) {
     let mut mark = Mark::new(meta.dmrt);
     mark.mark_all(&state);
 
-    let mut sweep = Sweep::new(&mut meta.dmrt.alloc);
+    let mut sweep = Sweep::new(&mut meta.dmrt);
     sweep.sweep();
 }

@@ -1,135 +1,133 @@
 use std::collections::BTreeSet;
 
-use index_vec::define_index_type;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use crate::id::TypeId;
-
-define_index_type! {pub struct TyId = u32;}
+use crate::id::{PathTypeId, TypeId};
 
 pub trait Ty {
     fn needs_destructor(&self) -> bool;
-    fn as_primitive(&self) -> Option<Primitive>;
-    fn is_primitive(&self, prim: Primitive) -> bool;
+    fn as_primitive(&self) -> Option<Type>;
+    fn is_primitive(&self, prim: Type) -> bool;
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize)]
-pub enum Primitive {
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Serialize, Deserialize)]
+pub enum Type {
     Null,
+
     Float,
-    String,
-    //Int,
-    // None => any ref. maybe replace with id 0
-    Ref(Option<TypeId>),
-}
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Serialize)]
-pub enum Complex {
-    Any,
-    Pointer(Box<Complex>),
-    List(Box<Complex>),
-    Primitive(Primitive),
+    // GC-kind
+    //String,
+    //List(TypeId),
+    // One day, String and List will be represented as path nodes. One day.
+    //Datum(PathTypeId),
+    //DatumAny,
+
+    // Object ref
+    Ref(RefType),
     // btreeset is bad.
-    OneOf(BTreeSet<Complex>),
-    Proc {
-        args: Vec<Complex>,
-        var_args: Option<Box<Complex>>,
-        ret: Box<Complex>,
-    },
+    OneOf(BTreeSet<TypeId>),
+    // Val type
+    Any,
+    /*Proc {
+        args: Vec<PathTypeId>,
+        var_args: Option<Box<PathTypeId>>,
+        ret: Box<PathTypeId>,
+    },*/
 }
 
-impl Complex {
-    pub fn unify<'a>(iter: impl Iterator<Item = &'a Complex>) -> Self {
-        let mut set = BTreeSet::new();
-
-        for ty in iter {
-            match ty {
-                Complex::Any => return Complex::Any,
-                Complex::OneOf(oset) => {
-                    set.extend(oset.iter().cloned());
-                },
-                _ => {
-                    set.insert(ty.clone());
-                },
-            }
-        }
-
-        match set.len() {
-            0 => panic!("oneof with no types?"),
-            1 => set.into_iter().next().unwrap(),
-            _ => Complex::OneOf(set),
-        }
-    }
-
+impl Type {
     // term any is overloaded.
     // in this case it means any ty that needs RTTI
     pub fn is_any(&self) -> bool {
-        matches!(self, Complex::Any | Complex::OneOf(_))
+        matches!(
+            self,
+            Type::Ref(RefType::Subtype(_) | RefType::Any) | Type::OneOf(_) | Type::Any
+        )
     }
 
-    pub fn contains(&self, prim: Primitive) -> bool {
+    /*pub fn contains(&self, prim: Prim) -> bool {
         match self {
-            Complex::Any => true,
-            Complex::Primitive(my_prim) => *my_prim == prim,
-            Complex::OneOf(tys) => tys.iter().any(|ty| ty.contains(prim)),
+            Type::Any => true,
+            Type::Primitive(my_prim) => *my_prim == prim,
+            Type::OneOf(tys) => tys.iter().any(|ty| ty.contains(prim)),
             _ => false,
         }
-    }
+    }*/
 
     // BAD. TODO: remove, x64 specific
     pub fn get_store_size(&self) -> u64 {
+        if self.is_any() {
+            return 16;
+        }
         match self {
-            Complex::Any | Complex::OneOf(_) => 16, // discrim + val
-            Complex::Primitive(_) => 8,
+            Type::Null | Type::Float | Type::Ref(RefType::String) => 8,
             _ => panic!("can't get size of {:?}", self),
         }
     }
 }
 
-impl Ty for Primitive {
+impl From<RefType> for Type {
+    fn from(rt: RefType) -> Self {
+        Self::Ref(rt)
+    }
+}
+
+/*impl Ty for Prim {
     fn needs_destructor(&self) -> bool {
-        matches!(self, Primitive::Ref(_))
+        matches!(self, Prim::Ref(_))
     }
 
-    fn as_primitive(&self) -> Option<Primitive> {
+    fn as_primitive(&self) -> Option<Prim> {
         Some(*self)
     }
 
-    fn is_primitive(&self, prim: Primitive) -> bool {
+    fn is_primitive(&self, prim: Prim) -> bool {
         *self == prim
     }
-}
+}*/
 
-impl Ty for Complex {
+impl Ty for Type {
     fn needs_destructor(&self) -> bool {
-        match self {
-            Complex::Any => true,
-            Complex::Primitive(p) => p.needs_destructor(),
-            Complex::OneOf(tys) => tys.iter().any(|ty| ty.needs_destructor()),
-            Complex::Proc { .. } => false,
+        todo!();
+        /*match self {
+            Type::Any => true,
+            Type::Primitive(p) => p.needs_destructor(),
+            Type::OneOf(tys) => tys.iter().any(|ty| ty.needs_destructor()),
+            Type::Proc { .. } => false,
             _ => unimplemented!("{:?}", self),
-        }
+        }*/
     }
 
-    fn as_primitive(&self) -> Option<Primitive> {
-        if let Complex::Primitive(my_prim) = self {
+    fn as_primitive(&self) -> Option<Type> {
+        todo!();
+        /*match self {
+            Type::
+        }
+        if let Type::Primitive(my_prim) = self {
             Some(*my_prim)
         } else {
             None
-        }
+        }*/
     }
 
-    fn is_primitive(&self, prim: Primitive) -> bool {
-        if let Complex::Primitive(my_prim) = self {
+    fn is_primitive(&self, prim: Type) -> bool {
+        todo!();
+        /*if let Type::Primitive(my_prim) = self {
             *my_prim == prim
         } else {
             false
-        }
+        }*/
     }
 }
 
-impl From<Primitive> for Complex {
-    fn from(p: Primitive) -> Complex {
-        Complex::Primitive(p)
-    }
+// Eventually this will contain: generic args, no special casing for list/string, no special casing
+// for Any?
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Serialize, Deserialize)]
+pub enum RefType {
+    Any,
+    String,
+    List(TypeId),
+    Exact(PathTypeId),
+    Subtype(PathTypeId),
 }

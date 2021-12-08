@@ -1,313 +1,90 @@
-//! Lifted from the rust compiler source code, commit ef92009c1dbe2750f1d24a6619b827721fb49749
-//! Copyright the rust project: https://github.com/rust-lang/rust/blob/master/COPYRIGHT
+#![feature(link_cfg)]
+#![feature(native_link_modifiers)]
+#![feature(native_link_modifiers_bundle)]
+#![feature(static_nobundle)]
+#![feature(c_unwind)]
+#![cfg_attr(not(target_env = "msvc"), feature(libc))]
 
-#![feature(unwind_attributes)]
-#![allow(nonstandard_style)]
-
-use libc::{c_int, c_void, uintptr_t};
-
-#[cfg(target_arch = "x86")]
-pub const UNWIND_DATA_REG: (i32, i32) = (0, 2); // EAX, EDX
-
-#[cfg(target_arch = "x86_64")]
-pub const UNWIND_DATA_REG: (i32, i32) = (0, 1); // RAX, RDX
-
-#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-pub const UNWIND_DATA_REG: (i32, i32) = (0, 1); // R0, R1 / X0, X1
-
-#[cfg(any(target_arch = "mips", target_arch = "mips64"))]
-pub const UNWIND_DATA_REG: (i32, i32) = (4, 5); // A0, A1
-
-#[cfg(any(target_arch = "powerpc", target_arch = "powerpc64"))]
-pub const UNWIND_DATA_REG: (i32, i32) = (3, 4); // R3, R4 / X3, X4
-
-#[cfg(target_arch = "s390x")]
-pub const UNWIND_DATA_REG: (i32, i32) = (6, 7); // R6, R7
-
-#[cfg(target_arch = "sparc64")]
-pub const UNWIND_DATA_REG: (i32, i32) = (24, 25); // I0, I1
-
-#[cfg(target_arch = "hexagon")]
-pub const UNWIND_DATA_REG: (i32, i32) = (0, 1); // R0, R1
-
-#[cfg(target_arch = "riscv64")]
-pub const UNWIND_DATA_REG: (i32, i32) = (10, 11); // x10, x11
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum _Unwind_Reason_Code {
-    _URC_NO_REASON = 0,
-    _URC_FOREIGN_EXCEPTION_CAUGHT = 1,
-    _URC_FATAL_PHASE2_ERROR = 2,
-    _URC_FATAL_PHASE1_ERROR = 3,
-    _URC_NORMAL_STOP = 4,
-    _URC_END_OF_STACK = 5,
-    _URC_HANDLER_FOUND = 6,
-    _URC_INSTALL_CONTEXT = 7,
-    _URC_CONTINUE_UNWIND = 8,
-    _URC_FAILURE = 9, // used only by ARM EHABI
-}
-pub use _Unwind_Reason_Code::*;
-
-pub type _Unwind_Exception_Class = u64;
-pub type _Unwind_Word = uintptr_t;
-pub type _Unwind_Ptr = uintptr_t;
-pub type _Unwind_Trace_Fn =
-    extern "C" fn(ctx: *mut _Unwind_Context, arg: *mut c_void) -> _Unwind_Reason_Code;
-
-#[cfg(target_arch = "x86")]
-pub const unwinder_private_data_size: usize = 5;
-
-#[cfg(target_arch = "x86_64")]
-pub const unwinder_private_data_size: usize = 6;
-
-#[cfg(all(target_arch = "arm", not(target_os = "ios")))]
-pub const unwinder_private_data_size: usize = 20;
-
-#[cfg(all(target_arch = "arm", target_os = "ios"))]
-pub const unwinder_private_data_size: usize = 5;
-
-#[cfg(target_arch = "aarch64")]
-pub const unwinder_private_data_size: usize = 2;
-
-#[cfg(target_arch = "mips")]
-pub const unwinder_private_data_size: usize = 2;
-
-#[cfg(target_arch = "mips64")]
-pub const unwinder_private_data_size: usize = 2;
-
-#[cfg(any(target_arch = "powerpc", target_arch = "powerpc64"))]
-pub const unwinder_private_data_size: usize = 2;
-
-#[cfg(target_arch = "s390x")]
-pub const unwinder_private_data_size: usize = 2;
-
-#[cfg(target_arch = "sparc64")]
-pub const unwinder_private_data_size: usize = 2;
-
-#[cfg(target_arch = "riscv64")]
-pub const unwinder_private_data_size: usize = 2;
-
-#[cfg(target_os = "emscripten")]
-pub const unwinder_private_data_size: usize = 20;
-
-#[cfg(all(target_arch = "hexagon", target_os = "linux"))]
-pub const unwinder_private_data_size: usize = 35;
-
-#[repr(C)]
-pub struct _Unwind_Exception {
-    pub exception_class: _Unwind_Exception_Class,
-    pub exception_cleanup: _Unwind_Exception_Cleanup_Fn,
-    pub private: [_Unwind_Word; unwinder_private_data_size],
+cfg_if::cfg_if! {
+    if #[cfg(target_env = "msvc")] {
+        // Windows MSVC no extra unwinder support needed
+    } else if #[cfg(any(
+        target_os = "l4re",
+        target_os = "none",
+        target_os = "espidf",
+    ))] {
+        // These "unix" family members do not have unwinder.
+        // Note this also matches x86_64-unknown-none-linuxkernel.
+    } else if #[cfg(any(
+        unix,
+        windows,
+        target_os = "psp",
+        target_os = "solid_asp3",
+        all(target_vendor = "fortanix", target_env = "sgx"),
+    ))] {
+        mod libunwind;
+        pub use libunwind::*;
+    } else {
+        // no unwinder on the system!
+        // - wasm32 (not emscripten, which is "unix" family)
+        // - os=none ("bare metal" targets)
+        // - os=hermit
+        // - os=uefi
+        // - os=cuda
+        // - nvptx64-nvidia-cuda
+        // - Any new targets not listed above.
+    }
 }
 
-pub enum _Unwind_Context {}
+#[cfg(target_env = "musl")]
+cfg_if::cfg_if! {
+    if #[cfg(all(feature = "llvm-libunwind", feature = "system-llvm-libunwind"))] {
+        compile_error!("`llvm-libunwind` and `system-llvm-libunwind` cannot be enabled at the same time");
+    } else if #[cfg(feature = "llvm-libunwind")] {
+        #[link(name = "unwind", kind = "static", modifiers = "-bundle")]
+        extern "C" {}
+    } else if #[cfg(feature = "system-llvm-libunwind")] {
+        #[link(name = "unwind", kind = "static", modifiers = "-bundle", cfg(target_feature = "crt-static"))]
+        #[link(name = "unwind", cfg(not(target_feature = "crt-static")))]
+        extern "C" {}
+    } else {
+        #[link(name = "unwind", kind = "static", modifiers = "-bundle", cfg(target_feature = "crt-static"))]
+        #[link(name = "gcc_s", cfg(not(target_feature = "crt-static")))]
+        extern "C" {}
+    }
+}
 
-pub type _Unwind_Exception_Cleanup_Fn =
-    extern "C" fn(unwind_code: _Unwind_Reason_Code, exception: *mut _Unwind_Exception);
-#[cfg_attr(
-    all(
-        feature = "llvm-libunwind",
-        any(target_os = "fuchsia", target_os = "linux")
-    ),
-    link(name = "unwind", kind = "static")
+// When building with crt-static, we get `gcc_eh` from the `libc` crate, since
+// glibc needs it, and needs it listed later on the linker command line. We
+// don't want to duplicate it here.
+#[cfg(all(
+    target_os = "linux",
+    target_env = "gnu",
+    not(feature = "llvm-libunwind"),
+    not(feature = "system-llvm-libunwind")
+))]
+#[link(name = "gcc_s", cfg(not(target_feature = "crt-static")))]
+extern "C" {}
+
+#[cfg(all(
+    target_os = "linux",
+    target_env = "gnu",
+    not(feature = "llvm-libunwind"),
+    feature = "system-llvm-libunwind"
+))]
+#[link(name = "unwind", cfg(not(target_feature = "crt-static")))]
+extern "C" {}
+
+#[cfg(target_os = "redox")]
+#[link(
+    name = "gcc_eh",
+    kind = "static",
+    modifiers = "-bundle",
+    cfg(target_feature = "crt-static")
 )]
-extern "C" {
-    #[unwind(allowed)]
-    pub fn _Unwind_Resume(exception: *mut _Unwind_Exception) -> !;
-    pub fn _Unwind_DeleteException(exception: *mut _Unwind_Exception);
-    pub fn _Unwind_GetLanguageSpecificData(ctx: *mut _Unwind_Context) -> *mut c_void;
-    pub fn _Unwind_GetRegionStart(ctx: *mut _Unwind_Context) -> _Unwind_Ptr;
-    pub fn _Unwind_GetTextRelBase(ctx: *mut _Unwind_Context) -> _Unwind_Ptr;
-    pub fn _Unwind_GetDataRelBase(ctx: *mut _Unwind_Context) -> _Unwind_Ptr;
-}
+#[link(name = "gcc_s", cfg(not(target_feature = "crt-static")))]
+extern "C" {}
 
-cfg_if::cfg_if! {
-if #[cfg(all(any(target_os = "ios", target_os = "netbsd", not(target_arch = "arm"))))] {
-    // Not ARM EHABI
-    #[repr(C)]
-    #[derive(Debug, Copy, Clone, PartialEq)]
-    pub enum _Unwind_Action {
-        _UA_SEARCH_PHASE = 1,
-        _UA_CLEANUP_PHASE = 2,
-        _UA_HANDLER_FRAME = 4,
-        _UA_FORCE_UNWIND = 8,
-        _UA_END_OF_STACK = 16,
-    }
-    pub use _Unwind_Action::*;
-
-    #[cfg_attr(all(feature = "llvm-libunwind",
-                   any(target_os = "fuchsia", target_os = "linux")),
-               link(name = "unwind", kind = "static"))]
-    extern "C" {
-        pub fn _Unwind_GetGR(ctx: *mut _Unwind_Context, reg_index: c_int) -> _Unwind_Word;
-        pub fn _Unwind_SetGR(ctx: *mut _Unwind_Context, reg_index: c_int, value: _Unwind_Word);
-        pub fn _Unwind_GetIP(ctx: *mut _Unwind_Context) -> _Unwind_Word;
-        pub fn _Unwind_SetIP(ctx: *mut _Unwind_Context, value: _Unwind_Word);
-        pub fn _Unwind_GetIPInfo(ctx: *mut _Unwind_Context, ip_before_insn: *mut c_int)
-                                 -> _Unwind_Word;
-        pub fn _Unwind_FindEnclosingFunction(pc: *mut c_void) -> *mut c_void;
-    }
-
-} else {
-    // ARM EHABI
-    #[repr(C)]
-    #[derive(Copy, Clone, PartialEq)]
-    pub enum _Unwind_State {
-        _US_VIRTUAL_UNWIND_FRAME = 0,
-        _US_UNWIND_FRAME_STARTING = 1,
-        _US_UNWIND_FRAME_RESUME = 2,
-        _US_ACTION_MASK = 3,
-        _US_FORCE_UNWIND = 8,
-        _US_END_OF_STACK = 16,
-    }
-    pub use _Unwind_State::*;
-
-    #[repr(C)]
-    enum _Unwind_VRS_Result {
-        _UVRSR_OK = 0,
-        _UVRSR_NOT_IMPLEMENTED = 1,
-        _UVRSR_FAILED = 2,
-    }
-    #[repr(C)]
-    enum _Unwind_VRS_RegClass {
-        _UVRSC_CORE = 0,
-        _UVRSC_VFP = 1,
-        _UVRSC_FPA = 2,
-        _UVRSC_WMMXD = 3,
-        _UVRSC_WMMXC = 4,
-    }
-    use _Unwind_VRS_RegClass::*;
-    #[repr(C)]
-    enum _Unwind_VRS_DataRepresentation {
-        _UVRSD_UINT32 = 0,
-        _UVRSD_VFPX = 1,
-        _UVRSD_FPAX = 2,
-        _UVRSD_UINT64 = 3,
-        _UVRSD_FLOAT = 4,
-        _UVRSD_DOUBLE = 5,
-    }
-    use _Unwind_VRS_DataRepresentation::*;
-
-    pub const UNWIND_POINTER_REG: c_int = 12;
-    pub const UNWIND_SP_REG: c_int = 13;
-    pub const UNWIND_IP_REG: c_int = 15;
-
-    #[cfg_attr(all(feature = "llvm-libunwind",
-                   any(target_os = "fuchsia", target_os = "linux")),
-               link(name = "unwind", kind = "static"))]
-    extern "C" {
-        fn _Unwind_VRS_Get(ctx: *mut _Unwind_Context,
-                           regclass: _Unwind_VRS_RegClass,
-                           regno: _Unwind_Word,
-                           repr: _Unwind_VRS_DataRepresentation,
-                           data: *mut c_void)
-                           -> _Unwind_VRS_Result;
-
-        fn _Unwind_VRS_Set(ctx: *mut _Unwind_Context,
-                           regclass: _Unwind_VRS_RegClass,
-                           regno: _Unwind_Word,
-                           repr: _Unwind_VRS_DataRepresentation,
-                           data: *mut c_void)
-                           -> _Unwind_VRS_Result;
-    }
-
-    // On Android or ARM/Linux, these are implemented as macros:
-
-    pub unsafe fn _Unwind_GetGR(ctx: *mut _Unwind_Context, reg_index: c_int) -> _Unwind_Word {
-        let mut val: _Unwind_Word = 0;
-        _Unwind_VRS_Get(ctx, _UVRSC_CORE, reg_index as _Unwind_Word, _UVRSD_UINT32,
-                        &mut val as *mut _ as *mut c_void);
-        val
-    }
-
-    pub unsafe fn _Unwind_SetGR(ctx: *mut _Unwind_Context, reg_index: c_int, value: _Unwind_Word) {
-        let mut value = value;
-        _Unwind_VRS_Set(ctx, _UVRSC_CORE, reg_index as _Unwind_Word, _UVRSD_UINT32,
-                        &mut value as *mut _ as *mut c_void);
-    }
-
-    pub unsafe fn _Unwind_GetIP(ctx: *mut _Unwind_Context)
-                                -> _Unwind_Word {
-        let val = _Unwind_GetGR(ctx, UNWIND_IP_REG);
-        (val & !1) as _Unwind_Word
-    }
-
-    pub unsafe fn _Unwind_SetIP(ctx: *mut _Unwind_Context,
-                                value: _Unwind_Word) {
-        // Propagate thumb bit to instruction pointer
-        let thumb_state = _Unwind_GetGR(ctx, UNWIND_IP_REG) & 1;
-        let value = value | thumb_state;
-        _Unwind_SetGR(ctx, UNWIND_IP_REG, value);
-    }
-
-    pub unsafe fn _Unwind_GetIPInfo(ctx: *mut _Unwind_Context,
-                                    ip_before_insn: *mut c_int)
-                                    -> _Unwind_Word {
-        *ip_before_insn = 0;
-        _Unwind_GetIP(ctx)
-    }
-
-    // This function also doesn't exist on Android or ARM/Linux, so make it a no-op
-    pub unsafe fn _Unwind_FindEnclosingFunction(pc: *mut c_void) -> *mut c_void {
-        pc
-    }
-}
-} // cfg_if!
-
-cfg_if::cfg_if! {
-if #[cfg(not(all(target_os = "ios", target_arch = "arm")))] {
-    // Not 32-bit iOS
-    #[cfg_attr(all(feature = "llvm-libunwind",
-                   any(target_os = "fuchsia", target_os = "linux")),
-               link(name = "unwind", kind = "static"))]
-    extern "C" {
-        #[unwind(allowed)]
-        pub fn _Unwind_RaiseException(exception: *mut _Unwind_Exception) -> _Unwind_Reason_Code;
-        pub fn _Unwind_Backtrace(trace: _Unwind_Trace_Fn,
-                                 trace_argument: *mut c_void)
-                                 -> _Unwind_Reason_Code;
-    }
-} else {
-    // 32-bit iOS uses SjLj and does not provide _Unwind_Backtrace()
-    #[cfg_attr(all(feature = "llvm-libunwind",
-                   any(target_os = "fuchsia", target_os = "linux")),
-               link(name = "unwind", kind = "static"))]
-    extern "C" {
-        #[unwind(allowed)]
-        pub fn _Unwind_SjLj_RaiseException(e: *mut _Unwind_Exception) -> _Unwind_Reason_Code;
-    }
-
-    #[inline]
-    pub unsafe fn _Unwind_RaiseException(exc: *mut _Unwind_Exception) -> _Unwind_Reason_Code {
-        _Unwind_SjLj_RaiseException(exc)
-    }
-}
-} // cfg_if!
-
-cfg_if::cfg_if! {
-if #[cfg(all(windows, target_arch = "x86_64", target_env = "gnu"))] {
-    // We declare these as opaque types. This is fine since you just need to
-    // pass them to _GCC_specific_handler and forget about them.
-    pub enum EXCEPTION_RECORD {}
-    pub type LPVOID = *mut c_void;
-    pub enum CONTEXT {}
-    pub enum DISPATCHER_CONTEXT {}
-    pub type EXCEPTION_DISPOSITION = c_int;
-    type PersonalityFn = unsafe extern "C" fn(version: c_int,
-                                              actions: _Unwind_Action,
-                                              exception_class: _Unwind_Exception_Class,
-                                              exception_object: *mut _Unwind_Exception,
-                                              context: *mut _Unwind_Context)
-                                              -> _Unwind_Reason_Code;
-
-    extern "C" {
-        pub fn _GCC_specific_handler(exceptionRecord: *mut EXCEPTION_RECORD,
-                                establisherFrame: LPVOID,
-                                contextRecord: *mut CONTEXT,
-                                dispatcherContext: *mut DISPATCHER_CONTEXT,
-                                personality: PersonalityFn)
-                                -> EXCEPTION_DISPOSITION;
-    }
-}
-} // cfg_if!
+#[cfg(all(target_vendor = "fortanix", target_env = "sgx"))]
+#[link(name = "unwind", kind = "static", modifiers = "-bundle")]
+extern "C" {}

@@ -3,7 +3,7 @@ mod func;
 mod prog;
 mod value;
 
-pub fn emit(ir: &caer_ir::env::Env) {
+pub fn emit(ir: &caer_ir::module::Module) {
     inkwell::targets::Target::initialize_native(&inkwell::targets::InitializationConfig::default())
         .unwrap();
 

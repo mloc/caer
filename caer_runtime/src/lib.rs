@@ -1,5 +1,4 @@
 #![feature(arbitrary_enum_discriminant)]
-#![feature(unwind_attributes)]
 #![feature(c_unwind)]
 
 mod alloc;
@@ -14,6 +13,7 @@ mod gc_stackmap;
 mod heap_object;
 pub mod list;
 mod meta_runtime;
+mod rtti;
 pub mod runtime;
 mod string;
 pub mod string_table;

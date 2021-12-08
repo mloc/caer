@@ -4,6 +4,7 @@ use caer_types::layout;
 use inkwell::types::BasicType;
 
 /// Only way of getting addressspace(1) in inkwell, for now
+/// Not really needed currently while using explicit forms
 pub const GC_ADDRESS_SPACE: inkwell::AddressSpace = inkwell::AddressSpace::Global;
 
 #[derive(Debug)]
@@ -112,28 +113,50 @@ pub struct RtFuncTyBundle<'ctx> {
     pub string_type: inkwell::types::StructType<'ctx>,
     pub string_type_ptr: inkwell::types::PointerType<'ctx>,
 
-    pub rt_type: inkwell::types::ArrayType<'ctx>,
+    pub rt_type: inkwell::types::StructType<'ctx>,
     pub vt_entry_type: inkwell::types::StructType<'ctx>,
+
+    pub ref_type: inkwell::types::StructType<'ctx>,
 
     pub landingpad_type: inkwell::types::StructType<'ctx>,
 }
 
 impl<'ctx> RtFuncTyBundle<'ctx> {
     fn new(ctx: &'ctx inkwell::context::Context) -> Self {
-        let val_type = ctx.struct_type(&[ctx.i32_type().into(), ctx.i64_type().into()], false);
+        let val_type = ctx.named_struct_type(
+            &[
+                // Disc
+                ctx.i8_type().into(),
+                // Value for most, vtable ptr for ref
+                ctx.i64_type().into(),
+                // Ptr for ref, unused for rest
+                ctx.i64_type().into(),
+            ],
+            false,
+            "val",
+        );
         let val_type_ptr = val_type.ptr_type(GC_ADDRESS_SPACE);
 
         let opaque_type = ctx.opaque_struct_type("opaque");
         let opaque_type_ptr = opaque_type.ptr_type(inkwell::AddressSpace::Generic);
 
-        let rt_type = ctx
-            .i8_type()
-            .array_type(size_of::<caer_runtime::runtime::Runtime>() as u32);
+        let rt_type = ctx.named_struct_type(
+            &[ctx
+                .i8_type()
+                .array_type(size_of::<caer_runtime::runtime::Runtime>() as u32)
+                .into()],
+            false,
+            "runtime",
+        );
 
-        let arg_pack_tuple_type = ctx.struct_type(&[ctx.i64_type().into(), val_type.into()], false);
+        let arg_pack_tuple_type = ctx.named_struct_type(
+            &[ctx.i64_type().into(), val_type.into()],
+            false,
+            "arg_pack_tuple",
+        );
         let arg_pack_tuple_type_ptr = arg_pack_tuple_type.ptr_type(inkwell::AddressSpace::Generic);
 
-        let arg_pack_type = ctx.struct_type(
+        let arg_pack_type = ctx.named_struct_type(
             &[
                 ctx.i64_type().into(),
                 val_type.ptr_type(inkwell::AddressSpace::Generic).into(),
@@ -142,6 +165,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
                 val_type.into(),
             ],
             false,
+            "arg_pack",
         );
 
         let proc_type = ctx.void_type().fn_type(
@@ -163,7 +187,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             false,
         );
 
-        let heap_header_type = ctx.struct_type(
+        let heap_header_type = ctx.named_struct_type(
             &[
                 // kind
                 ctx.i8_type().into(),
@@ -171,19 +195,21 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
                 ctx.i8_type().into(),
             ],
             false,
+            "heap_header",
         );
 
-        let datum_common_type = ctx.struct_type(
+        let datum_common_type = ctx.named_struct_type(
             &[
                 heap_header_type.into(),
                 // ty id
-                ctx.i32_type().into(),
+                //ctx.i32_type().into(),
             ],
             false,
+            "datum_header",
         );
         let datum_common_type_ptr = datum_common_type.ptr_type(GC_ADDRESS_SPACE);
 
-        let string_type = ctx.struct_type(
+        let string_type = ctx.named_struct_type(
             &[
                 heap_header_type.into(),
                 // size
@@ -194,11 +220,14 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
                     .into(),
             ],
             false,
+            "rt_string",
         );
         let string_type_ptr = string_type.ptr_type(GC_ADDRESS_SPACE);
 
-        let vt_entry_type = ctx.struct_type(
+        let vt_entry_type = ctx.named_struct_type(
             &[
+                // type id
+                ctx.i32_type().into(),
                 // size
                 ctx.i64_type().into(),
                 // var_get fn ptr
@@ -206,7 +235,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
                     .fn_type(
                         &[
                             datum_common_type_ptr.into(),
-                            ctx.i64_type().into(),
+                            string_type_ptr.into(),
                             val_type_ptr.into(),
                         ],
                         false,
@@ -218,7 +247,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
                     .fn_type(
                         &[
                             datum_common_type_ptr.into(),
-                            ctx.i64_type().into(),
+                            string_type_ptr.into(),
                             val_type_ptr.into(),
                         ],
                         false,
@@ -230,7 +259,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
                     .ptr_type(inkwell::AddressSpace::Generic)
                     .fn_type(
                         &[
-                            ctx.i64_type().into(),
+                            string_type_ptr.into(),
                             rt_type.ptr_type(inkwell::AddressSpace::Generic).into(),
                         ],
                         false,
@@ -239,14 +268,28 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
                     .into(),
             ],
             false,
+            "vt_entry",
         );
 
-        let landingpad_type = ctx.struct_type(
+        // Fat pointer, rename?
+        let ref_type = ctx.named_struct_type(
+            &[
+                vt_entry_type
+                    .ptr_type(inkwell::AddressSpace::Generic)
+                    .into(),
+                opaque_type.ptr_type(GC_ADDRESS_SPACE).into(),
+            ],
+            false,
+            "ref",
+        );
+
+        let landingpad_type = ctx.named_struct_type(
             &[
                 opaque_type.ptr_type(inkwell::AddressSpace::Generic).into(),
                 ctx.i32_type().into(),
             ],
             false,
+            "landingpad",
         );
 
         RtFuncTyBundle {
@@ -265,6 +308,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             string_type_ptr,
             rt_type,
             vt_entry_type,
+            ref_type,
             landingpad_type,
         }
     }
@@ -368,7 +412,7 @@ rt_funcs! {
         (rt_val_cloned, void_type~val, [val_type~ptr]),
         (rt_val_drop, void_type~val, [val_type~ptr]),
         (rt_val_cast_string_val, string_type~ptr, [val_type~ptr, rt_type~gptr]),
-        (rt_val_call_proc, void_type~val, [val_type~ptr, i64_type~val, arg_pack_type~ptr, rt_type~gptr, val_type~ptr]),
+        (rt_val_call_proc, void_type~val, [val_type~ptr, string_type~ptr, arg_pack_type~ptr, rt_type~gptr, val_type~ptr]),
 
         (rt_runtime_init, void_type~val, [rt_type~gptr, i8_type~gptr, i8_type~gptr, vt_entry_type~gptr, opaque_type_ptr~gptr, i64_type~val]),
         (rt_runtime_alloc_datum, datum_common_type~ptr, [rt_type~gptr, i32_type~val]),

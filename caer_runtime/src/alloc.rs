@@ -7,6 +7,8 @@ use std::mem::ManuallyDrop;
 use std::ops::Deref;
 use std::ptr::{copy_nonoverlapping, NonNull};
 
+use caer_types::id::InstanceTypeId;
+
 #[derive(Debug)]
 pub struct Alloc {
     // TODO: replace with UnsafeCell for speeeed?
@@ -16,6 +18,7 @@ pub struct Alloc {
 #[derive(Debug)]
 struct AllocRecord {
     layout: Layout,
+    ty_id: InstanceTypeId,
 }
 
 impl Alloc {
@@ -26,14 +29,14 @@ impl Alloc {
     }
 
     // TODO: tailor more to the types of objects we're allocating, revisit alignment
-    pub fn alloc(&mut self, size: usize) -> NonNull<u8> {
+    pub fn alloc(&mut self, size: usize, ty_id: InstanceTypeId) -> NonNull<u8> {
         let layout = Layout::from_size_align(size, 8).unwrap();
-        self.allocate(layout)
+        self.allocate(layout, ty_id)
     }
 
-    pub fn alloc_emplace<T>(&self, obj: T) -> NonNull<T> {
+    pub fn alloc_emplace<T>(&self, obj: T, ty_id: InstanceTypeId) -> NonNull<T> {
         let layout = Layout::for_value(&obj);
-        let ptr = self.allocate(layout).cast();
+        let ptr = self.allocate(layout, ty_id).cast();
         let obj = ManuallyDrop::new(obj);
         unsafe {
             copy_nonoverlapping(obj.deref(), ptr.as_ptr(), 1);
@@ -42,10 +45,10 @@ impl Alloc {
     }
 
     // alloc api, ish
-    fn allocate(&self, layout: Layout) -> NonNull<u8> {
+    fn allocate(&self, layout: Layout, ty_id: InstanceTypeId) -> NonNull<u8> {
         //let ptr = alloc::Global.allocate_zeroed(layout)?;
         let ptr = unsafe { NonNull::new(alloc::alloc_zeroed(layout)).unwrap() };
-        let record = AllocRecord { layout };
+        let record = AllocRecord { layout, ty_id };
         self.allocations.borrow_mut().insert(ptr.cast(), record);
         ptr
     }
@@ -58,15 +61,14 @@ impl Alloc {
     }
 
     // Mut here is more about ensuring the closure can't call back into self.
-    pub fn for_each<F>(&mut self, f: F)
+    pub fn for_each<F>(&mut self, mut f: F)
     where
-        F: FnMut(NonNull<u8>),
+        F: FnMut(NonNull<u8>, InstanceTypeId),
     {
         self.allocations
             .borrow()
             .iter()
-            .map(|(p, _)| *p)
-            .for_each(f);
+            .for_each(|(p, r)| f(*p, r.ty_id));
     }
 
     pub fn contains(&self, ptr: NonNull<u8>) -> bool {

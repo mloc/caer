@@ -166,13 +166,13 @@ impl CoroCtx {
             unsafe { cargs.2.as_mut().on_wake() };
             let mut ret = Val::Null;
             let pack = (&cargs.1.as_pack()) as *const _;
-            cargs.0(pack, cargs.2, (&mut ret) as *mut _);
+            cargs.0(pack, unsafe { cargs.2.as_mut() }, (&mut ret) as *mut _);
         }
         fn closure_entry(mut cargs: (ClosurePtr, ClosureArgs, NonNull<Runtime>)) {
             unsafe { cargs.2.as_mut().on_wake() };
             let mut ret = Val::Null;
             let env = cargs.1.environment.as_ptr();
-            cargs.0(env, cargs.2, (&mut ret) as *mut _);
+            cargs.0(env, unsafe { cargs.2.as_mut() }, (&mut ret) as *mut _);
         }
 
         let stack = self.ctx.create_stack(Some(STACK_SIZE));

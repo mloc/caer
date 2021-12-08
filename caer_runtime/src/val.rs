@@ -8,21 +8,21 @@ use caer_types::{layout, op};
 use ordered_float::OrderedFloat;
 
 use crate::arg_pack::ProcPack;
-use crate::datum::Datum;
 use crate::list::List;
+use crate::rtti::RttiRef;
 use crate::runtime::Runtime;
 use crate::string::{resolve_string, RtString};
 use crate::string_table::StringTable;
 
 // null must be first
 // TODO: not copy?
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Copy, Clone)]
-#[repr(C, u32)]
+#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]
+#[repr(C, u8)]
 pub enum Val {
     Null = layout::VAL_DISCRIM_NULL,
     Float(OrderedFloat<f32>) = layout::VAL_DISCRIM_FLOAT,
     String(Option<NonNull<RtString>>) = layout::VAL_DISCRIM_STRING,
-    Ref(Option<NonNull<Datum>>) = layout::VAL_DISCRIM_REF,
+    Ref(RttiRef) = layout::VAL_DISCRIM_REF,
 }
 
 #[no_mangle]
@@ -73,20 +73,20 @@ pub extern "C" fn rt_val_to_switch_disc(val: &Val) -> u32 {
         Val::Null => 0,
         Val::String(None) => 0,
         Val::String(Some(s)) => !(unsafe { s.as_ref() }.as_str().is_empty()) as u32,
-        Val::Ref(ptr) => ptr.is_some() as u32,
+        Val::Ref(ptr) => 1,
     }
 }
 
 #[no_mangle]
 pub extern "C" fn rt_val_print(val: &Val, rt: &mut Runtime) {
     let s = match val {
-        Val::Null | Val::Ref(None) => "null".into(),
+        Val::Null => "null".into(),
         Val::Float(n) => format!("{}", n),
         Val::String(None) => "".into(),
         Val::String(Some(s)) => unsafe { s.as_ref() }.as_str().into(),
-        _ => val.cast_string(rt).into(),
+        _ => val.cast_string(rt),
     };
-    println!("{}", s);
+    //println!("{}", s);
     rt.send_message(&messages::Server::Message(s));
 }
 
@@ -108,7 +108,7 @@ pub extern "C" fn rt_val_drop(val: &Val) {
 
 #[no_mangle]
 pub extern "C" fn rt_val_call_proc(
-    val: &Val, proc_name: StringId, args: &ProcPack, rt: &mut Runtime, out: &mut Val,
+    val: &Val, proc_name: &RtString, args: &ProcPack, rt: &mut Runtime, out: &mut Val,
 ) {
     val.call_proc(proc_name, args, rt, out)
 }
@@ -151,14 +151,13 @@ impl Val {
         }
     }
 
-    pub fn call_proc(self, proc_name: StringId, args: &ProcPack, rt: &mut Runtime, out: &mut Val) {
+    pub fn call_proc(self, proc_name: &RtString, args: &ProcPack, rt: &mut Runtime, out: &mut Val) {
         match self {
-            Val::Ref(Some(mut ptr)) => {
-                let datum_ref = unsafe { ptr.as_mut() };
-                let rt_ptr = NonNull::new(rt as _).unwrap();
-                let lookup_fn = rt.vtable[datum_ref.ty].proc_lookup;
-                let proc_fn = lookup_fn(proc_name, rt_ptr);
-                proc_fn(args, rt_ptr, out)
+            Val::Ref(rtti_ref) => {
+                // TODO: include src
+                let lookup_fn = rtti_ref.vptr.proc_lookup;
+                let proc_fn = lookup_fn(proc_name, rt);
+                proc_fn(args, rt, out)
             },
             _ => panic!("RTE can't call proc on val {:?}", self),
         }
@@ -229,8 +228,7 @@ impl Val {
     #[inline]
     pub fn try_cast_float(&self) -> Option<OrderedFloat<f32>> {
         match self {
-            // null ref is same as null. shrug.
-            Val::Null | Val::Ref(None) => Some(0f32.into()),
+            Val::Null => Some(0f32.into()),
             Val::Float(f) => Some(*f),
             _ => None,
         }
@@ -244,8 +242,7 @@ impl Val {
     #[inline]
     pub fn try_cast_int(&self) -> Option<i64> {
         match self {
-            // null ref is same as null. shrug.
-            Val::Null | Val::Ref(None) => Some(0),
+            Val::Null => Some(0),
             Val::Float(f) => Some(f.into_inner() as _),
             _ => None,
         }
@@ -259,12 +256,13 @@ impl Val {
     // TODO: use cow
     fn cast_string(&self, rt: &mut Runtime) -> String {
         match self {
-            Val::Null | Val::Ref(None) => "null".into(),
+            Val::Null => "null".into(),
             Val::Float(n) => n.to_string(),
             //Val::Int(n) => n.to_string(),
             Val::String(s) => resolve_string(*s).into(),
-            Val::Ref(Some(dp)) => {
-                let datum = unsafe { dp.as_ref() };
+            Val::Ref(rr) => {
+                todo!("ref stringing");
+                /*let datum = unsafe { rr.ptr.as_ref() };
                 let dty = datum.ty;
                 match rt.env.type_tree.types[dty].specialization {
                     Specialization::List => {
@@ -273,7 +271,7 @@ impl Val {
                         format!("{:?}", list)
                     },
                     Specialization::Datum => rt.env.type_tree.types[dty].path_string.clone(),
-                }
+                }*/
             },
         }
     }
@@ -292,8 +290,7 @@ impl Val {
             Val::Null => Val::Null,
             Val::Float(_) => Val::Float(0f32.into()),
             Val::String(_) => Val::String(None),
-            // TODO: rip and tear, ptr in ref is Bad
-            Val::Ref(_) => Val::Ref(None),
+            Val::Ref(_) => Val::Null,
         }
     }
 }

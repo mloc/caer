@@ -1,10 +1,12 @@
 use std::collections::{BTreeSet, HashMap};
 
+use caer_types::id::TypeId;
 use caer_types::ty;
 use ena::unify::{InPlace, Snapshot, UnificationTable, UnifyKey, UnifyValue};
 use index_vec::{Idx, IndexVec};
 use petgraph::graph::DiGraph;
 use thiserror::Error;
+use ty::Type;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct InferKey(u32);
@@ -37,13 +39,13 @@ impl Idx for InferKey {
 
 #[derive(Debug, Clone, Default)]
 pub struct InferValue {
-    tys: BTreeSet<ty::Complex>,
+    tys: BTreeSet<TypeId>,
     participating_keys: Vec<InferKey>,
     frozen: bool,
 }
 
 impl InferValue {
-    fn from_ty(ty: ty::Complex) -> Self {
+    fn from_ty(ty: TypeId) -> Self {
         Self {
             tys: std::iter::once(ty).collect(),
             participating_keys: Vec::new(),
@@ -51,25 +53,26 @@ impl InferValue {
         }
     }
 
-    pub fn as_ty(self) -> ty::Complex {
-        if self.tys.is_empty() {
-            ty::Complex::Any
-        } else if let Some(prim) = self.as_primitive() {
-            prim.into()
+    pub fn as_tys(self) -> BTreeSet<TypeId> {
+        self.tys
+        /*if self.tys.is_empty() {
+            TYPE_ID_ANY
+        } else if self.tys.len() == 1 {
+            self.tys.into_iter().next().unwrap()
         } else {
-            ty::Complex::OneOf(self.tys.clone())
-        }
+            Type::OneOf(self.tys)
+        }*/
     }
 
-    pub fn as_primitive(&self) -> Option<ty::Primitive> {
+    /*pub fn as_primitive(&self) -> Option<ty::Prim> {
         if self.tys.len() != 1 {
             return None;
         }
         match self.tys.iter().next() {
-            Some(ty::Complex::Primitive(prim)) => Some(*prim),
+            Some(Type::Primitive(prim)) => Some(*prim),
             _ => None,
         }
-    }
+    }*/
 
     fn freeze(&self) -> Self {
         Self {
@@ -110,8 +113,8 @@ impl UnifyValue for InferValue {
 pub enum InferUnifyError {
     #[error("attempted to unify frozen ty set {frozen:?} with incompatible ty set {target:?}")]
     UnifyFrozen {
-        frozen: BTreeSet<ty::Complex>,
-        target: BTreeSet<ty::Complex>,
+        frozen: BTreeSet<TypeId>,
+        target: BTreeSet<TypeId>,
     },
     #[error("exhausted all branches on Choice step")]
     ExhaustedChoices,
@@ -119,8 +122,8 @@ pub enum InferUnifyError {
 
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
 pub enum Rule {
-    Const(InferKey, ty::Complex),
-    ConstFreeze(InferKey, ty::Complex),
+    Const(InferKey, TypeId),
+    ConstFreeze(InferKey, TypeId),
     Equals(InferKey, InferKey),
 }
 

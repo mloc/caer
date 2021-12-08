@@ -13,26 +13,23 @@ pub fn scan_stack(state: &mut State, stackmap: &GcStackmap) {
             let record = stackmap.addr_to_record.get(&ip);
 
             if let Some(record) = record {
-                for location in record.locations.iter() {
-                    let ptr = match location.pointer {
-                        LocationPointer::Direct { reg, offset } => {
-                            let addr = (cursor.register(map_regnum(reg))? as i64) + (offset as i64);
-                            NonNull::new(addr as *mut u32).unwrap() // alignment?
-                        },
-                        LocationPointer::Indirect { reg, offset } => {
-                            let addr = (cursor.register(map_regnum(reg))? as i64) + (offset as i64);
-                            let ptr = unsafe { *(addr as *const *mut u32) };
-                            NonNull::new(ptr).unwrap()
-                        },
-                        _ => panic!("unhandled stackmap location: {:?}", location),
-                    };
+                let name = cursor.proc_name()?;
+                let offset = (cursor.ip()? as i64) - (cursor.proc_info()?.start() as i64);
 
-                    let name = cursor.proc_name()?;
-                    let offset = (cursor.ip()? as i64) - (cursor.proc_info()?.start() as i64);
+                for loc in record.root_locations.iter() {
+                    let ptr = resolve_pointer(&mut cursor, loc.location.pointer)?;
                     println!("found root at {:?} in {}+{}", ptr, name, offset);
-                    println!(" -> location: {:?}", location);
+                    println!(" -> location: {:?}", loc);
 
-                    state.add_root(ptr);
+                    state.add_root(ptr, loc.tag);
+                }
+
+                for loc in record.stack_locations.iter() {
+                    let ptr = resolve_pointer(&mut cursor, loc.pointer)?;
+                    println!("found stack val at {:?} in {}+{}", ptr, name, offset);
+                    println!(" -> location: {:?}", loc);
+
+                    state.add_stack_ptr(ptr);
                 }
             }
 
@@ -44,6 +41,23 @@ pub fn scan_stack(state: &mut State, stackmap: &GcStackmap) {
         Ok(())
     })
     .unwrap();
+}
+
+fn resolve_pointer(
+    cursor: &mut Cursor, pointer: LocationPointer,
+) -> Result<NonNull<u8>, libunwind_rs::Error> {
+    match pointer {
+        LocationPointer::Direct { reg, offset } => {
+            let addr = (cursor.register(map_regnum(reg))? as i64) + (offset as i64);
+            Ok(NonNull::new(addr as *mut u8).unwrap()) // alignment?
+        },
+        LocationPointer::Indirect { reg, offset } => {
+            let addr = (cursor.register(map_regnum(reg))? as i64) + (offset as i64);
+            let ptr = unsafe { *(addr as *const *mut u8) };
+            Ok(NonNull::new(ptr).unwrap())
+        },
+        _ => panic!("unhandled stackmap pointer: {:?}", pointer),
+    }
 }
 
 #[inline(always)]
