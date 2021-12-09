@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use caer_types::id::{FuncId, InstanceTypeId, StringId};
 use caer_types::instance::InstanceTypes;
 use caer_types::type_tree::{Specialization, TypeTree};
+use index_vec::IndexVec;
 
 use super::cfg::*;
 use crate::string::StringTable;
@@ -16,7 +17,7 @@ pub struct Module {
     pub type_tree: TypeTree,
     pub instances: InstanceTypes,
 
-    pub funcs: HashMap<FuncId, Function>,
+    pub funcs: IndexVec<FuncId, Function>,
     next_func_id: FuncId,
     pub types: TypeRepo,
 }
@@ -27,7 +28,7 @@ impl Module {
             string_table: strings,
             type_tree,
             instances,
-            funcs: HashMap::new(),
+            funcs: IndexVec::new(),
             next_func_id: 0.into(),
             types: TypeRepo::new(),
         }
@@ -40,8 +41,8 @@ impl Module {
     }
 
     pub fn assimilate_func(&mut self, func: Function) {
-        assert!(!self.funcs.contains_key(&func.id));
-        self.funcs.insert(func.id, func);
+        assert_eq!(func.id, self.funcs.next_idx());
+        self.funcs.push(func);
     }
 
     pub fn intern_string(&mut self, s: impl Into<String> + AsRef<str>) -> StringId {

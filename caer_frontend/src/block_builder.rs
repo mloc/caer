@@ -26,7 +26,7 @@ pub struct BlockBuilder {
     finalized: EnsureFinalize,
 }
 
-impl<'f> BlockBuilder {
+impl<'f, 'ot> BlockBuilder {
     pub fn new(block: cfg::Block) -> Self {
         Self {
             root_block_id: block.id,
@@ -44,33 +44,33 @@ impl<'f> BlockBuilder {
         self.block.terminator = terminator;
     }
 
-    pub fn done(self, fb: &mut FuncBuilder<'f>) -> BlockId {
+    pub fn done(self, fb: &mut FuncBuilder<'f, 'ot>) -> BlockId {
         let id = self.root_block_id;
         self.finalize(fb);
         id
     }
 
-    fn finalize(mut self, fb: &mut FuncBuilder<'f>) {
+    fn finalize(mut self, fb: &mut FuncBuilder<'f, 'ot>) {
         self.finalized.0 = true;
         fb.finalize_block(self.block);
     }
 
-    fn cur_block_done(&mut self, fb: &mut FuncBuilder<'f>, replacement: cfg::Block) {
+    fn cur_block_done(&mut self, fb: &mut FuncBuilder<'f, 'ot>, replacement: cfg::Block) {
         let mut swp = replacement;
         std::mem::swap(&mut self.block, &mut swp);
         fb.finalize_block(swp);
     }
 
     pub fn build_stmts(
-        &mut self, fb: &mut FuncBuilder<'f>,
-        stmts: impl Iterator<Item = &'f ast::Spanned<ast::Statement>>,
+        &mut self, fb: &mut FuncBuilder<'f, 'ot>,
+        stmts: impl Iterator<Item = &'ot ast::Spanned<ast::Statement>>,
     ) {
         for stmt in stmts {
             self.build_stmt(fb, &stmt.elem);
         }
     }
 
-    pub fn build_stmt(&mut self, fb: &mut FuncBuilder<'f>, stmt: &'f ast::Statement) {
+    pub fn build_stmt(&mut self, fb: &mut FuncBuilder<'f, 'ot>, stmt: &'ot ast::Statement) {
         match stmt {
             ast::Statement::Var(v) => {
                 let var = self.add_var(fb, &v.var_type, &v.name);
@@ -294,7 +294,7 @@ impl<'f> BlockBuilder {
     }
 
     fn add_var(
-        &mut self, fb: &mut FuncBuilder<'f>, var_type: &ast::VarType, var_name: &str,
+        &mut self, fb: &mut FuncBuilder<'f, 'ot>, var_type: &ast::VarType, var_name: &str,
     ) -> VarId {
         // TODO: care about var flags?
         let name_id = fb.ir.intern_string(var_name);
@@ -319,7 +319,7 @@ impl<'f> BlockBuilder {
     }
 
     fn build_expr_base(
-        &mut self, fb: &mut FuncBuilder<'f>, term: &ast::Spanned<ast::Term>,
+        &mut self, fb: &mut FuncBuilder<'f, 'ot>, term: &ast::Spanned<ast::Term>,
         unary_ops: &[ast::UnaryOp], follow: &[ast::Spanned<ast::Follow>],
     ) -> LocalId {
         let mut local = self.build_term(fb, &term.elem);
@@ -333,7 +333,8 @@ impl<'f> BlockBuilder {
     }
 
     fn build_follow(
-        &mut self, fb: &mut FuncBuilder<'f>, local: LocalId, follow: &ast::Spanned<ast::Follow>,
+        &mut self, fb: &mut FuncBuilder<'f, 'ot>, local: LocalId,
+        follow: &ast::Spanned<ast::Follow>,
     ) -> LocalId {
         match &follow.elem {
             ast::Follow::Field(kind, field) => {
@@ -350,7 +351,7 @@ impl<'f> BlockBuilder {
     }
 
     fn build_expr_lhs(
-        &mut self, fb: &mut FuncBuilder<'f>, expr: &ast::Expression,
+        &mut self, fb: &mut FuncBuilder<'f, 'ot>, expr: &ast::Expression,
     ) -> (Option<LocalId>, StringId) {
         match expr {
             ast::Expression::Base {
@@ -391,7 +392,7 @@ impl<'f> BlockBuilder {
     }
 
     fn build_assign(
-        &mut self, fb: &mut FuncBuilder<'f>, base: Option<LocalId>, var: StringId,
+        &mut self, fb: &mut FuncBuilder<'f, 'ot>, base: Option<LocalId>, var: StringId,
         expr: &ast::Expression,
     ) {
         let asg_expr = self.build_expr(fb, expr);
@@ -407,7 +408,7 @@ impl<'f> BlockBuilder {
         }
     }
 
-    fn build_var_load(&mut self, fb: &mut FuncBuilder<'f>, var: VarId) -> LocalId {
+    fn build_var_load(&mut self, fb: &mut FuncBuilder<'f, 'ot>, var: VarId) -> LocalId {
         // TODO var ty fix
         let holder = fb.add_local(self.block.scope, ty::Type::Any);
         if let Some(assoc) = fb.func.vars[var].assoc_dty {
@@ -419,7 +420,7 @@ impl<'f> BlockBuilder {
 
     // TODO: ERRH(fe)
     fn build_datum_load(
-        &mut self, fb: &mut FuncBuilder<'f>, datum_local: LocalId, var: StringId,
+        &mut self, fb: &mut FuncBuilder<'f, 'ot>, datum_local: LocalId, var: StringId,
         index_kind: ast::IndexKind,
     ) -> LocalId {
         let field_dty_id = self.validate_datum_index(fb, datum_local, var, index_kind);
@@ -434,7 +435,7 @@ impl<'f> BlockBuilder {
     }
 
     fn build_datum_call(
-        &mut self, fb: &mut FuncBuilder<'f>, datum_local: LocalId, proc_name: StringId,
+        &mut self, fb: &mut FuncBuilder<'f, 'ot>, datum_local: LocalId, proc_name: StringId,
         args: Vec<LocalId>, index_kind: ast::IndexKind,
     ) -> LocalId {
         match index_kind {
@@ -473,7 +474,7 @@ impl<'f> BlockBuilder {
     // TODO: ERRH(fe)
     /// Returns the dtype ID of the indexed field, if indexed with a .-like operator
     fn validate_datum_index(
-        &mut self, fb: &mut FuncBuilder<'f>, datum_local: LocalId, var: StringId,
+        &mut self, fb: &mut FuncBuilder<'f, 'ot>, datum_local: LocalId, var: StringId,
         index_kind: ast::IndexKind,
     ) -> Option<PathTypeId> {
         match index_kind {
@@ -502,7 +503,7 @@ impl<'f> BlockBuilder {
         }
     }
 
-    fn build_expr(&mut self, fb: &mut FuncBuilder<'f>, expr: &ast::Expression) -> LocalId {
+    fn build_expr(&mut self, fb: &mut FuncBuilder<'f, 'ot>, expr: &ast::Expression) -> LocalId {
         match expr {
             ast::Expression::Base {
                 unary,
@@ -554,7 +555,7 @@ impl<'f> BlockBuilder {
 
     // build a binop with short-circuiting
     fn build_logical_binop(
-        &mut self, fb: &mut FuncBuilder<'f>, lhs: &ast::Expression, rhs: &ast::Expression,
+        &mut self, fb: &mut FuncBuilder<'f, 'ot>, lhs: &ast::Expression, rhs: &ast::Expression,
         op: &ast::BinaryOp,
     ) -> LocalId {
         // TODO: nameless vars
@@ -602,13 +603,13 @@ impl<'f> BlockBuilder {
         res
     }
 
-    fn build_literal(&mut self, fb: &mut FuncBuilder<'f>, lit: cfg::Literal) -> LocalId {
+    fn build_literal(&mut self, fb: &mut FuncBuilder<'f, 'ot>, lit: cfg::Literal) -> LocalId {
         let local = fb.add_local(self.block.scope, lit.get_ty());
         self.block.push_op(cfg::Op::Literal(local, lit));
         local
     }
 
-    fn build_term(&mut self, fb: &mut FuncBuilder<'f>, term: &ast::Term) -> LocalId {
+    fn build_term(&mut self, fb: &mut FuncBuilder<'f, 'ot>, term: &ast::Term) -> LocalId {
         match term {
             ast::Term::Expr(e) => self.build_expr(fb, e),
             ast::Term::Null => self.build_literal(fb, cfg::Literal::Null),

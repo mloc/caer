@@ -7,29 +7,36 @@ use caer_types::ty;
 use dreammaker::objtree::{self, ProcValue};
 
 use super::func_builder::FuncBuilder;
+use crate::ir_builder::{FuncQueue, FuncRecipe};
 use crate::objtree_wrapper::ObjtreeWrapper;
 
-pub struct ProcBuilder<'a> {
+pub struct ProcBuilder<'a, 'ot> {
     // should be ProcId, eventually
     pub id: FuncId,
+    fq: &'a mut FuncQueue<'ot>,
     pub ir: &'a mut Module,
-    pub objtree: &'a ObjtreeWrapper<'a>,
+    pub objtree: &'ot ObjtreeWrapper<'ot>,
 }
 
-impl<'a> ProcBuilder<'a> {
+impl<'a, 'ot> ProcBuilder<'a, 'ot> {
     pub fn build(
-        func: Function, ir: &'a mut Module, objtree: &'a ObjtreeWrapper<'a>, body: &'a ProcBody,
+        func: &'a mut Function, fq: &'a mut FuncQueue<'ot>, ir: &'a mut Module,
+        objtree: &'ot ObjtreeWrapper<'ot>, body: ProcBody<'ot>, parent: Option<FuncId>,
     ) -> FuncId {
         let pb = Self {
+            fq,
             id: func.id,
             ir,
             objtree,
         };
 
-        pb.build_proc(func, body)
+        pb.build_proc(func, body, parent)
     }
 
-    fn build_proc(mut self, mut func: Function, body: &'a ProcBody) -> FuncId {
+    fn build_proc(
+        mut self, func: &'a mut Function, body: ProcBody<'ot>, parent: Option<FuncId>,
+    ) -> FuncId {
+        func.parent = parent;
         func.new_scope(func.global_scope);
 
         match body {
@@ -38,7 +45,7 @@ impl<'a> ProcBuilder<'a> {
         }
     }
 
-    fn build_ast_proc(&mut self, mut func: Function, pv: &ProcValue) -> FuncId {
+    fn build_ast_proc(&mut self, func: &'a mut Function, pv: &'ot ProcValue) -> FuncId {
         let mut proc_spec = ProcSpec::default();
 
         for (i, param) in pv.parameters.iter().enumerate() {
@@ -53,7 +60,7 @@ impl<'a> ProcBuilder<'a> {
         proc_spec.names.sort_unstable_by_key(|(ref s, _)| *s);
         func.calling_spec = Some(CallingSpec::Proc(proc_spec));
 
-        let mut func_builder = FuncBuilder::for_proc(&mut self.ir, self.objtree, func);
+        let mut func_builder = FuncBuilder::for_proc(self.fq, self.ir, self.objtree, func);
 
         let body = if let objtree::Code::Present(ref b) = pv.code {
             b
@@ -64,7 +71,8 @@ impl<'a> ProcBuilder<'a> {
         func_builder.finalize()
     }
 
-    fn build_builtin(&mut self, mut func: Function, builtin: &BuiltinProc) -> FuncId {
+    // wow this is awful!! TODO: Better builtin
+    fn build_builtin(&mut self, func: &'a mut Function, builtin: BuiltinProc) -> FuncId {
         match builtin {
             BuiltinProc::Sleep => {
                 let s_delay = self.ir.intern_string("delay");
@@ -75,7 +83,7 @@ impl<'a> ProcBuilder<'a> {
                 proc_spec.params.push(s_delay);
                 proc_spec.names.push((s_delay, 0));
                 func.calling_spec = Some(CallingSpec::Proc(proc_spec));
-                let mut func_builder = FuncBuilder::for_proc(&mut self.ir, self.objtree, func);
+                let mut func_builder = FuncBuilder::for_proc(self.fq, self.ir, self.objtree, func);
                 func_builder.build_raw_sleep(id);
                 func_builder.func.builtin = true;
                 func_builder.finalize()
@@ -109,13 +117,13 @@ impl<'a> ProcBuilder<'a> {
     }*/
 }
 
-#[derive(Clone, Debug)]
-pub enum ProcBody {
-    Ast(objtree::ProcValue),
+#[derive(Clone, Copy, Debug)]
+pub enum ProcBody<'ot> {
+    Ast(&'ot objtree::ProcValue),
     Builtin(BuiltinProc),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum BuiltinProc {
     Sleep,
 }

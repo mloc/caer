@@ -72,8 +72,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     pub fn build_funcs(&mut self) {
-        for i in 0..self.env.funcs.len() {
-            let func = &self.env.funcs[&i.into()];
+        for func in self.env.funcs.iter() {
             self.add_func(func);
         }
     }
@@ -85,7 +84,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 
     pub fn lookup_global_proc(&self, name: StringId) -> FuncId {
         let global_dty = self.env.type_tree.global_type();
-        global_dty.proc_lookup[&name].top_proc
+        global_dty.proc_lookup[&name].top_func
     }
 
     fn add_func(&mut self, ir_func: &'a Function) {
@@ -174,10 +173,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     fn finalize_main(&self, block: inkwell::basic_block::BasicBlock, entry_func: FuncId) {
         self.ctx.builder.position_at_end(block);
 
-        let mut func_specs = IndexVec::with_capacity(self.env.funcs.len());
-        for i in 0..self.env.funcs.len() {
-            func_specs.push(self.env.funcs[&i.into()].get_spec());
-        }
+        let func_specs = self.env.funcs.iter().map(|f| f.get_spec()).collect();
 
         // TODO: move file emit to a better place
         let rt_env = RtEnvBundle {
@@ -676,7 +672,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             cases.push((disc_val, case_block));
             phi_incoming.push((proc_index_val, case_block));
             proc_lookup_vals.push(
-                self.sym[ty.pty.proc_lookup[proc_name].top_proc]
+                self.sym[ty.pty.proc_lookup[proc_name].top_func]
                     .as_global_value()
                     .as_pointer_value(),
             );

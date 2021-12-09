@@ -113,5 +113,5 @@ pub struct VarInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcInfo {
     pub name: StringId,
-    pub top_proc: FuncId,
+    pub top_func: FuncId,
 }

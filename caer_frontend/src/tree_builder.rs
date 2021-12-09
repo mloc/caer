@@ -10,6 +10,7 @@ use dreammaker::objtree::{self, NodeIndex};
 use index_vec::IndexVec;
 use ir::string::StringTable;
 
+use crate::ir_builder::FuncRecipe;
 use crate::objtree_wrapper::ObjtreeWrapper;
 use crate::proc_builder::{BuiltinProc, ProcBody};
 
@@ -17,14 +18,14 @@ pub struct TreeBundle<'a> {
     pub type_tree: TypeTree,
     pub instances: InstanceTypes,
     pub objtree: ObjtreeWrapper<'a>,
-    pub funcs: IndexVec<FuncId, (ProcBody, Option<FuncId>)>,
+    pub funcs: IndexVec<FuncId, FuncRecipe<'a>>,
 }
 
 /// Walks the object tree, generating a type tree and queueing work for CfgBuilder.
 pub struct TreeBuilder<'a, 's> {
     objtree: &'a objtree::ObjectTree,
     strings: &'s mut StringTable,
-    funcs: IndexVec<FuncId, (ProcBody, Option<FuncId>)>,
+    funcs: IndexVec<FuncId, FuncRecipe<'a>>,
 
     types: IndexVec<PathTypeId, PathType>,
 
@@ -178,7 +179,7 @@ impl<'a, 's> TreeBuilder<'a, 's> {
             None => (Vec::new(), HashMap::new()),
         };
 
-        for (name, tp) in oty.procs.iter() {
+        for (name, tp) in oty.get().procs.iter() {
             let name_id = self.strings.put(name);
             assert!(!tp.value.is_empty());
 
@@ -194,14 +195,17 @@ impl<'a, 's> TreeBuilder<'a, 's> {
                         // At this point, proc_lookup hasn't been modified for this proc since it
                         // was cloned from the parent type.
                         } else if let Some(parent_proc) = proc_lookup.get(&name_id) {
-                            parent = Some(parent_proc.top_proc)
+                            parent = Some(parent_proc.top_func)
                         // Root proc
                         } else {
                             parent = None
                         }
 
                         top_func = Some(func_id);
-                        self.funcs.push((ProcBody::Ast(pv.clone()), parent));
+                        self.funcs.push(FuncRecipe::ForProc {
+                            body: ProcBody::Ast(&pv),
+                            parent,
+                        });
                     },
                     objtree::Code::Invalid(err) => panic!("oh no dm error {:?}", err),
                     objtree::Code::Builtin => top_func = self.handle_builtin(oty, name, tp),
@@ -215,7 +219,7 @@ impl<'a, 's> TreeBuilder<'a, 's> {
                         if tp.declaration.is_some() {
                             panic!("ty {:?} redecls proc {}", oty, name);
                         }
-                        pi.top_proc = top;
+                        pi.top_func = top;
                     },
                     None => {
                         if tp.declaration.is_none() {
@@ -226,7 +230,7 @@ impl<'a, 's> TreeBuilder<'a, 's> {
                         let pi = type_tree::ProcInfo {
                             name: name_id,
                             // wow nasty
-                            top_proc: top,
+                            top_func: top,
                         };
                         proc_lookup.insert(name_id, pi);
                     },
@@ -276,7 +280,10 @@ impl<'a, 's> TreeBuilder<'a, 's> {
         };
 
         let func_id = self.funcs.next_idx();
-        self.funcs.push((ProcBody::Builtin(builtin), None));
+        self.funcs.push(FuncRecipe::ForProc {
+            body: ProcBody::Builtin(builtin),
+            parent: None,
+        });
         Some(func_id)
     }
 

@@ -9,24 +9,28 @@ use dreammaker::{ast, objtree};
 use index_vec::IndexVec;
 
 use crate::block_builder::BlockBuilder;
+use crate::ir_builder::{FuncQueue, FuncRecipe};
 use crate::objtree_wrapper::ObjtreeWrapper;
 
-pub struct FuncBuilder<'a> {
+pub struct FuncBuilder<'a, 'ot> {
+    pub(crate) fq: &'a mut FuncQueue<'ot>,
     pub(crate) ir: &'a mut Module,
     // TODO: can we get rid of this?
-    pub(crate) objtree: &'a ObjtreeWrapper<'a>,
-    pub(crate) func: cfg::Function,
+    pub(crate) objtree: &'ot ObjtreeWrapper<'ot>,
+    pub(crate) func: &'a mut cfg::Function,
 
     next_block_id: usize,
-    closure_slots: IndexVec<ClosureSlotId, (ScopeId, &'a ast::Block)>,
+    closure_slots: IndexVec<ClosureSlotId, (ScopeId, &'ot ast::Block)>,
     finished_blocks: Vec<cfg::Block>,
 }
 
-impl<'a> FuncBuilder<'a> {
+impl<'a, 'ot> FuncBuilder<'a, 'ot> {
     pub(crate) fn for_proc(
-        ir: &'a mut Module, objtree: &'a ObjtreeWrapper<'a>, func: cfg::Function,
+        fq: &'a mut FuncQueue<'ot>, ir: &'a mut Module, objtree: &'ot ObjtreeWrapper<'ot>,
+        func: &'a mut cfg::Function,
     ) -> Self {
         Self {
+            fq,
             ir,
             objtree,
             func,
@@ -37,11 +41,12 @@ impl<'a> FuncBuilder<'a> {
     }
 
     pub(crate) fn for_closure(
-        ir: &'a mut Module, objtree: &'a ObjtreeWrapper<'a>, over: FuncId, scope: ScopeId,
+        fq: &'a mut FuncQueue<'ot>, ir: &'a mut Module, objtree: &'ot ObjtreeWrapper<'ot>,
+        func: &'a mut cfg::Function, over: FuncId, scope: ScopeId,
     ) -> Self {
-        let mut func = ir.new_func();
         func.set_closure(over, scope);
         Self {
+            fq,
             ir,
             objtree,
             func,
@@ -57,19 +62,20 @@ impl<'a> FuncBuilder<'a> {
             self.func.add_block(block);
         }
         self.func.analyze();
-        let id = self.func.id;
-        self.ir.assimilate_func(self.func);
 
         let mut closure_funcs = IndexVec::new();
         for (scope, block) in self.closure_slots {
-            let mut closure_builder = FuncBuilder::for_closure(self.ir, self.objtree, id, scope);
-            closure_builder.build_block(block, None, None);
-            closure_funcs.push(closure_builder.finalize());
+            let recipe = FuncRecipe::Closure {
+                over: self.func.id,
+                parent_scope: scope,
+                block,
+            };
+            closure_funcs.push(self.fq.push(recipe));
         }
 
-        self.ir.funcs.get_mut(&id).unwrap().child_closures = closure_funcs;
+        self.func.child_closures = closure_funcs;
 
-        id
+        self.func.id
     }
 
     // TODO: ERRH within frontend
@@ -105,7 +111,7 @@ impl<'a> FuncBuilder<'a> {
         loop {
             println!("{:?}, {:?}", cur_func_id, cur_scope);
 
-            let cur_func = self.ir.funcs.get_mut(&cur_func_id).unwrap();
+            let cur_func = self.ir.funcs.get_mut(cur_func_id).unwrap();
             if let Some(match_var) = cur_func.lookup_var(cur_scope, name) {
                 top_var = match_var;
                 break;
@@ -126,16 +132,16 @@ impl<'a> FuncBuilder<'a> {
         let mut cur_parent = cur_func_id;
         for func_id in capture_stack.into_iter().rev() {
             println!("!! {:?}", func_id);
-            let func = self.ir.funcs.get_mut(&func_id).unwrap();
+            let func = self.ir.funcs.get_mut(func_id).unwrap();
             let new_top_var = func.add_captured_var(name, top_var);
-            let parent_func = self.ir.funcs.get_mut(&cur_parent).unwrap();
+            let parent_func = self.ir.funcs.get_mut(cur_parent).unwrap();
             parent_func.mark_var_captured(top_var, func_id, new_top_var);
             top_var = new_top_var;
             cur_parent = func_id;
         }
 
         let final_var = self.func.add_captured_var(name, top_var);
-        let parent_func = self.ir.funcs.get_mut(&cur_parent).unwrap();
+        let parent_func = self.ir.funcs.get_mut(cur_parent).unwrap();
         parent_func.mark_var_captured(top_var, self.func.id, final_var);
 
         Some(final_var)
@@ -190,7 +196,7 @@ impl<'a> FuncBuilder<'a> {
     }
 
     pub(crate) fn add_closure_slot(
-        &mut self, scope: ScopeId, block: &'a ast::Block,
+        &mut self, scope: ScopeId, block: &'ot ast::Block,
     ) -> ClosureSlotId {
         let ret = self.closure_slots.next_idx();
         self.closure_slots.push((scope, block));
@@ -198,7 +204,7 @@ impl<'a> FuncBuilder<'a> {
     }
 
     pub fn build_block(
-        &mut self, stmts: &'a [ast::Spanned<ast::Statement>], parent_scope: Option<ScopeId>,
+        &mut self, stmts: &'ot [ast::Spanned<ast::Statement>], parent_scope: Option<ScopeId>,
         next_block: Option<BlockId>,
     ) -> (BlockId, ScopeId) {
         let scope = self

@@ -63,7 +63,7 @@ impl<'ir, W: Write> Generator<W> {
 
     fn write_proc(&mut self, ir: &Module, proc: &ProcInfo) -> Result<()> {
         let proc_name = ir.string_table.get(proc.name);
-        let func = &ir.funcs[&proc.top_proc];
+        let func = &ir.funcs[proc.top_func];
         // Bulitin procs are inherently overrides
         if !func.builtin && func.parent.is_none() {
             self.write("proc/")?;

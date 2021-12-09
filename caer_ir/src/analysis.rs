@@ -24,7 +24,7 @@ pub struct FuncAnalysis<'a> {
 
 impl<'a> FuncAnalysis<'a> {
     pub fn analyse_proc(env: &'a mut Module, func_id: FuncId) -> IndexVec<LocalId, LocalInfo> {
-        let proc = env.funcs[&func_id].clone();
+        let proc = env.funcs[func_id].clone();
         let initial_local_info = proc.locals.indices().map(LocalInfo::new).collect();
         let initial_var_info = proc.vars.indices().map(VarInfo::new).collect();
 
@@ -48,7 +48,7 @@ impl<'a> FuncAnalysis<'a> {
         let mut postorder = Vec::new();
         self.build_orders(
             None,
-            &self.func.blocks.first().unwrap(),
+            self.func.blocks.first().unwrap(),
             &mut visited,
             &mut postorder,
         );
