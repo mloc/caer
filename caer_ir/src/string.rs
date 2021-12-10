@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::io::Write;
 
 use caer_types::id::StringId;
+use caer_types::string::FrozenStringTable;
 use index_vec::IndexVec;
 use serde::{Deserialize, Serialize};
 
@@ -62,6 +63,10 @@ impl StringTable {
         self.strings
             .indices()
             .map(move |id| (id, self.strings[id].as_str()))
+    }
+
+    pub fn freeze(self) -> FrozenStringTable {
+        FrozenStringTable::from_strings(self.strings)
     }
 }
 

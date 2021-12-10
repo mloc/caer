@@ -146,6 +146,14 @@ impl Runtime {
     }
 
     #[no_mangle]
+    pub extern "C" fn rt_runtime_string_to_id(&mut self, string: NonNull<RtString>) -> StringId {
+        self.env
+            .string_table
+            .lookup(resolve_string(Some(string)))
+            .unwrap_or_else(|| StringId::from_raw(!0u64))
+    }
+
+    #[no_mangle]
     pub extern "C" fn rt_runtime_suspend(&mut self, sleep_duration: &Val) {
         println!("SLEEP({:?})", sleep_duration);
         self.sleep_duration = match sleep_duration {

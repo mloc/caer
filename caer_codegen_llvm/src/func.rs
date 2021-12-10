@@ -6,7 +6,7 @@ use caer_types::ty::{self, RefType, Ty};
 use caer_types::{layout, op};
 use index_vec::IndexVec;
 use inkwell::basic_block::BasicBlock;
-use inkwell::types::BasicType;
+use inkwell::types::{BasicType, PointerType};
 use inkwell::values::*;
 use ty::Type;
 
@@ -816,9 +816,9 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 assert!(self.get_ty(self.ir_func.locals[*dst].ty).is_any());
 
                 let rval_ptr = self.get_local_any_ro(*src);
-                let ref_ptr = self.build_extract_ref_ptr(rval_ptr);
+                let (ref_vptr, ref_ptr) = self.build_extract_ref_ptrs(rval_ptr);
                 let var_get_ptr = self
-                    .build_vtable_lookup(block, ref_ptr, layout::VTABLE_VAR_GET_FIELD_OFFSET)
+                    .build_vtentry_extract(ref_vptr, layout::VTABLE_VAR_GET_FIELD_OFFSET)
                     .into_pointer_value();
                 dbg!(rval_ptr, ref_ptr);
 
@@ -844,9 +844,9 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
 
             Op::DatumStoreVar(dst, var_id, src) => {
                 let lval_ptr = self.get_local_any_ro(*dst);
-                let ref_ptr = self.build_extract_ref_ptr(lval_ptr);
+                let (ref_vptr, ref_ptr) = self.build_extract_ref_ptrs(lval_ptr);
                 let var_set_ptr = self
-                    .build_vtable_lookup(block, ref_ptr, layout::VTABLE_VAR_SET_FIELD_OFFSET)
+                    .build_vtentry_extract(ref_vptr, layout::VTABLE_VAR_SET_FIELD_OFFSET)
                     .into_pointer_value();
 
                 let src_val = self.get_local_any_ro(*src);
@@ -871,11 +871,10 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 let src_val_any = self.get_local_any_ro(*src);
                 match self.get_ty(self.ir_func.locals[*src].ty) {
                     Type::Ref(_) => {
-                        let ref_ptr = self.build_extract_ref_ptr(src_val_any);
+                        let (ref_vptr, ref_ptr) = self.build_extract_ref_ptrs(src_val_any);
                         let proc_lookup_ptr = self
-                            .build_vtable_lookup(
-                                block,
-                                ref_ptr,
+                            .build_vtentry_extract(
+                                ref_vptr,
                                 layout::VTABLE_PROC_LOOKUP_FIELD_OFFSET,
                             )
                             .into_pointer_value();
@@ -1350,11 +1349,25 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         argpack
     }
 
-    fn build_extract_ref_ptr(&self, rval_ptr: PointerValue<'ctx>) -> PointerValue<'ctx> {
+    /// Returns (vptr, ptr).
+    fn build_extract_ref_ptrs(
+        &self, rval_ptr: PointerValue<'ctx>,
+    ) -> (PointerValue<'ctx>, PointerValue<'ctx>) {
         // TODO: tycheck we're a ref
         // TODO: use some constant instead of 1
         // TODO: TYAPI
         // TODO: cast val struct instead of int2ptr
+        println!("{:?}", rval_ptr);
+        let val_vptr = unsafe {
+            self.ctx.builder.build_in_bounds_gep(
+                rval_ptr,
+                &[
+                    self.ctx.llvm_ctx.i32_type().const_zero(),
+                    self.ctx.llvm_ctx.i32_type().const_int(0, false),
+                ],
+                "val_vptr",
+            )
+        };
         let val_ptr = unsafe {
             self.ctx.builder.build_in_bounds_gep(
                 rval_ptr,
@@ -1365,20 +1378,32 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 "val_ptr",
             )
         };
+        let ref_vptr_int = self
+            .ctx
+            .builder
+            .build_load(val_vptr, "ref_vptr_int")
+            .into_int_value();
         let ref_ptr_int = self
             .ctx
             .builder
             .build_load(val_ptr, "ref_ptr_int")
             .into_int_value();
 
-        self.ctx.builder.build_int_to_ptr(
-            ref_ptr_int,
-            self.ctx.rt.ty.datum_common_type_ptr,
-            "ref_ptr",
+        (
+            self.ctx.builder.build_int_to_ptr(
+                ref_vptr_int,
+                self.ctx.rt.ty.vt_entry_type_ptr,
+                "ref_vptr",
+            ),
+            self.ctx.builder.build_int_to_ptr(
+                ref_ptr_int,
+                self.ctx.rt.ty.datum_common_type_ptr,
+                "ref_ptr",
+            ),
         )
     }
 
-    fn build_extract_ty_id(&self, datum_ptr: PointerValue<'ctx>) -> IntValue<'ctx> {
+    /*fn build_extract_ty_id(&self, datum_ptr: PointerValue<'ctx>) -> IntValue<'ctx> {
         let ty_id_ptr = unsafe {
             self.ctx.builder.build_in_bounds_gep(
                 datum_ptr,
@@ -1398,7 +1423,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             .build_load(ty_id_ptr, "ty_id")
             .into_int_value();
         ty_id
-    }
+    }*/
 
     fn build_vtable_lookup_inline(
         &self, ty_id: IntValue<'ctx>, offset: u64,
@@ -1420,7 +1445,24 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             .build_load(field_ptr, &format!("vtable_field_{}", offset))
     }
 
-    fn build_vtable_lookup(
+    fn build_vtentry_extract(&self, vptr: PointerValue<'ctx>, offset: u64) -> BasicValueEnum<'ctx> {
+        let field_ptr = unsafe {
+            self.ctx.builder.build_in_bounds_gep(
+                vptr,
+                &[
+                    self.ctx.llvm_ctx.i32_type().const_zero(),
+                    self.ctx.llvm_ctx.i32_type().const_int(offset, false),
+                ],
+                &format!("vtable_field_{}_ptr", offset),
+            )
+        };
+
+        self.ctx
+            .builder
+            .build_load(field_ptr, &format!("vtable_field_{}", offset))
+    }
+
+    /*fn build_vtable_lookup(
         &self, block: &Block, datum_ptr: PointerValue<'ctx>, offset: u64,
     ) -> BasicValueEnum<'ctx> {
         let lookup_fn = self.prog_emit.vt_lookup[offset as usize];
@@ -1429,7 +1471,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             .unwrap();
         field.set_name(&format!("vtable_field_{}", offset));
         field
-    }
+    }*/
 
     fn gather_captured_vars(&self, closure: FuncId) -> Vec<(VarId, VarId)> {
         let mut vars = Vec::new();

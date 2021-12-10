@@ -37,7 +37,7 @@ impl<'a> FuncAnalysis<'a> {
 
         pa.do_analyse();
 
-        pa.env.funcs.insert(func_id, pa.func);
+        pa.env.funcs[func_id] = pa.func;
 
         pa.local_info
     }

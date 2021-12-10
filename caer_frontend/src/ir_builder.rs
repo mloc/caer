@@ -41,11 +41,10 @@ impl<'a, 'ot> IrBuilder<'a, 'ot> {
         }
 
         // wow ewww
-        for proc_id_n in 0..self.ir.funcs.len() {
-            let proc_id = FuncId::new(proc_id_n);
-            self.ir.funcs[proc_id].dot(&format!("proc_{}", proc_id.index()));
-            caer_ir::analysis::FuncAnalysis::analyse_proc(self.ir, proc_id);
-            self.ir.funcs[proc_id].dot(&format!("opt_proc_{}", proc_id.index()));
+        for func_id in self.ir.funcs.indices() {
+            self.ir.funcs[func_id].dot(&format!("proc_{}", func_id.index()));
+            caer_ir::analysis::FuncAnalysis::analyse_proc(self.ir, func_id);
+            self.ir.funcs[func_id].dot(&format!("opt_proc_{}", func_id.index()));
         }
     }
 

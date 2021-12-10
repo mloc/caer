@@ -31,7 +31,7 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
     }
 
     // wrong spot for this
-    pub fn make_vtable_lookup(
+    /*pub fn make_vtable_lookup(
         &self, vt_global: inkwell::values::GlobalValue<'ctx>,
     ) -> Vec<inkwell::values::FunctionValue<'ctx>> {
         let mut vt_lookup = Vec::new();
@@ -87,7 +87,7 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
         }
 
         vt_lookup
-    }
+    }*/
 }
 
 // TODO: probably move out of context
@@ -115,6 +115,7 @@ pub struct RtFuncTyBundle<'ctx> {
 
     pub rt_type: inkwell::types::StructType<'ctx>,
     pub vt_entry_type: inkwell::types::StructType<'ctx>,
+    pub vt_entry_type_ptr: inkwell::types::PointerType<'ctx>,
 
     pub ref_type: inkwell::types::StructType<'ctx>,
 
@@ -123,14 +124,21 @@ pub struct RtFuncTyBundle<'ctx> {
 
 impl<'ctx> RtFuncTyBundle<'ctx> {
     fn new(ctx: &'ctx inkwell::context::Context) -> Self {
-        let val_type = ctx.named_struct_type(
+        let val_union_type = ctx.struct_type(
             &[
-                // Disc
-                ctx.i8_type().into(),
                 // Value for most, vtable ptr for ref
                 ctx.i64_type().into(),
                 // Ptr for ref, unused for rest
                 ctx.i64_type().into(),
+            ],
+            false,
+        );
+
+        let val_type = ctx.named_struct_type(
+            &[
+                // Disc
+                ctx.i8_type().into(),
+                val_union_type.into(),
             ],
             false,
             "val",
@@ -270,6 +278,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             false,
             "vt_entry",
         );
+        let vt_entry_type_ptr = vt_entry_type.ptr_type(inkwell::AddressSpace::Generic);
 
         // Fat pointer, rename?
         let ref_type = ctx.named_struct_type(
@@ -308,6 +317,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             string_type_ptr,
             rt_type,
             vt_entry_type,
+            vt_entry_type_ptr,
             ref_type,
             landingpad_type,
         }
@@ -326,7 +336,7 @@ macro_rules! rt_funcs {
 
         impl<'ctx> $name <'ctx> {
             fn new(ctx: &'ctx inkwell::context::Context, module: &inkwell::module::Module<'ctx>) -> $name<'ctx> {
-                assert_eq!(size_of::<caer_runtime::val::Val>(), 16);
+                assert_eq!(size_of::<caer_runtime::val::Val>(), 24);
 
                 let tyb = RtFuncTyBundle::new(ctx);
 
@@ -417,6 +427,7 @@ rt_funcs! {
         (rt_runtime_init, void_type~val, [rt_type~gptr, i8_type~gptr, i8_type~gptr, vt_entry_type~gptr, opaque_type_ptr~gptr, i64_type~val]),
         (rt_runtime_alloc_datum, datum_common_type~ptr, [rt_type~gptr, i32_type~val]),
         (rt_runtime_concat_strings, string_type~ptr, [rt_type~gptr, string_type~ptr, string_type~ptr]),
+        (rt_runtime_string_to_id, i64_type~val, [rt_type~gptr, string_type~ptr]),
         (rt_runtime_suspend, void_type~val, [rt_type~gptr, val_type~ptr]),
         (rt_runtime_spawn_closure, void_type~val, [
             rt_type~gptr,

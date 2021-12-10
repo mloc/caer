@@ -26,7 +26,7 @@ pub struct ProgEmit<'a, 'ctx> {
     pub vt_global: inkwell::values::GlobalValue<'ctx>,
     // Func table global
     pub ft_global: inkwell::values::GlobalValue<'ctx>,
-    pub vt_lookup: Vec<FunctionValue<'ctx>>,
+    //pub vt_lookup: Vec<FunctionValue<'ctx>>,
     pub datum_types: IndexVec<InstanceTypeId, inkwell::types::StructType<'ctx>>,
     pub sym: IndexVec<FuncId, FunctionValue<'ctx>>,
     pub string_allocs: IndexVec<StringId, inkwell::values::PointerValue<'ctx>>,
@@ -64,7 +64,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             rt_global,
             vt_global,
             ft_global,
-            vt_lookup: ctx.make_vtable_lookup(vt_global),
+            //vt_lookup: ctx.make_vtable_lookup(vt_global),
             datum_types: IndexVec::new(),
             sym: IndexVec::new(),
             string_allocs: IndexVec::new(),
@@ -177,15 +177,12 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 
         // TODO: move file emit to a better place
         let rt_env = RtEnvBundle {
+            string_table: self.env.string_table.clone().freeze(),
             type_tree: self.env.type_tree.clone(),
             instances: self.env.instances.clone(),
             func_specs,
             types: self.env.types.get_all(),
         };
-        self.env
-            .string_table
-            .serialize_runtime(File::create("stringtable.bincode").unwrap());
-        bincode::serialize_into(File::create("environment.bincode").unwrap(), &rt_env).unwrap();
 
         // not used by runtime, just for debugging / aux tooling
         serde_json::to_writer_pretty(
@@ -375,25 +372,46 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
                     self.ctx.rt.rt_list_var_set.into(),
                     self.ctx.rt.rt_list_proc_lookup.into(),
                 ],
-                x => todo!("{:?}", x), /*{
-                                           let field_tys = self.ctx.rt.ty.vt_entry_type.get_field_types();
-                                           [
-                                               self.ctx.llvm_ctx.i32_type().const_int(id.raw() as _, false),
-                                               self.ctx.llvm_ctx.i64_type().const_int(1 << 60, false), // lol
-                                               self.make_trapping_func(
-                                                   field_tys[1],
-                                                   format!("ty_{}_var_get_TRAP", id.index()),
-                                               ),
-                                               self.make_trapping_func(
-                                                   field_tys[2],
-                                                   format!("ty_{}_var_set_TRAP", id.index()),
-                                               ),
-                                               self.make_trapping_func(
-                                                   field_tys[3],
-                                                   format!("ty_{}_proc_lookup_get_TRAP", id.index()),
-                                               ),
-                                           ]
-                                       },*/
+                Specialization::String => {
+                    let field_tys = self.ctx.rt.ty.vt_entry_type.get_field_types();
+                    [
+                        self.ctx
+                            .llvm_ctx
+                            .i32_type()
+                            .const_int(ity.id.raw() as _, false)
+                            .into(),
+                        self.ctx
+                            .llvm_ctx
+                            .i64_type()
+                            .const_int(1 << 60, false)
+                            .into(), // lol
+                        self.make_trapping_func(
+                            field_tys[2]
+                                .into_pointer_type()
+                                .get_element_type()
+                                .into_function_type(),
+                            &format!("ty_{}_var_get_STRTRAP", ity.id.index()),
+                        )
+                        .into(),
+                        self.make_trapping_func(
+                            field_tys[3]
+                                .into_pointer_type()
+                                .get_element_type()
+                                .into_function_type(),
+                            &format!("ty_{}_var_set_STRTRAP", ity.id.index()),
+                        )
+                        .into(),
+                        self.make_trapping_func(
+                            field_tys[4]
+                                .into_pointer_type()
+                                .get_element_type()
+                                .into_function_type(),
+                            &format!("ty_{}_proc_lookup_get_STRTRAP", ity.id.index()),
+                        )
+                        .into(),
+                    ]
+                },
+                x => todo!("{:?}", x),
             };
 
             let field_tys = self.ctx.rt.ty.vt_entry_type.get_field_types();

@@ -4,6 +4,7 @@ use caer_types::func::FuncInfo;
 use caer_types::id::{FuncId, InstanceTypeId, PathTypeId, TypeId};
 use caer_types::instance::InstanceTypes;
 use caer_types::rt_env::RtEnvBundle;
+use caer_types::string::FrozenStringTable;
 use caer_types::ty::{RefType, Type};
 use caer_types::type_tree::{PathType, Specialization, TypeTree};
 use index_vec::IndexVec;
@@ -12,6 +13,7 @@ use serde::{Deserialize, Serialize};
 // TODO: move stringtable into here, at least intern
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Environment {
+    pub(crate) string_table: FrozenStringTable,
     // move into typetree?
     pub(crate) func_specs: IndexVec<FuncId, FuncInfo>,
     pub type_tree: TypeTree,
@@ -22,6 +24,7 @@ pub struct Environment {
 impl Environment {
     pub fn from_rt_env(rt_env: RtEnvBundle) -> Self {
         Self {
+            string_table: rt_env.string_table,
             func_specs: rt_env.func_specs,
             type_tree: rt_env.type_tree,
             instances: rt_env.instances,

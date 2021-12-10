@@ -5,5 +5,6 @@ pub mod layout;
 pub mod op;
 pub mod rt_env;
 pub mod rtti;
+pub mod string;
 pub mod ty;
 pub mod type_tree;

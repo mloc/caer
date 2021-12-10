@@ -4,7 +4,7 @@
 
 // TODO: replace this with better addressing in LLVM
 // ty indexes into vtable
-pub const DATUM_TY_FIELD_OFFSET: u64 = 1;
+//pub const DATUM_TY_FIELD_OFFSET: u64 = 1;
 // only for datum-spec datums, offset to start of vars blob in VST
 pub const DATUM_VARS_FIELD_OFFSET: u64 = 1;
 
