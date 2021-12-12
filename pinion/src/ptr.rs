@@ -9,7 +9,7 @@ pub struct Ptr<T, const ADDRSPACE: u32> {
     phantom: PhantomData<T>,
 }
 
-impl<'ctx, T: BasicType<'ctx>, const ADDRSPACE: u32> Type<'ctx> for Ptr<T, ADDRSPACE> {
+impl<'ctx, T: PinionBasicType<'ctx>, const ADDRSPACE: u32> PinionType<'ctx> for Ptr<T, ADDRSPACE> {
     type Out = inkwell::types::PointerType<'ctx>;
 
     fn instantiate(ctx: &'ctx Context) -> Self::Out {
@@ -22,7 +22,9 @@ impl<'ctx, T: BasicType<'ctx>, const ADDRSPACE: u32> Type<'ctx> for Ptr<T, ADDRS
     }
 }
 
-impl<'ctx, T: BasicType<'ctx>, const ADDRSPACE: u32> BasicType<'ctx> for Ptr<T, ADDRSPACE> {
+impl<'ctx, T: PinionBasicType<'ctx>, const ADDRSPACE: u32> PinionBasicType<'ctx>
+    for Ptr<T, ADDRSPACE>
+{
     type BasicOut = Self::Out;
 }
 

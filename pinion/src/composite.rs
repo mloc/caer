@@ -1,13 +1,13 @@
 #[macro_export]
 macro_rules! struct_type {
-    (@int $i:ident, {$($field_ty:ty) , +}, $packed:expr) => {
-        struct $i {
+    ($v:vis $i:ident, {$($field_ty:ty) , +}, $packed:expr, $name:expr) => {
+        $v struct $i {
             fields: std::marker::PhantomData<(
                 $($field_ty,)+
             )>
         }
 
-        impl<'ctx> $crate::traits::Type<'ctx> for $i {
+        impl<'ctx> $crate::traits::PinionType<'ctx> for $i {
             type Out = inkwell::types::StructType<'ctx>;
 
             fn instantiate(ctx: &'ctx inkwell::context::Context) -> Self::Out {
@@ -23,14 +23,11 @@ macro_rules! struct_type {
             }
         }
 
-        impl<'ctx> $crate::traits::BasicType<'ctx> for $i {
+        impl<'ctx> $crate::traits::PinionBasicType<'ctx> for $i {
             type BasicOut = Self::Out;
         }
     };
-    ($i:ident, $field_tys:tt ) => {
-        struct_type!(@int $i, $field_tys, false);
-    };
-    ($i:ident, packed $field_tys:tt) => {
-        struct_type!(@int $i, $field_tys, true);
+    ($v:vis $i:ident, $field_tys:tt, $packed:expr) => {
+        $crate::struct_type!($v $i, $field_tys, $packed, "");
     };
 }

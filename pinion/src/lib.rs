@@ -1,27 +1,23 @@
-pub mod compound;
+pub mod composite;
+pub mod func;
 pub mod ptr;
 pub mod scalar;
 pub mod traits;
+pub mod types;
 
-int_type!(Bool, bool_type);
-int_type!(Int8, i8_type);
-int_type!(Int16, i16_type);
-int_type!(Int32, i32_type);
-int_type!(Int64, i64_type);
-
-float_type!(Float16, f16_type);
-float_type!(Float32, f32_type);
-float_type!(Float64, f64_type);
+pub use crate::types::*;
 
 #[test]
 fn test() {
-    struct_type!(Compound, {Bool, Int8});
-    struct_type!(Compound2, {Bool, Compound});
+    struct_type!(Compound, {Bool, Int8}, false);
+    struct_type!(Compound2, {Bool, Compound}, false);
+
+    func_type!(Bar(Bool, Compound) -> Int16);
 
     use inkwell::context::Context;
 
     use crate::ptr::Ptr;
-    use crate::traits::Type;
+    use crate::traits::PinionType;
 
     type Foo = Ptr<Ptr<Compound2, 0>, 0>;
     //type Foo = Ptr<Bool, 0>;
@@ -29,4 +25,7 @@ fn test() {
     println!("{}", Foo::debug_stringify());
     let ctx = Context::create();
     println!("{:?}", Foo::instantiate(&ctx));
+
+    println!("{}", Bar::debug_stringify());
+    println!("{:?}", Bar::instantiate(&ctx));
 }

@@ -1,16 +1,18 @@
 use inkwell::context::Context;
 use inkwell::types as ity;
 
-pub trait Type<'ctx> {
+pub trait PinionType<'ctx> {
     type Out: ity::AnyType<'ctx>;
     fn instantiate(ctx: &'ctx Context) -> Self::Out;
     fn debug_stringify() -> String;
 }
 
-pub trait BasicType<'ctx>: Type<'ctx, Out = Self::BasicOut> {
+pub trait PinionBasicType<'ctx>: PinionType<'ctx, Out = Self::BasicOut> {
     type BasicOut: ity::BasicType<'ctx>;
 }
 
-pub trait IntType<'ctx>: Type<'ctx, Out = inkwell::types::IntType<'ctx>> {}
-pub trait FloatType<'ctx>: Type<'ctx, Out = inkwell::types::FloatType<'ctx>> {}
-pub trait StructType<'ctx>: Type<'ctx, Out = inkwell::types::StructType<'ctx>> {}
+// These mostly exist as marker traits
+pub trait PinionIntType<'ctx>: PinionType<'ctx, Out = ity::IntType<'ctx>> {}
+pub trait PinionFloatType<'ctx>: PinionType<'ctx, Out = ity::FloatType<'ctx>> {}
+pub trait PinionStructType<'ctx>: PinionType<'ctx, Out = ity::StructType<'ctx>> {}
+pub trait PinionFuncType<'ctx>: PinionType<'ctx, Out = ity::FunctionType<'ctx>> {}
