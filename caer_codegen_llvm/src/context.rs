@@ -283,9 +283,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
         // Fat pointer, rename?
         let ref_type = ctx.named_struct_type(
             &[
-                vt_entry_type
-                    .ptr_type(inkwell::AddressSpace::Generic)
-                    .into(),
+                vt_entry_type_ptr.into(),
                 opaque_type.ptr_type(GC_ADDRESS_SPACE).into(),
             ],
             false,

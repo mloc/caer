@@ -5,9 +5,10 @@ use caer_ir::module::Module;
 use caer_ir::walker::CFGWalker;
 use caer_types::id::{FuncId, InstanceTypeId, PathTypeId, StringId};
 use caer_types::instance::InstanceType;
+use caer_types::layout;
 use caer_types::rt_env::RtEnvBundle;
+use caer_types::ty::Type;
 use caer_types::type_tree::{PathType, Specialization};
-use caer_types::{layout, ty};
 use index_vec::IndexVec;
 use inkwell::types::FunctionType;
 use inkwell::values::{AnyValueEnum, FunctionValue, PointerValue};
@@ -162,7 +163,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
                 self.ctx
                     .llvm_ctx
                     .i64_type()
-                    .const_int(ty::Type::Any.get_store_size(), false)
+                    .const_int(Type::Any.get_layout().store_size(), false)
                     .into(),
                 self.ctx.llvm_ctx.bool_type().const_zero().into(),
             ],

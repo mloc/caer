@@ -2,7 +2,7 @@ use caer_ir::cfg::*;
 use caer_ir::id::{BlockId, LocalId, VarId};
 use caer_ir::walker::{CFGWalker, Lifetimes, WalkActor};
 use caer_types::id::{FuncId, StringId, TypeId};
-use caer_types::ty::{self, RefType, Ty};
+use caer_types::ty::{self, Layout, RefType, ScalarLayout};
 use caer_types::{layout, op};
 use index_vec::IndexVec;
 use inkwell::basic_block::BasicBlock;
@@ -137,28 +137,8 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             self.var_allocs.push(StackValue::new(alloca, var.ty));
         }
 
-        // maybe just use zeroinitializer?
         // TODO: Bring Back SSAValue
-        let ret_ty = self.get_ty(self.ir_func.vars[0].ty);
-        if ret_ty.is_any() {
-            // TODO: cleanup var inst
-            unsafe {
-                self.const_gep_insertvalue(
-                    self.var_allocs[0].val,
-                    &[0, 0],
-                    self.ctx
-                        .llvm_ctx
-                        .i8_type()
-                        .const_int(layout::VAL_DISCRIM_NULL as _, false)
-                        .into(),
-                )
-            };
-        } else {
-            let ret_zero = self.get_zero_value(ret_ty);
-            self.ctx
-                .builder
-                .build_store(self.var_allocs[0].val, self.build_literal(&ret_zero));
-        }
+        self.build_var_zeroinit(0.into());
 
         self.emit_prelude();
 
@@ -217,31 +197,25 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             .build_unconditional_branch(self.blocks[BlockId::new(0)]);
     }
 
-    fn assign_literal(&mut self, lit: &Literal, local_id: LocalId) {
+    fn assign_literal(&mut self, lit: Literal, local_id: LocalId) {
         let val = self.build_literal(lit);
         self.set_local(local_id, val)
     }
 
-    fn build_literal(&mut self, lit: &Literal) -> BasicValueEnum<'ctx> {
+    fn build_literal(&self, lit: Literal) -> BasicValueEnum<'ctx> {
         let val: BasicValueEnum = match lit {
-            Literal::Num(x) => self.ctx.llvm_ctx.f32_type().const_float(*x as f64).into(),
-            Literal::String(id) => self.prog_emit.string_allocs[*id].into(),
+            Literal::Num(x) => self.ctx.llvm_ctx.f32_type().const_float(x as f64).into(),
+            Literal::String(id) => self.prog_emit.string_allocs[id].into(),
             Literal::Null => self.ctx.llvm_ctx.i64_type().const_zero().into(),
             _ => unimplemented!("{:?}", lit),
         };
         val
     }
 
-    fn get_zero_value(&self, ty: &Type) -> Literal {
-        if ty.is_any() {
-            return Literal::Null;
-        }
-        match ty {
-            Type::Null => Literal::Null,
-            Type::Float => Literal::Num(0.0),
-            Type::Ref(RefType::String) => Literal::String(StringId::new(0)),
-            Type::Ref(_) => Literal::Null,
-            _ => panic!("no zero value for {:?}", ty),
+    fn get_zero_value(&self, layout: ScalarLayout) -> Literal {
+        match layout {
+            ScalarLayout::Null => Literal::Null,
+            ScalarLayout::Float => Literal::Num(0.0),
         }
     }
 
@@ -250,20 +224,32 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
     }
 
     fn conv_any_into(
-        &self, src_local: BasicValueEnum<'ctx>, src_ty: &Type, into: PointerValue<'ctx>,
+        &self, src_local: BasicValueEnum<'ctx>, src_ty: &Type, dest: PointerValue<'ctx>,
     ) {
-        // pointer already points to an any-layout struct
-        if src_ty.is_any() {
-            self.copy_val(src_local.into_pointer_value(), into);
-            return;
-        }
+        let (disc, llval) = match src_ty.get_layout() {
+            Layout::Val => {
+                // Special case: can just memcpy directly
+                self.copy_val(src_local.into_pointer_value(), dest);
+                return;
+            },
+            Layout::SoftRef => {
+                // Special case: need to update two fields
+                todo!();
+            },
 
-        let (disc, llval) = match src_ty {
-            Type::Null => {
+            Layout::HardRef(_) => {
+                let ptr_as_int = self.ctx.builder.build_ptr_to_int(
+                    src_local.into_pointer_value(),
+                    self.ctx.llvm_ctx.i64_type(),
+                    "pack_val",
+                );
+                (layout::VAL_DISCRIM_REF, ptr_as_int)
+            },
+            Layout::Scalar(ScalarLayout::Null) => {
                 let null_val = self.ctx.llvm_ctx.i64_type().const_zero();
                 (layout::VAL_DISCRIM_NULL, null_val)
             },
-            Type::Float => {
+            Layout::Scalar(ScalarLayout::Float) => {
                 // TODO fix this, this is mega bad, won't work on big endian systems
                 let val_as_i32 = self.ctx.builder.build_bitcast(
                     src_local,
@@ -277,53 +263,14 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 );
                 (layout::VAL_DISCRIM_FLOAT, val_as_i64)
             },
-            Type::Ref(RefType::String) => {
-                let val_as_int = self.ctx.builder.build_ptr_to_int(
-                    src_local.into_pointer_value(),
-                    self.ctx.llvm_ctx.i64_type(),
-                    "pack_val",
-                );
-                (layout::VAL_DISCRIM_STRING, val_as_int)
-            },
-            Type::Ref(_) => {
-                let val_as_int = self.ctx.builder.build_ptr_to_int(
-                    src_local.into_pointer_value(),
-                    self.ctx.llvm_ctx.i64_type(),
-                    "pack_val",
-                );
-                (layout::VAL_DISCRIM_REF, val_as_int)
-            },
-            _ => todo!("{:?}", src_ty),
         };
+        assert_eq!(llval.get_type().get_bit_width(), 64);
 
-        let disc_ptr = self
-            .ctx
-            .builder
-            .build_bitcast(
-                into,
-                self.ctx
-                    .llvm_ctx
-                    .i8_type()
-                    .ptr_type(into.get_type().get_address_space()),
-                "disc_ptr",
-            )
-            .into_pointer_value();
-        self.ctx.builder.build_store(
-            disc_ptr,
-            self.ctx.llvm_ctx.i8_type().const_int(disc as u64, false),
-        );
-
-        let val_ptr = unsafe {
-            self.ctx.builder.build_in_bounds_gep(
-                into,
-                &[
-                    self.ctx.llvm_ctx.i32_type().const_zero(),
-                    self.ctx.llvm_ctx.i32_type().const_int(1, false),
-                ],
-                "val_ptr",
-            )
-        };
-        self.ctx.builder.build_store(val_ptr, llval);
+        let disc_val = self.ctx.llvm_ctx.i8_type().const_int(disc as u64, false);
+        unsafe {
+            self.const_gep_insertvalue(dest, &[0, 0], disc_val.into());
+            self.const_gep_insertvalue(dest, &[0, 1, 0], llval.into());
+        }
     }
 
     fn conv_local_any_into(&self, local_id: LocalId, into: PointerValue<'ctx>) {
@@ -336,8 +283,8 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         let local = self.locals[local_id].unwrap();
         let ty = self.get_ty(self.ir_func.locals[local_id].ty);
 
-        // local already points to an any-layout struct
-        if ty.is_any() {
+        // local already points to a val-layout struct
+        if let Layout::Val = ty.get_layout() {
             return local.into_pointer_value();
         }
 
@@ -462,6 +409,8 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
     fn copy_val(&self, src: PointerValue<'ctx>, dest: PointerValue<'ctx>) {
         self.prog_emit.copy_val(src, dest);
     }
+
+    fn build_memcpy(&self, src: PointerValue<'ctx>, dest: PointerValue<'ctx>) {}
 
     fn build_call_internal<F>(
         &self, func: F, args: &[BveWrapper<'ctx>],
@@ -644,7 +593,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             Op::Noop => {},
 
             Op::Literal(id, literal) => {
-                self.assign_literal(literal, *id);
+                self.assign_literal(*literal, *id);
             },
 
             Op::MkVar(_) => {
@@ -655,19 +604,78 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 let local_ty = self.get_ty(self.ir_func.locals[*local].ty);
                 let var_ty = self.get_ty(self.ir_func.vars[*var].ty);
 
-                let val = if var_ty.is_any() {
-                    if !local_ty.is_any() {
-                        panic!("trying to load Any var into non-Any local")
-                    }
+                let local_val = match (var_ty.get_layout(), local_ty.get_layout()) {
+                    // Val into val OR soft ref into soft ref: alloc and memcpy
+                    (Layout::Val, Layout::Val) | (Layout::SoftRef, Layout::SoftRef) => {
+                        let copied_alloca = self.build_gc_alloca(self.ctx.rt.ty.val_type, "");
+                        self.copy_val(self.var_allocs[*var].val, copied_alloca);
+                        //copied_alloca.into();
+                    },
+
+                    // Anything else into val: alloc, tag, pack
+                    (_, Layout::Val) => {
+                        todo!()
+                    },
+
+                    // Val into anything else: impossible
+                    (Layout::Val, other) => panic!(
+                        "tryng to load val-layout var into local with layout {:?}",
+                        other
+                    ),
+
+                    // Hard ref into soft ref: alloc and pack
+                    (Layout::HardRef(_), Layout::SoftRef) => {
+                        todo!()
+                    },
+
+                    // Soft ref into anything else: impossible
+                    (Layout::SoftRef, other) => panic!(
+                        "trying to load soft-ref var into local with layout {:?}",
+                        other
+                    ),
+
+                    // Anything else into soft ref: impossible
+                    // TODO: nulls?
+                    (other, Layout::SoftRef) => panic!(
+                        "trying to load var with layout {:?} into soft-ref local",
+                        other
+                    ),
+
+                    // Word-sized types: simple load if compatible
+                    (
+                        lhs @ (Layout::HardRef(_) | Layout::Scalar(_)),
+                        rhs @ (Layout::HardRef(_) | Layout::Scalar(_)),
+                    ) => {
+                        // TODO: better compatibility check, allow coercion? nulls?
+                        // TODO: ERRH
+                        if lhs != rhs {
+                            panic!(
+                                "word-size layouts are incompatible: trying to load {:?} into {:?}",
+                                lhs, rhs
+                            );
+                        }
+                    },
+                };
+
+                /*if var_ty.get_layout().is_val() {
+                    assert!(
+                        local_ty.get_layout().is_val(),
+                        "trying to load val-layout var into non-val local"
+                    );
                     // var points to reified val struct, so memcpy
                     let copied_alloca = self.build_gc_alloca(self.ctx.rt.ty.val_type, "");
                     self.copy_val(self.var_allocs[*var].val, copied_alloca);
-                    copied_alloca.into()
+                    copied_alloca.into();
+                } else {
+                    assert!(!local_ty.get_layout().is_val());
+                }
+
+                let val = if var_ty.is_any() {
                 } else {
                     assert!(!local_ty.is_any());
                     self.ctx.builder.build_load(self.var_allocs[*var].val, "")
-                };
-                self.set_local(*local, val);
+                };*/
+                //self.set_local(*local, local_val);
             },
 
             Op::Store(var, local) => {
@@ -1460,6 +1468,33 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         self.ctx
             .builder
             .build_load(field_ptr, &format!("vtable_field_{}", offset))
+    }
+
+    fn build_var_zeroinit(&self, var: VarId) {
+        let var_ty = self.get_ty(self.ir_func.vars[var].ty);
+        let val = self.var_allocs[var].val;
+
+        match var_ty.get_layout() {
+            Layout::Val => {
+                let null_disc = self
+                    .ctx
+                    .llvm_ctx
+                    .i8_type()
+                    .const_int(layout::VAL_DISCRIM_NULL as _, false);
+                unsafe { self.const_gep_insertvalue(val, &[0, 0], null_disc.into()) };
+            },
+            Layout::SoftRef => todo!("can't yet zeroinit virtual nulls"),
+            Layout::HardRef(_) => {
+                let null_ptr = val.get_type().const_null();
+                self.ctx.builder.build_store(val, null_ptr);
+            },
+            Layout::Scalar(scalar_layout) => {
+                let scalar_zero = self.get_zero_value(scalar_layout);
+                self.ctx
+                    .builder
+                    .build_store(val, self.build_literal(scalar_zero));
+            },
+        }
     }
 
     /*fn build_vtable_lookup(

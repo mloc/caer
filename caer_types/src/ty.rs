@@ -4,31 +4,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::id::{PathTypeId, TypeId};
 
-pub trait Ty {
-    fn needs_destructor(&self) -> bool;
-    fn as_primitive(&self) -> Option<Type>;
-    fn is_primitive(&self, prim: Type) -> bool;
-}
-
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Serialize, Deserialize)]
 pub enum Type {
     Null,
 
     Float,
 
-    // GC-kind
-    //String,
-    //List(TypeId),
-    // One day, String and List will be represented as path nodes. One day.
-    //Datum(PathTypeId),
-    //DatumAny,
-
     // Object ref
     Ref(RefType),
+
+    // Val types. Any and OneOf require a soft-val layout
+    Any,
     // btreeset is bad.
     OneOf(BTreeSet<TypeId>),
-    // Val type
-    Any,
     /*Proc {
         args: Vec<PathTypeId>,
         var_args: Option<Box<PathTypeId>>,
@@ -37,14 +25,32 @@ pub enum Type {
 }
 
 impl Type {
+    pub fn is_any(&self) -> bool {
+        panic!();
+    }
+
     // term any is overloaded.
     // in this case it means any ty that needs RTTI
-    pub fn is_any(&self) -> bool {
-        matches!(
-            self,
-            Type::Ref(RefType::Subtype(_) | RefType::Any) | Type::OneOf(_) | Type::Any
-        )
+    /*pub fn is_any(&self) -> bool {
+
+    pub trait Ty {
+        fn needs_destructor(&self) -> bool;
+        fn as_primitive(&self) -> Option<Type>;
+        fn is_primitive(&self, prim: Type) -> bool;
     }
+            matches!(
+                self,
+                Type::Ref(RefType::Subtype(_) | RefType::Any) | Type::OneOf(_) | Type::Any
+            )
+        }*/
+
+    /*pub fn is_layout_val(&self) -> bool {
+        matches!(self, Type::OneOf(_) | Type::Any)
+    }
+
+    pub fn is_layout_vref(&self) -> bool {
+        matches!(self, Type::Ref(RefType::Subtype(_) | RefType::Any))
+    }*/
 
     /*pub fn contains(&self, prim: Prim) -> bool {
         match self {
@@ -56,13 +62,29 @@ impl Type {
     }*/
 
     // BAD. TODO: remove, x64 specific
-    pub fn get_store_size(&self) -> u64 {
-        if self.is_any() {
-            return 16;
+    /*pub fn get_store_size(&self) -> u64 {
+        if self.is_layout_val() {
+            24
+        } else if self.is_layout_vref() {
+            16
+        } else {
+            match self {
+                Type::Null
+                | Type::Float
+                | Type::Ref(RefType::String | RefType::Exact(_) | RefType::List(_)) => 8,
+                _ => panic!("can't get size of {:?}", self),
+            }
         }
+    }*/
+
+    pub fn get_layout(&self) -> Layout<'_> {
         match self {
-            Type::Null | Type::Float | Type::Ref(RefType::String) => 8,
-            _ => panic!("can't get size of {:?}", self),
+            Type::Null => Layout::Scalar(ScalarLayout::Null),
+            Type::Float => Layout::Scalar(ScalarLayout::Float),
+
+            Type::Any | Type::OneOf(_) => Layout::Val,
+
+            Type::Ref(ref_type) => ref_type.get_layout(),
         }
     }
 }
@@ -70,54 +92,6 @@ impl Type {
 impl From<RefType> for Type {
     fn from(rt: RefType) -> Self {
         Self::Ref(rt)
-    }
-}
-
-/*impl Ty for Prim {
-    fn needs_destructor(&self) -> bool {
-        matches!(self, Prim::Ref(_))
-    }
-
-    fn as_primitive(&self) -> Option<Prim> {
-        Some(*self)
-    }
-
-    fn is_primitive(&self, prim: Prim) -> bool {
-        *self == prim
-    }
-}*/
-
-impl Ty for Type {
-    fn needs_destructor(&self) -> bool {
-        todo!();
-        /*match self {
-            Type::Any => true,
-            Type::Primitive(p) => p.needs_destructor(),
-            Type::OneOf(tys) => tys.iter().any(|ty| ty.needs_destructor()),
-            Type::Proc { .. } => false,
-            _ => unimplemented!("{:?}", self),
-        }*/
-    }
-
-    fn as_primitive(&self) -> Option<Type> {
-        todo!();
-        /*match self {
-            Type::
-        }
-        if let Type::Primitive(my_prim) = self {
-            Some(*my_prim)
-        } else {
-            None
-        }*/
-    }
-
-    fn is_primitive(&self, prim: Type) -> bool {
-        todo!();
-        /*if let Type::Primitive(my_prim) = self {
-            *my_prim == prim
-        } else {
-            false
-        }*/
     }
 }
 
@@ -130,4 +104,44 @@ pub enum RefType {
     List(TypeId),
     Exact(PathTypeId),
     Subtype(PathTypeId),
+}
+
+impl RefType {
+    pub fn get_layout(&self) -> Layout<'_> {
+        match self {
+            RefType::String | RefType::Exact(_) | RefType::List(_) => Layout::HardRef(self),
+            _ => Layout::SoftRef,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Layout<'a> {
+    Val,
+    SoftRef,
+    HardRef(&'a RefType),
+    Scalar(ScalarLayout),
+}
+
+impl Layout<'_> {
+    // BAD. TODO: remove, x64 specific
+    pub fn store_size(self) -> u64 {
+        match self {
+            Layout::Val => 24,             // tag, (scalar OR softref)
+            Layout::SoftRef => 16,         // vptr, ptr
+            Layout::HardRef(_) => 8,       // ptr
+            Layout::Scalar(_) => panic!(), // padded float, etc
+        }
+    }
+
+    pub fn is_val(self) -> bool {
+        matches!(self, Layout::Val)
+    }
+}
+
+// meh, helps codegen deal with layouts
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScalarLayout {
+    Null,
+    Float,
 }
