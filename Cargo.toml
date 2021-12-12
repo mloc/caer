@@ -14,6 +14,7 @@ members = [
     "caer_types",
     "caer_util",
     "llvm_stackmaps",
+    "pinion",
     "rustc_build_helper",
     "rustc_dwarf",
     "rustc_unwind",
