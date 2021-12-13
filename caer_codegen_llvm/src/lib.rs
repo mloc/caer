@@ -1,6 +1,7 @@
 mod context;
 mod func;
 mod prog;
+mod rt_type;
 mod value;
 
 pub fn emit(ir: &caer_ir::module::Module) {

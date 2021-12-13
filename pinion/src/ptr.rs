@@ -22,10 +22,30 @@ impl<'ctx, T: PinionBasicType<'ctx>, const ADDRSPACE: u32> PinionType<'ctx> for 
     }
 }
 
-impl<'ctx, T: PinionBasicType<'ctx>, const ADDRSPACE: u32> PinionBasicType<'ctx>
+impl<'ctx, T: 'static + PinionBasicType<'ctx>, const ADDRSPACE: u32> PinionBasicType<'ctx>
     for Ptr<T, ADDRSPACE>
 {
     type BasicOut = Self::Out;
+
+    fn create_empty() -> Box<dyn PinionIndexableType<'ctx>> {
+        Box::new(Self {
+            phantom: PhantomData,
+        })
+    }
+}
+
+impl<'ctx, T: 'static + PinionBasicType<'ctx>, const ADDRSPACE: u32> PinionIndexableType<'ctx>
+    for Ptr<T, ADDRSPACE>
+{
+    fn resolve_index(
+        &self, field: &'static str,
+    ) -> Option<(u64, Box<dyn PinionIndexableType<'ctx>>)> {
+        if field == "*" {
+            Some((0, T::create_empty()))
+        } else {
+            None
+        }
+    }
 }
 
 const fn map_addrspace(addrspace: u32) -> inkwell::AddressSpace {

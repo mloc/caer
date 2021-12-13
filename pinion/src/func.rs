@@ -21,7 +21,7 @@ macro_rules! func_type {
 
             fn debug_stringify() -> String {
                 let params = [$(<$param_ty>::debug_stringify()),*];
-                format!(concat!("fn {} ({}) -> {}"), stringify!($name), params.join(", "), <$ret_ty>::debug_stringify())
+                format!("fn {} ({}) -> {}", stringify!($name), params.join(", "), <$ret_ty>::debug_stringify())
             }
         }
 
@@ -29,10 +29,10 @@ macro_rules! func_type {
     };
 
     ($v:vis $name:ident $params:tt -> $ret_ty:ty) => {
-        $crate::func_type!(%impl% $v $name, $params, $ret_ty);
+        $crate::func_type!(%impl% $v $name, $params, $ret_ty)
     };
 
     ($v:vis $name:ident $params:tt) => {
-        $crate::func_type!(%impl% $v $name, $params, $crate::types::VoidType);
+        $crate::func_type!(%impl% $v $name, $params, $crate::types::VoidType)
     };
 }

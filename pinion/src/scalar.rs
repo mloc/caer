@@ -28,7 +28,12 @@ macro_rules! basic_scalar_type {
 
         impl<'ctx> $crate::traits::PinionBasicType<'ctx> for $i {
             type BasicOut = inkwell::types::$out_ty<'ctx>;
+
+            fn create_empty() -> Box<dyn $crate::traits::PinionIndexableType<'ctx>> {
+                Box::new(Self { _dummy: () })
+            }
         }
+        impl<'ctx> $crate::traits::PinionIndexableType<'ctx> for $i {}
     };
 }
 
