@@ -68,7 +68,7 @@ macro_rules! struct_type {
             type BasicOut = Self::Out;
 
             fn create_empty() -> Box<dyn $crate::traits::PinionIndexableType<'ctx>> {
-                todo!()
+                Box::new(Self{_dummy: ()})
             }
         }
         impl<'ctx> $crate::traits::PinionIndexableType<'ctx> for $i {
