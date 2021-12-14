@@ -1,12 +1,31 @@
 use std::marker::PhantomData;
 
+use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::types as ity;
+use inkwell::values::PointerValue;
 
 use crate::traits::*;
 
 pub struct Ptr<T, const ADDRSPACE: u32> {
     phantom: PhantomData<T>,
+}
+
+impl<'ctx, T: PinionBasicType<'ctx>, const ADDRSPACE: u32> Ptr<T, ADDRSPACE> {
+    pub fn build_gep<F>(
+        ctx: &'ctx Context, builder: Builder<'ctx>, ptr: PointerValue<'ctx>, index_closure: F,
+    ) -> PointerValue<'ctx>
+    where
+        F: FnOnce(Box<dyn PinionIndexableType>) -> Vec<u64>,
+    {
+        let base = T::create_empty();
+        let path = index_closure(base);
+        let indices: Vec<_> = path
+            .into_iter()
+            .map(|i| ctx.i32_type().const_int(i, false))
+            .collect();
+        unsafe { builder.build_in_bounds_gep(ptr, &indices, "") }
+    }
 }
 
 impl<'ctx, T: PinionBasicType<'ctx>, const ADDRSPACE: u32> PinionType<'ctx> for Ptr<T, ADDRSPACE> {
@@ -37,7 +56,7 @@ impl<'ctx, T: 'static + PinionBasicType<'ctx>, const ADDRSPACE: u32> PinionBasic
 impl<'ctx, T: 'static + PinionBasicType<'ctx>, const ADDRSPACE: u32> PinionIndexableType<'ctx>
     for Ptr<T, ADDRSPACE>
 {
-    fn resolve_index(
+    /*fn resolve_index(
         &self, field: &'static str,
     ) -> Option<(u64, Box<dyn PinionIndexableType<'ctx>>)> {
         if field == "*" {
@@ -45,7 +64,7 @@ impl<'ctx, T: 'static + PinionBasicType<'ctx>, const ADDRSPACE: u32> PinionIndex
         } else {
             None
         }
-    }
+    }*/
 }
 
 const fn map_addrspace(addrspace: u32) -> inkwell::AddressSpace {

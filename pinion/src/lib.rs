@@ -13,7 +13,7 @@ mod test {
     use crate::ptr::Ptr;
     use crate::traits::{PinionBasicType, PinionType};
     use crate::types::*;
-    use crate::{func_type, index, struct_type};
+    use crate::{func_type, struct_type};
 
     struct_type! {Compound { a: Bool, b: Int8 }, false}
     struct_type! {
@@ -37,10 +37,12 @@ mod test {
         println!("{}", Bar::debug_stringify());
         println!("{:?}", Bar::instantiate(&ctx));
 
-        let x = Ptr::<Ptr<Int8, 0>, 0>::create_empty();
+        /*let x = Ptr::<Ptr<Int8, 0>, 0>::create_empty();
         let y = x.resolve_index("*").unwrap().1.resolve_index("*");
         assert!(y.is_some());
-        assert!(y.unwrap().1.resolve_index("*").is_none());
-        println!("{:?}", index!(Ptr<Compound2, 0>, *.b.a));
+        assert!(y.unwrap().1.resolve_index("*").is_none());*/
+
+        let geps = crate::index!(b.a);
+        println!("{:?}", geps(Compound2::create_empty()));
     }
 }
