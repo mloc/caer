@@ -73,3 +73,32 @@ const fn map_addrspace(addrspace: u32) -> inkwell::AddressSpace {
         _ => panic!("unknown addressspace id"),
     }
 }
+
+pub struct FuncPtr<T> {
+    phantom: PhantomData<T>,
+}
+
+impl<'ctx, T: PinionFuncType<'ctx>> PinionType<'ctx> for FuncPtr<T> {
+    type Out = inkwell::types::PointerType<'ctx>;
+
+    fn instantiate(ctx: &'ctx Context) -> Self::Out {
+        let ty = T::instantiate(ctx);
+        ty.ptr_type(inkwell::AddressSpace::Generic)
+    }
+
+    fn debug_stringify() -> String {
+        format!("FuncPtr<{}>", T::debug_stringify())
+    }
+}
+
+impl<'ctx, T: 'static + PinionFuncType<'ctx>> PinionBasicType<'ctx> for FuncPtr<T> {
+    type BasicOut = Self::Out;
+
+    fn create_empty() -> Box<dyn PinionIndexableType<'ctx>> {
+        Box::new(Self {
+            phantom: PhantomData,
+        })
+    }
+}
+
+impl<'ctx, T: 'static + PinionFuncType<'ctx>> PinionIndexableType<'ctx> for FuncPtr<T> {}

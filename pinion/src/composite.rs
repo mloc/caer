@@ -58,7 +58,7 @@ macro_rules! struct_type {
                 )
             }
 
-            fn debug_stringify() -> String {
+            fn debug_stringify() -> std::string::String {
                 let fields = $crate::struct_type!(@fmt_debug $fields);
                 format!("{} {{{}}}", stringify!($i), fields.join(", "))
             }
