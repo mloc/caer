@@ -1028,14 +1028,28 @@ version = "0.0.0"
 dependencies = [
  "inkwell",
  "pinion_macros",
+ "pinion_types",
 ]
 
 [[package]]
 name = "pinion_macros"
 version = "0.1.0"
 dependencies = [
+ "pinion_types",
+ "proc-macro2 1.0.34",
  "quote 1.0.10",
  "syn 1.0.82",
+]
+
+[[package]]
+name = "pinion_types"
+version = "0.1.0"
+
+[[package]]
+name = "pinion_work"
+version = "0.1.0"
+dependencies = [
+ "pinion",
 ]
 
 [[package]]

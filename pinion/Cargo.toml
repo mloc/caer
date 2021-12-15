@@ -8,5 +8,6 @@ description = "Mid-level wrappers around inkwell's API"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-pinion_macros = { path = "../pinion_macros" }
 inkwell = { git = "https://github.com/mloc/inkwell", branch = "exceptions" }
+pinion_macros = { path = "../pinion_macros" }
+pinion_types = { path = "../pinion_types" }
