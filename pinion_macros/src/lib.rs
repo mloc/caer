@@ -13,10 +13,6 @@ enum Field {
     Type(Type),
 }
 
-struct StructBuilder {}
-
-impl StructBuilder {}
-
 fn make_prim_lookup() -> HashMap<Type, Primitive> {
     [
         (parse_quote! {bool}, Primitive::Bool),
@@ -49,13 +45,27 @@ fn quote_primitive(prim: Primitive) -> syn::Expr {
     parse_quote! { pinion::types::Primitive::#variant }
 }
 
+fn create_type_for_type(ctx: &syn::Expr, ty: &Type) -> syn::Expr {
+    match ty {
+        Type::Path(path) => {
+            parse_quote! { <#path as pinion::PinionStruct>::create_in_context(#ctx) }
+        },
+        Type::Reference(ptr) => {
+            let elem_type = create_type_for_type(ctx, &ptr.elem);
+            // TODO: figure out gcptrs
+            parse_quote! { #ctx.make_pointer_type(#elem_type, false) }
+        },
+        _ => todo!("can't synth type {:?}", ty),
+    }
+}
+
 fn create_field_type(ctx: &syn::Expr, field: &Field) -> syn::Expr {
     match field {
         Field::Prim(prim) => {
             let pq = quote_primitive(*prim);
             parse_quote! { #ctx.make_primitive_type(#pq) }
         },
-        Field::Type(_) => todo!(),
+        Field::Type(ty) => create_type_for_type(ctx, ty),
     }
 }
 
@@ -77,7 +87,11 @@ impl ToTokens for Field {
 #[proc_macro_derive(PinionStruct)]
 pub fn derive_struct(input: TokenStream) -> TokenStream {
     let DeriveInput {
-        ident, data, attrs, ..
+        ident,
+        data,
+        generics,
+        attrs,
+        ..
     } = parse_macro_input!(input);
 
     let mut found_repr = false;
@@ -113,26 +127,17 @@ pub fn derive_struct(input: TokenStream) -> TokenStream {
         _ => panic!("can only derive for structs"),
     };
 
-    //panic!("{:#?}", vf);
-
-    /*let output = quote! {
-    impl #ident {
-        fn foo() {
-            println!("it works!");
-        }
-    }
-    };*/
-
     let ctxq: syn::Expr = parse_quote! { ctx };
     let fq = vf.iter().map(|f| create_field_type(&ctxq, f));
 
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let output = quote! {
-    impl pinion::PinionStruct for #ident {
-        fn create_in_context<C: pinion::Context>(ctx: &mut C) -> C::BasicType {
-            let fields = [#(#fq,)*];
-            ctx.make_struct_type(&fields, false, "")
+        impl #impl_generics pinion::PinionStruct for #ident #ty_generics #where_clause {
+            fn create_in_context<C: pinion::Context>(ctx: &mut C) -> C::BasicType {
+                let fields = [#(#fq,)*];
+                ctx.make_struct_type(&fields, false, "")
+            }
         }
-    }
     };
 
     output.into()
