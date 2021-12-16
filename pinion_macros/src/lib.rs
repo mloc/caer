@@ -1,11 +1,14 @@
+mod attr;
+
 extern crate proc_macro;
 use std::collections::HashMap;
 
+use attr::StructAttributes;
 use pinion_types::Primitive;
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{quote, ToTokens};
-use syn::{parse_macro_input, parse_quote, Attribute, DeriveInput, Type};
+use syn::{parse_macro_input, parse_quote, DeriveInput, Type};
 
 #[derive(Debug)]
 enum Field {
@@ -53,7 +56,12 @@ fn create_type_for_type(ctx: &syn::Expr, ty: &Type) -> syn::Expr {
         Type::Reference(ptr) => {
             let elem_type = create_type_for_type(ctx, &ptr.elem);
             // TODO: figure out gcptrs
-            parse_quote! { #ctx.make_pointer_type(#elem_type, false) }
+            parse_quote! {
+                {
+                    let elem = #elem_type;
+                    #ctx.make_pointer_type(elem, false)
+                }
+            }
         },
         _ => todo!("can't synth type {:?}", ty),
     }
@@ -84,7 +92,7 @@ impl ToTokens for Field {
     }
 }
 
-#[proc_macro_derive(PinionStruct)]
+#[proc_macro_derive(PinionStruct, attributes(pinion))]
 pub fn derive_struct(input: TokenStream) -> TokenStream {
     let DeriveInput {
         ident,
@@ -94,18 +102,7 @@ pub fn derive_struct(input: TokenStream) -> TokenStream {
         ..
     } = parse_macro_input!(input);
 
-    let mut found_repr = false;
-
-    let repr_c: Attribute = parse_quote! { #[repr(C)] };
-
-    for attr in attrs.iter() {
-        if *attr == repr_c {
-            found_repr = true;
-        }
-    }
-    if !found_repr {
-        panic!("no repr")
-    }
+    let attrs = StructAttributes::from_attrs(&attrs).unwrap();
 
     let prim_lookup = make_prim_lookup();
 
@@ -130,12 +127,16 @@ pub fn derive_struct(input: TokenStream) -> TokenStream {
     let ctxq: syn::Expr = parse_quote! { ctx };
     let fq = vf.iter().map(|f| create_field_type(&ctxq, f));
 
+    let name = attrs.name().unwrap_or("");
+    let packed = attrs.packed();
+
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let output = quote! {
+        #[automatically_derived]
         impl #impl_generics pinion::PinionStruct for #ident #ty_generics #where_clause {
             fn create_in_context<C: pinion::Context>(ctx: &mut C) -> C::BasicType {
                 let fields = [#(#fq,)*];
-                ctx.make_struct_type(&fields, false, "")
+                ctx.make_struct_type(&fields, #packed, #name)
             }
         }
     };

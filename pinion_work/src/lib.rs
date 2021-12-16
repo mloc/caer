@@ -1,6 +1,7 @@
 use pinion::PinionStruct;
 
 #[derive(PinionStruct)]
+#[pinion(name = "foo")]
 #[repr(C)]
 struct Foo<'a> {
     x: u8,
