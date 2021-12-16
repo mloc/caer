@@ -1,6 +1,6 @@
-use pinion::PinionStruct;
+use pinion::PinionBasicType;
 
-#[derive(PinionStruct)]
+#[derive(PinionBasicType)]
 #[pinion(name = "foo")]
 #[repr(C)]
 struct Foo<'a> {
@@ -10,6 +10,6 @@ struct Foo<'a> {
     z: f32,
 }
 
-#[derive(PinionStruct)]
+#[derive(PinionBasicType)]
 #[repr(C)]
 struct Ffff {}
