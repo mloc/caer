@@ -22,6 +22,26 @@ fn build_type(ctx: &syn::Expr, ty: &Type) -> syn::Expr {
                 }
             }
         },
+        Type::BareFn(bare_fn) => {
+            assert_eq!(bare_fn.abi, Some(parse_quote! { extern "C" }));
+            let param_types = bare_fn.inputs.iter().map(|arg| build_type(ctx, &arg.ty));
+            let ret_type: syn::Expr = match &bare_fn.output {
+                syn::ReturnType::Default => parse_quote! {None},
+                syn::ReturnType::Type(_, ty) => {
+                    let ty = build_type(ctx, ty);
+                    parse_quote! {Some(#ty)}
+                },
+            };
+
+            parse_quote! {
+                {
+                    let params = [#(#param_types,)*];
+                    let ret_ty = #ret_type;
+                    let func = #ctx.make_function_type(&params, ret_ty);
+                    #ctx.make_func_ptr_type(func)
+                }
+            }
+        },
         _ => todo!("can't synth type {:?}", ty),
     }
 }
@@ -35,6 +55,9 @@ fn build_layout(ty: &Type) -> syn::Expr {
             let elem_ty = &ptr.elem;
             // TODO: figure out gcptrs
             parse_quote! { <pinion::PinionPointer<#elem_ty, false> as pinion::PinionBasicType>::get_layout() }
+        },
+        Type::BareFn(_bare_fn) => {
+            parse_quote! { <pinion::PinionFuncPtr as pinion::PinionBasicType>::get_layout() }
         },
         _ => todo!("can't make layout {:?}", ty),
     }

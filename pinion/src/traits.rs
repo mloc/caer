@@ -29,6 +29,15 @@ pub trait PinionStruct: PinionBasicType {
     }
 }
 
+// Everything below here should probably be moved...
+
+#[macro_export]
+macro_rules! gep_path {
+    ($($part:ident).+) => {
+        &[$(stringify!($part)),+]
+    };
+}
+
 macro_rules! prim_types {
     ($($($prim:ty)|+ => $var:ident),+ $(,)?) => {
         $($(
@@ -40,7 +49,7 @@ macro_rules! prim_types {
                 fn get_layout() -> &'static layout::CycleCell {
                     static LAYOUT: once_cell::sync::OnceCell<layout::CycleCell> = once_cell::sync::OnceCell::new();
                     LAYOUT.get_or_init(|| {
-                        layout::CycleCell::new_init(layout::BasicType::Primitive(Primitive::$var).into())
+                        layout::CycleCell::new_init(layout::BasicType::Primitive(Primitive::$var))
                     })
                 }
             }
@@ -87,5 +96,21 @@ impl<T: PinionBasicType, const GC: bool> PinionBasicType for PinionPointer<T, GC
         let layout = LAYOUT.get().unwrap();
         layout.update(ty);
         layout
+    }
+}
+
+pub struct PinionFuncPtr {
+    _dummy: (),
+}
+
+impl PinionBasicType for PinionFuncPtr {
+    fn create_in_context<C: Context>(_ctx: &mut C) -> C::BasicType {
+        panic!("can't call create_in_context directly for PinionFuncPtr")
+    }
+
+    fn get_layout() -> &'static layout::CycleCell {
+        static LAYOUT: once_cell::sync::OnceCell<layout::CycleCell> =
+            once_cell::sync::OnceCell::new();
+        LAYOUT.get_or_init(|| layout::CycleCell::new_init(layout::BasicType::FuncPtr))
     }
 }

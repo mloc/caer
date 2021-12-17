@@ -10,6 +10,7 @@ pub enum BasicType {
     Struct(StructLayout),
     Primitive(Primitive),
     Pointer(Pointer),
+    FuncPtr,
 }
 
 #[derive(Debug, Clone)]

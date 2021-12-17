@@ -1,4 +1,4 @@
-use pinion::{PinionBasicType, PinionStruct};
+use pinion::{gep_path, PinionBasicType, PinionStruct};
 
 #[derive(PinionStruct)]
 #[pinion(name = "foo")]
@@ -22,8 +22,14 @@ struct Subsub {
     fin: f64,
 }
 
+#[derive(PinionStruct)]
+#[repr(C)]
+struct VtMock {
+    fn_ptr: extern "C" fn(x: &Ffff) -> &Subsub,
+}
+
 fn main() {
     println!("{:#?}", Foo::get_layout());
 
-    println!("{:#?}", Foo::get_gep_indices(&["y", "sub", "fin"]));
+    println!("{:#?}", Foo::get_gep_indices(gep_path!(y.sub.fin)));
 }
