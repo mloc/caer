@@ -9,3 +9,7 @@ pub use interface::*;
 pub use pinion_macros::*;
 pub use pinion_types as types;
 pub use traits::*;
+
+pub mod rex {
+    pub use once_cell;
+}

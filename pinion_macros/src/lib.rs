@@ -32,15 +32,9 @@ fn build_layout(ty: &Type) -> syn::Expr {
             parse_quote! { <#path as pinion::PinionBasicType>::get_layout() }
         },
         Type::Reference(ptr) => {
-            let elem_layout = build_layout(&ptr.elem);
+            let elem_ty = &ptr.elem;
             // TODO: figure out gcptrs
-            parse_quote! {
-                {
-                    let elem = #elem_layout;
-                    let ptr = pinion::types::layout::Pointer::new(elem, false);
-                    pinion::types::layout::BasicType::Pointer(ptr)
-                }
-            }
+            parse_quote! { <pinion::PinionPointer<#elem_ty, false> as pinion::PinionBasicType>::get_layout() }
         },
         _ => todo!("can't make layout {:?}", ty),
     }
@@ -50,7 +44,7 @@ fn ident_to_litstr(ident: &syn::Ident) -> syn::LitStr {
     syn::LitStr::new(&ident.to_string(), ident.span())
 }
 
-#[proc_macro_derive(PinionBasicType, attributes(pinion))]
+#[proc_macro_derive(PinionStruct, attributes(pinion))]
 pub fn derive_struct(input: TokenStream) -> TokenStream {
     let DeriveInput {
         ident,
@@ -76,10 +70,18 @@ pub fn derive_struct(input: TokenStream) -> TokenStream {
     let field_names = fields
         .iter()
         .map(|f| ident_to_litstr(f.ident.as_ref().unwrap()));
-    let field_layouts = fields.iter().map(|f| build_layout(&f.ty));
+    let field_layouts = fields
+        .iter()
+        .map(|f| build_layout(&f.ty))
+        .map(|e| -> syn::Expr {
+            parse_quote! {#e.clone()}
+        });
 
     let name = attrs.name().unwrap_or("");
     let packed = attrs.packed();
+
+    let once_cell: syn::Path = parse_quote! { pinion::rex::once_cell };
+    let layout: syn::Path = parse_quote! { pinion::types::layout };
 
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let output = quote! {
@@ -90,12 +92,28 @@ pub fn derive_struct(input: TokenStream) -> TokenStream {
                 ctx.make_struct_type(&fields, #packed, #name)
             }
 
-            fn get_layout() -> pinion::types::layout::BasicType {
+            fn get_layout() -> &'static #layout::CycleCell {
+                static LAYOUT: #once_cell::sync::OnceCell<#layout::CycleCell> = #once_cell::sync::OnceCell::new();
+
+                if let Some(v) = LAYOUT.get() {
+                    return v
+                }
+
+                match LAYOUT.set(#layout::CycleCell::new_empty()) {
+                    Ok(()) => {},
+                    Err(_) => panic!(),
+                }
+
                 let fields = [#((#field_names,#field_layouts),)*];
-                let struct_layout = pinion::types::layout::StructLayout::new(&fields);
-                pinion::types::layout::BasicType::Struct(struct_layout)
+                let struct_layout = #layout::StructLayout::new(&fields);
+                let lty = #layout::BasicType::Struct(struct_layout);
+
+                let layout = LAYOUT.get().unwrap();
+                layout.update(lty);
+                layout
             }
         }
+        impl #impl_generics pinion::PinionStruct for #ident #ty_generics #where_clause {}
     };
 
     output.into()

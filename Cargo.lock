@@ -1027,6 +1027,7 @@ name = "pinion"
 version = "0.0.0"
 dependencies = [
  "inkwell",
+ "once_cell",
  "pinion_macros",
  "pinion_types",
 ]

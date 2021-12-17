@@ -1,6 +1,6 @@
-use pinion::PinionBasicType;
+use pinion::{PinionBasicType, PinionStruct};
 
-#[derive(PinionBasicType)]
+#[derive(PinionStruct)]
 #[pinion(name = "foo")]
 #[repr(C)]
 struct Foo<'a> {
@@ -10,10 +10,20 @@ struct Foo<'a> {
     z: f32,
 }
 
-#[derive(PinionBasicType)]
+#[derive(PinionStruct)]
 #[repr(C)]
-struct Ffff {}
+struct Ffff {
+    sub: Subsub,
+}
+
+#[derive(PinionStruct)]
+#[repr(C)]
+struct Subsub {
+    fin: f64,
+}
 
 fn main() {
     println!("{:#?}", Foo::get_layout());
+
+    println!("{:#?}", Foo::get_gep_indices(&["y", "sub", "fin"]));
 }
