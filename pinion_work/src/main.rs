@@ -13,3 +13,7 @@ struct Foo<'a> {
 #[derive(PinionBasicType)]
 #[repr(C)]
 struct Ffff {}
+
+fn main() {
+    println!("{:#?}", Foo::get_layout());
+}

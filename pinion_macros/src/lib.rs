@@ -26,6 +26,30 @@ fn build_type(ctx: &syn::Expr, ty: &Type) -> syn::Expr {
     }
 }
 
+fn build_layout(ty: &Type) -> syn::Expr {
+    match ty {
+        Type::Path(path) => {
+            parse_quote! { <#path as pinion::PinionBasicType>::get_layout() }
+        },
+        Type::Reference(ptr) => {
+            let elem_layout = build_layout(&ptr.elem);
+            // TODO: figure out gcptrs
+            parse_quote! {
+                {
+                    let elem = #elem_layout;
+                    let ptr = pinion::types::layout::Pointer::new(elem, false);
+                    pinion::types::layout::BasicType::Pointer(ptr)
+                }
+            }
+        },
+        _ => todo!("can't make layout {:?}", ty),
+    }
+}
+
+fn ident_to_litstr(ident: &syn::Ident) -> syn::LitStr {
+    syn::LitStr::new(&ident.to_string(), ident.span())
+}
+
 #[proc_macro_derive(PinionBasicType, attributes(pinion))]
 pub fn derive_struct(input: TokenStream) -> TokenStream {
     let DeriveInput {
@@ -38,22 +62,21 @@ pub fn derive_struct(input: TokenStream) -> TokenStream {
 
     let attrs = StructAttributes::from_attrs(&attrs).unwrap();
 
-    let mut vf = Vec::new();
-
-    match data {
+    let fields: Vec<syn::Field> = match data {
         syn::Data::Struct(s) => match s.fields {
-            syn::Fields::Named(fields) => {
-                for field in fields.named {
-                    vf.push(field.ty)
-                }
-            },
-            _ => panic!(),
+            syn::Fields::Named(fields) => fields.named.iter().cloned().collect(),
+            _ => panic!("struct must have named fields"),
         },
         _ => panic!("can only derive for structs"),
     };
 
     let ctxq: syn::Expr = parse_quote! { ctx };
-    let fq = vf.iter().map(|f| build_type(&ctxq, f));
+    let fq = fields.iter().map(|f| build_type(&ctxq, &f.ty));
+
+    let field_names = fields
+        .iter()
+        .map(|f| ident_to_litstr(f.ident.as_ref().unwrap()));
+    let field_layouts = fields.iter().map(|f| build_layout(&f.ty));
 
     let name = attrs.name().unwrap_or("");
     let packed = attrs.packed();
@@ -68,7 +91,9 @@ pub fn derive_struct(input: TokenStream) -> TokenStream {
             }
 
             fn get_layout() -> pinion::types::layout::BasicType {
-                todo!();
+                let fields = [#((#field_names,#field_layouts),)*];
+                let struct_layout = pinion::types::layout::StructLayout::new(&fields);
+                pinion::types::layout::BasicType::Struct(struct_layout)
             }
         }
     };
