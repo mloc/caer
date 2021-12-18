@@ -70,7 +70,7 @@ pub struct RtString {
     ptr: NonNull<i8>,
 }
 
-/*#[derive(PinionStruct, Clone, Copy)]
+#[derive(PinionStruct, Clone, Copy)]
 #[repr(C)]
 #[pinion(name = "vt_entry")]
 pub struct Entry {
@@ -81,11 +81,9 @@ pub struct Entry {
     pub proc_lookup: extern "C" fn(proc: &RtString, rt: &mut Runtime) -> ProcPtr,
 }
 
-#[derive(PinionStruct, Debug, Clone, Copy)]
+#[derive(PinionStruct, Clone, Copy)]
 #[repr(C)]
-pub struct FuncPtr {
-    ptr: *const std::ffi::c_void,
-}*/
+pub struct ProcPtr(extern "C" fn(arg_pack: *const ArgPack, rt: &mut Runtime, out: *mut Val));
 
 /*
 use pinion::ptr::FuncPtr;

@@ -1,13 +1,29 @@
 use index_vec::define_index_type;
+use pinion::{Context, PinionBasicType};
 
-define_index_type! {pub struct PathTypeId = u32;}
-define_index_type! {pub struct InstanceTypeId = u32;}
-define_index_type! {pub struct ProcId = u32;}
+macro_rules! define_caer_id {
+    ($name:ident: $pty:ident) => {
+        define_index_type! {pub struct $name = $pty;}
+        impl PinionBasicType for $name {
+            fn create_in_context<C: Context>(ctx: &mut C) -> C::BasicType {
+                $pty::create_in_context(ctx)
+            }
+
+            fn get_layout() -> &'static pinion::types::layout::CycleCell {
+                $pty::get_layout()
+            }
+        }
+    };
+}
+
+define_caer_id! {PatyTypeId: u32}
+define_caer_id! {InstanceTypeId: u32}
+define_caer_id! {ProcId: u32}
 // format is overriden by runtime stringtable for extra info?
-define_index_type! {pub struct StringId = u64;}
+define_caer_id! {StringId: u64}
 // closures aren't exactly procs. oh well.
-define_index_type! {pub struct FuncId = u64;}
-define_index_type! {pub struct TypeId = u32;}
+define_caer_id! {FuncId: u64}
+define_caer_id! {TypeId: u32}
 
 // Nasty consts
 pub const TYPE_ID_ANY: TypeId = TypeId { _raw: 0 };
