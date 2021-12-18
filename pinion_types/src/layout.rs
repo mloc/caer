@@ -11,6 +11,7 @@ pub enum BasicType {
     Primitive(Primitive),
     Pointer(Pointer),
     FuncPtr,
+    OpaqueStruct,
 }
 
 #[derive(Debug, Clone)]

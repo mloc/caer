@@ -28,6 +28,10 @@ struct VtMock {
     fn_ptr: extern "C" fn(x: &Ffff) -> &Subsub,
 }
 
+#[derive(PinionStruct)]
+#[repr(C)]
+struct ExFunc(extern "C" fn(x: &Ffff) -> &Subsub);
+
 fn main() {
     println!("{:#?}", Foo::get_layout());
 

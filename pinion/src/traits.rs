@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 use std::ops::Deref;
+use std::ptr::NonNull;
 
 use crate::interface::Context;
 use crate::types::{layout, Primitive};
@@ -28,6 +29,9 @@ pub trait PinionStruct: PinionBasicType {
         indices
     }
 }
+
+// marker trait
+pub trait PinionPointerType: PinionBasicType {}
 
 // Everything below here should probably be moved...
 
@@ -67,35 +71,51 @@ prim_types! {
     f64 => Float64,
 }
 
-// should be moved
-pub struct PinionPointer<T: PinionBasicType, const GC: bool> {
-    phantom: PhantomData<T>,
+macro_rules! ptr_types {
+    (@inner $t:tt, $res:tt, $ty:ty) => {
+        impl <$t: $res> PinionBasicType for $ty {
+            fn create_in_context<C: Context>(ctx: &mut C) -> C::BasicType {
+                let elem_type = $t::create_in_context(ctx);
+                ctx.make_pointer_type(elem_type, false)
+            }
+
+            fn get_layout() -> &'static layout::CycleCell {
+                static LAYOUT: once_cell::sync::OnceCell<layout::CycleCell> =
+                    once_cell::sync::OnceCell::new();
+
+                if let Some(v) = LAYOUT.get() {
+                    return v;
+                }
+
+                match LAYOUT.set(layout::CycleCell::new_empty()) {
+                    Ok(()) => {},
+                    Err(_) => panic!(),
+                }
+
+                let ty = layout::BasicType::Pointer(layout::Pointer::new($t::get_layout(), false));
+
+                let layout = LAYOUT.get().unwrap();
+                layout.update(ty);
+                layout
+            }
+        }
+        impl <$t: $res> PinionPointerType for $ty {}
+    };
+
+    ($t:ident : $res:tt, [$($ty:ty),+$(,)?]) => {
+        $(ptr_types!(@inner $t, $res, $ty);)+
+    }
 }
 
-impl<T: PinionBasicType, const GC: bool> PinionBasicType for PinionPointer<T, GC> {
+ptr_types!(T: PinionBasicType, [&T, &mut T, *const T, *mut T, NonNull<T>]);
+
+impl<T: PinionPointerType> PinionBasicType for Option<T> {
     fn create_in_context<C: Context>(ctx: &mut C) -> C::BasicType {
-        let elem_type = T::create_in_context(ctx);
-        ctx.make_pointer_type(elem_type, GC)
+        T::create_in_context(ctx)
     }
 
     fn get_layout() -> &'static layout::CycleCell {
-        static LAYOUT: once_cell::sync::OnceCell<layout::CycleCell> =
-            once_cell::sync::OnceCell::new();
-
-        if let Some(v) = LAYOUT.get() {
-            return v;
-        }
-
-        match LAYOUT.set(layout::CycleCell::new_empty()) {
-            Ok(()) => {},
-            Err(_) => panic!(),
-        }
-
-        let ty = layout::BasicType::Pointer(layout::Pointer::new(T::get_layout(), GC));
-
-        let layout = LAYOUT.get().unwrap();
-        layout.update(ty);
-        layout
+        T::get_layout()
     }
 }
 
@@ -112,5 +132,22 @@ impl PinionBasicType for PinionFuncPtr {
         static LAYOUT: once_cell::sync::OnceCell<layout::CycleCell> =
             once_cell::sync::OnceCell::new();
         LAYOUT.get_or_init(|| layout::CycleCell::new_init(layout::BasicType::FuncPtr))
+    }
+}
+impl PinionPointerType for PinionFuncPtr {}
+
+pub struct PinionOpaqueStruct {
+    _dummy: (),
+}
+
+impl PinionBasicType for PinionOpaqueStruct {
+    fn create_in_context<C: Context>(_ctx: &mut C) -> C::BasicType {
+        panic!("can't call create_in_context directly for PinionOpaqueStruct")
+    }
+
+    fn get_layout() -> &'static layout::CycleCell {
+        static LAYOUT: once_cell::sync::OnceCell<layout::CycleCell> =
+            once_cell::sync::OnceCell::new();
+        LAYOUT.get_or_init(|| layout::CycleCell::new_init(layout::BasicType::OpaqueStruct))
     }
 }
