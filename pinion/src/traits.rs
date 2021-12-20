@@ -1,4 +1,3 @@
-use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ptr::NonNull;
 
@@ -32,6 +31,10 @@ pub trait PinionStruct: PinionBasicType {
 
 // marker trait
 pub trait PinionPointerType: PinionBasicType {}
+
+pub trait PinionFuncCarrier {
+    fn get_all_funcs<C: Context>(ctx: &mut C) -> Vec<(&'static str, C::FunctionType)>;
+}
 
 // Everything below here should probably be moved...
 

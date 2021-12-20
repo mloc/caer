@@ -11,7 +11,7 @@ struct ExtFunc {
 }
 
 impl ExtFunc {
-    fn build_shim(&self, carrier: &syn::Type) -> syn::ItemFn {
+    fn build_shim(&self, self_ty: &syn::Type) -> syn::ItemFn {
         let name = &self.name;
         let ret = self.shape.ret.as_ref().map(|ty| quote! { -> #ty });
         let params = self.shape.params.iter().enumerate().map(|(i, ty)| {
@@ -30,7 +30,7 @@ impl ExtFunc {
         let output = quote! {
             #[no_mangle]
             unsafe extern "C" fn #name ( #(#params),* ) #ret {
-                #carrier::#name ( #(#args),* )
+                #self_ty::#name ( #(#args),* )
             }
         }
         .into();
@@ -39,7 +39,7 @@ impl ExtFunc {
     }
 }
 
-pub fn build_export_funcs(target: syn::Type, impl_item: syn::ItemImpl) -> TokenStream2 {
+pub fn build_export_funcs(carrier: syn::Type, impl_item: syn::ItemImpl) -> TokenStream2 {
     assert_eq!(impl_item.generics, parse_quote! {});
 
     let funcs: Vec<_> = impl_item
@@ -58,14 +58,27 @@ pub fn build_export_funcs(target: syn::Type, impl_item: syn::ItemImpl) -> TokenS
         })
         .collect();
 
+    let ctx: syn::Expr = parse_quote! { ctx };
+
     let shims = funcs.iter().map(|e| e.build_shim(&impl_item.self_ty));
+    let ctx_funcs = funcs.iter().map(|e| e.shape.build_type(&ctx));
+    let func_names = funcs.iter().map(|e| &e.name);
+    let func_names_str = funcs.iter().map(|e| e.name.to_string());
 
     quote! {
         #impl_item
 
-        #[doc(hidden)]
-        struct #target {
-            _hide: (), // TODO: never type
+        #[allow(non_camel_case_types)]
+        #[allow(dead_code)]
+        enum #carrier {
+           #(#func_names),*
+        }
+
+        #[automatically_derived]
+        impl pinion::PinionFuncCarrier for #carrier {
+            fn get_all_funcs<C: pinion::Context>(ctx: &mut C) -> Vec<(&'static str, C::FunctionType)> {
+                [#((#func_names_str, #ctx_funcs)),*].into()
+            }
         }
 
         #(#shims)*

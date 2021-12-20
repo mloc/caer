@@ -77,8 +77,7 @@ impl FuncShape {
             {
                 let params = [#(#param_types,)*];
                 let ret_ty = #ret_type;
-                let func = #ctx.make_function_type(&params, ret_ty);
-                #ctx.make_func_ptr_type(func)
+                #ctx.make_function_type(&params, ret_ty)
             }
         }
     }

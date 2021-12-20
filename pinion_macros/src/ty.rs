@@ -17,7 +17,13 @@ pub fn build_type(ctx: &syn::Expr, ty: &syn::Type) -> syn::Expr {
         },
         syn::Type::BareFn(bare_fn) => {
             assert_eq!(bare_fn.abi, Some(parse_quote! { extern "C" }));
-            func::FuncShape::from_bare(bare_fn).build_type(ctx)
+            let func_ty = func::FuncShape::from_bare(bare_fn).build_type(ctx);
+            parse_quote! {
+                {
+                    let func = #func_ty;
+                    #ctx.make_func_ptr_type(func)
+                }
+            }
         },
         _ => todo!("can't synth type {:?}", ty),
     }
