@@ -38,9 +38,13 @@ fn main() {
     println!("{:#?}", Foo::get_gep_indices(gep_path!(y.sub.fin)));
 }
 
-#[pinion_export_funcs(SubsubExports)]
-impl Subsub {
-    fn foo(&self) {
-        println!("hi {}", self.fin);
-    }
+#[pinion_export_funcs(SubsubExports, wheep)]
+trait SubsubExtern {
+    fn foo(&self);
 }
+
+impl SubsubExtern for Subsub {
+    fn foo(&self) {}
+}
+
+wheep!(Subsub);

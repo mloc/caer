@@ -128,5 +128,7 @@ fn derive_struct_newtype(
 
 #[proc_macro_attribute]
 pub fn pinion_export_funcs(attr: TokenStream, item: TokenStream) -> TokenStream {
-    export::build_export_funcs(syn::parse(attr).unwrap(), syn::parse(item).unwrap()).into()
+    let attr_tok: TokenStream2 = attr.into();
+    let args = parse_quote! { #attr_tok }; // meh, easy
+    export::build_export_funcs(args, syn::parse(item).unwrap()).into()
 }
