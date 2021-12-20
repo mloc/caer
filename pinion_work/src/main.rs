@@ -1,4 +1,4 @@
-use pinion::{gep_path, PinionBasicType, PinionStruct};
+use pinion::{gep_path, pinion_export_funcs, PinionBasicType, PinionStruct};
 
 #[derive(PinionStruct)]
 #[pinion(name = "foo")]
@@ -36,4 +36,11 @@ fn main() {
     println!("{:#?}", Foo::get_layout());
 
     println!("{:#?}", Foo::get_gep_indices(gep_path!(y.sub.fin)));
+}
+
+#[pinion_export_funcs(SubsubExports)]
+impl Subsub {
+    fn foo(&self) {
+        println!("hi {}", self.fin);
+    }
 }

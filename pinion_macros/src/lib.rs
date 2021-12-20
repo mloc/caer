@@ -1,4 +1,7 @@
 mod attr;
+mod export;
+mod func;
+mod ty;
 
 extern crate proc_macro;
 
@@ -6,60 +9,7 @@ use attr::StructAttributes;
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{parse_macro_input, parse_quote, DeriveInput, Type};
-
-fn build_type(ctx: &syn::Expr, ty: &Type) -> syn::Expr {
-    match ty {
-        Type::Path(path) => {
-            parse_quote! { <#path as pinion::PinionBasicType>::create_in_context(#ctx) }
-        },
-        Type::Reference(ptr) => {
-            parse_quote! { <#ptr as pinion::PinionBasicType>::create_in_context(#ctx) }
-        },
-        Type::Ptr(ptr) => {
-            parse_quote! { <#ptr as pinion::PinionBasicType>::create_in_context(#ctx) }
-        },
-        Type::BareFn(bare_fn) => {
-            assert_eq!(bare_fn.abi, Some(parse_quote! { extern "C" }));
-            let param_types = bare_fn.inputs.iter().map(|arg| build_type(ctx, &arg.ty));
-            let ret_type: syn::Expr = match &bare_fn.output {
-                syn::ReturnType::Default => parse_quote! {None},
-                syn::ReturnType::Type(_, ty) => {
-                    let ty = build_type(ctx, ty);
-                    parse_quote! {Some(#ty)}
-                },
-            };
-
-            parse_quote! {
-                {
-                    let params = [#(#param_types,)*];
-                    let ret_ty = #ret_type;
-                    let func = #ctx.make_function_type(&params, ret_ty);
-                    #ctx.make_func_ptr_type(func)
-                }
-            }
-        },
-        _ => todo!("can't synth type {:?}", ty),
-    }
-}
-
-fn build_layout(ty: &Type) -> syn::Expr {
-    match ty {
-        Type::Path(path) => {
-            parse_quote! { <#path as pinion::PinionBasicType>::get_layout() }
-        },
-        Type::Reference(ptr) => {
-            parse_quote! { <#ptr as pinion::PinionBasicType>::get_layout() }
-        },
-        Type::Ptr(ptr) => {
-            parse_quote! { <#ptr as pinion::PinionBasicType>::get_layout() }
-        },
-        Type::BareFn(_bare_fn) => {
-            parse_quote! { <pinion::PinionFuncPtr as pinion::PinionBasicType>::get_layout() }
-        },
-        _ => todo!("can't make layout {:?}", ty),
-    }
-}
+use syn::{parse_macro_input, parse_quote, DeriveInput};
 
 fn ident_to_litstr(ident: &syn::Ident) -> syn::LitStr {
     syn::LitStr::new(&ident.to_string(), ident.span())
@@ -98,12 +48,12 @@ fn derive_struct_named(
 ) -> TokenStream2 {
     let attrs = StructAttributes::from_attrs(attrs).unwrap();
     let ctxq: syn::Expr = parse_quote! { ctx };
-    let fq = fields.iter().map(|f| build_type(&ctxq, &f.ty));
+    let fq = fields.iter().map(|f| ty::build_type(&ctxq, &f.ty));
 
     let field_names = fields
         .iter()
         .map(|f| ident_to_litstr(f.ident.as_ref().unwrap()));
-    let field_layouts = fields.iter().map(|f| build_layout(&f.ty));
+    let field_layouts = fields.iter().map(|f| ty::build_layout(&f.ty));
 
     let name = attrs.name().unwrap_or("");
     let packed = attrs.packed();
@@ -156,8 +106,8 @@ fn derive_struct_newtype(
 
     let ctxq: syn::Expr = parse_quote! { ctx };
 
-    let layout_b = build_layout(s_ty);
-    let ctxty = build_type(&ctxq, s_ty);
+    let layout_b = ty::build_layout(s_ty);
+    let ctxty = ty::build_type(&ctxq, s_ty);
 
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
@@ -174,4 +124,9 @@ fn derive_struct_newtype(
         }
         impl #impl_generics pinion::PinionStruct for #ident #ty_generics #where_clause {}
     }
+}
+
+#[proc_macro_attribute]
+pub fn pinion_export_funcs(attr: TokenStream, item: TokenStream) -> TokenStream {
+    export::build_export_funcs(syn::parse(attr).unwrap(), syn::parse(item).unwrap()).into()
 }
