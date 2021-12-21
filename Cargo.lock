@@ -257,6 +257,8 @@ name = "caer_types"
 version = "0.1.0"
 dependencies = [
  "index_vec",
+ "num-derive",
+ "num-traits",
  "pinion",
  "serde",
 ]

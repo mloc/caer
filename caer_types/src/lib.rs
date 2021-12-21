@@ -1,4 +1,5 @@
 pub mod func;
+pub mod heap_object;
 pub mod id;
 pub mod instance;
 pub mod layout;
@@ -8,3 +9,4 @@ pub mod rtti;
 pub mod string;
 pub mod ty;
 pub mod type_tree;
+pub mod val;

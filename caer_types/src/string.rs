@@ -1,6 +1,8 @@
 use std::collections::HashMap;
+use std::ptr::NonNull;
 
 use index_vec::IndexVec;
+use pinion::PinionStruct;
 use serde::{Deserialize, Serialize};
 
 use crate::id::StringId;
@@ -28,4 +30,13 @@ impl FrozenStringTable {
     pub fn lookup(&self, s: impl AsRef<str>) -> Option<StringId> {
         self.ids.get(s.as_ref()).copied()
     }
+}
+
+#[derive(PinionStruct)]
+#[repr(C)]
+#[pinion(name = "rt_string")]
+pub struct RtString {
+    header: HeapHeader,
+    size: i64,
+    ptr: NonNull<i8>,
 }

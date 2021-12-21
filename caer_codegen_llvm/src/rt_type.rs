@@ -48,7 +48,7 @@ pub struct ArgPack {
 
 #[derive(PinionStruct)]
 #[repr(C)]
-#[pinion(name = "arg_pack")]
+#[pinion(name = "heap_header")]
 pub struct HeapHeader {
     kind: i8,
     gc_marker: i8,
