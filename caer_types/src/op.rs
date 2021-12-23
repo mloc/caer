@@ -1,8 +1,9 @@
+use pinion::PinionData;
 use serde::Serialize;
 
 use crate::ty::{RefType, Type};
 
-#[derive(Debug, Copy, Clone, PartialEq, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, PinionData)]
 #[repr(u32)]
 pub enum BinaryOp {
     Add,

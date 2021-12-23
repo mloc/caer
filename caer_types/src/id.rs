@@ -12,11 +12,15 @@ macro_rules! define_caer_id {
             fn get_layout() -> &'static pinion::types::layout::CycleCell {
                 $pty::get_layout()
             }
+
+            unsafe fn validate(ptr: *const u8) {
+                $pty::validate(ptr)
+            }
         }
     };
 }
 
-define_caer_id! {PatyTypeId: u32}
+define_caer_id! {PathTypeId: u32}
 define_caer_id! {InstanceTypeId: u32}
 define_caer_id! {ProcId: u32}
 // format is overriden by runtime stringtable for extra info?

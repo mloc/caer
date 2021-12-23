@@ -4,6 +4,7 @@ use syn::parse_quote;
 use syn::spanned::Spanned;
 
 use crate::func::FuncShape;
+use crate::ty;
 
 struct ExtFunc {
     name: syn::Ident,
@@ -20,17 +21,25 @@ impl ExtFunc {
                 #param_name: #ty
             }
         });
-        let args = self
+        let args: Vec<_> = self
             .shape
             .params
             .iter()
             .enumerate()
-            .map(|(i, ty)| syn::Ident::new(&format!("arg{}", i), ty.span()));
+            .map(|(i, ty)| syn::Ident::new(&format!("arg{}", i), ty.span()))
+            .collect();
+
+        let validates = self.shape.params.iter().enumerate().map(|(i, ty)| {
+            let arg = &args[i];
+            let ptr = parse_quote! { &#arg as *const _ as *const u8 };
+            ty::build_validate(&ptr, ty)
+        });
 
         quote! {
             #[no_mangle]
             #[doc(hidden)]
             unsafe extern "C" fn #name ( #(#params),* ) #ret {
+                #(#validates;)*
                 #ts::#name ( #(#args),* )
             }
         }

@@ -1,6 +1,4 @@
-use num_derive::FromPrimitive;
-use num_traits::FromPrimitive;
-use pinion::PinionStruct;
+use pinion::PinionData;
 
 use crate::layout;
 
@@ -8,13 +6,13 @@ use crate::layout;
 #[derive(PinionData, Debug, Clone)]
 #[repr(C)]
 pub struct HeapHeader {
-    pub gc_marker: u8,
+    pub gc_marker: GcMarker,
 }
 
 impl HeapHeader {
     pub fn new() -> Self {
         Self {
-            gc_marker: GcMarker::White as u8,
+            gc_marker: GcMarker::White,
         }
     }
 }
@@ -33,7 +31,7 @@ pub enum HeapKind {
     String = layout::HEAP_KIND_STRING,
 }
 
-#[derive(FromPrimitive, Debug, Clone, Copy)]
+#[derive(PinionData, Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum GcMarker {
     White = 0,

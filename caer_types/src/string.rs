@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::ptr::NonNull;
 
 use index_vec::IndexVec;
-use pinion::PinionStruct;
+use pinion::PinionData;
 use serde::{Deserialize, Serialize};
 
+use crate::heap_object::HeapHeader;
 use crate::id::StringId;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,7 +33,7 @@ impl FrozenStringTable {
     }
 }
 
-#[derive(PinionStruct)]
+#[derive(PinionData)]
 #[repr(C)]
 #[pinion(name = "rt_string")]
 pub struct RtString {

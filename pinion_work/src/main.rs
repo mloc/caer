@@ -32,6 +32,15 @@ struct VtMock {
 #[repr(C)]
 struct ExFunc(extern "C" fn(x: &Ffff) -> &Subsub);
 
+#[derive(PinionData, Copy, Clone)]
+#[repr(u8)]
+enum WhateverState {
+    Whee,
+    Whoo,
+    Fwoo = 7,
+    Fwen,
+}
+
 fn main() {
     println!("{:#?}", Foo::get_layout());
 
@@ -40,20 +49,11 @@ fn main() {
 
 #[pinion_export_funcs(SubsubExports, export_subsub)]
 trait SubsubExtern {
-    fn foo(&self);
+    fn foo(&self, s: WhateverState);
 }
 
 impl SubsubExtern for Subsub {
-    fn foo(&self) {}
+    fn foo(&self, s: WhateverState) {}
 }
 
 export_subsub!(Subsub);
-
-#[derive(PinionData)]
-#[repr(u8)]
-enum WhateverState {
-    Whee,
-    Whoo,
-    Fwoo = 7,
-    Fwen,
-}

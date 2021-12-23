@@ -1,6 +1,8 @@
-use pinion::{pinion_export_funcs, PinionOpaqueStruct, PinionStruct};
+use pinion::{pinion_export_funcs, PinionData, PinionOpaqueStruct};
 
-#[derive(PinionStruct)]
+use crate::op;
+
+#[derive(PinionData)]
 #[repr(C)]
 #[pinion(name = "val")]
 pub struct ValFlat {
@@ -8,7 +10,7 @@ pub struct ValFlat {
     data: ValUnion,
 }
 
-#[derive(PinionStruct)]
+#[derive(PinionData)]
 #[repr(C)]
 pub struct ValUnion {
     // Value for most, vtable ptr for ref
@@ -17,10 +19,10 @@ pub struct ValUnion {
     high: i64,
 }
 
-/*#[pinion_export_funcs(ValFuncs, export_val_funcs)]
+#[pinion_export_funcs(ValFuncs, export_val_funcs)]
 pub trait ValExport {
     fn rt_val_binary_op(
         rt: &mut PinionOpaqueStruct, op: op::BinaryOp, lhs: &ValFlat, rhs: &ValFlat,
         out: &mut ValFlat,
     );
-}*/
+}

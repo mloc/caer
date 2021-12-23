@@ -4,6 +4,7 @@ use std::ptr::NonNull;
 use aed_common::messages;
 use caer_types::id::StringId;
 use caer_types::type_tree::Specialization;
+use caer_types::val::ValFlat;
 use caer_types::{layout, op};
 use ordered_float::OrderedFloat;
 
@@ -13,6 +14,10 @@ use crate::rtti::RttiRef;
 use crate::runtime::Runtime;
 use crate::string::{resolve_string, RtString};
 use crate::string_table::StringTable;
+
+impl ValFlat {
+    fn foo() {}
+}
 
 // null must be first
 // TODO: not copy?
