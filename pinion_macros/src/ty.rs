@@ -7,13 +7,13 @@ use crate::func;
 pub fn build_type(ctx: &syn::Expr, ty: &syn::Type) -> syn::Expr {
     match ty {
         syn::Type::Path(path) => {
-            parse_quote! { <#path as pinion::PinionBasicType>::create_in_context(#ctx) }
+            parse_quote! { <#path as pinion::PinionData>::create_in_context(#ctx) }
         },
         syn::Type::Reference(ptr) => {
-            parse_quote! { <#ptr as pinion::PinionBasicType>::create_in_context(#ctx) }
+            parse_quote! { <#ptr as pinion::PinionData>::create_in_context(#ctx) }
         },
         syn::Type::Ptr(ptr) => {
-            parse_quote! { <#ptr as pinion::PinionBasicType>::create_in_context(#ctx) }
+            parse_quote! { <#ptr as pinion::PinionData>::create_in_context(#ctx) }
         },
         syn::Type::BareFn(bare_fn) => {
             assert_eq!(bare_fn.abi, Some(parse_quote! { extern "C" }));
@@ -32,16 +32,16 @@ pub fn build_type(ctx: &syn::Expr, ty: &syn::Type) -> syn::Expr {
 pub fn build_layout(ty: &syn::Type) -> syn::Expr {
     match ty {
         syn::Type::Path(path) => {
-            parse_quote! { <#path as pinion::PinionBasicType>::get_layout() }
+            parse_quote! { <#path as pinion::PinionData>::get_layout() }
         },
         syn::Type::Reference(ptr) => {
-            parse_quote! { <#ptr as pinion::PinionBasicType>::get_layout() }
+            parse_quote! { <#ptr as pinion::PinionData>::get_layout() }
         },
         syn::Type::Ptr(ptr) => {
-            parse_quote! { <#ptr as pinion::PinionBasicType>::get_layout() }
+            parse_quote! { <#ptr as pinion::PinionData>::get_layout() }
         },
         syn::Type::BareFn(_bare_fn) => {
-            parse_quote! { <pinion::PinionFuncPtr as pinion::PinionBasicType>::get_layout() }
+            parse_quote! { <pinion::PinionFuncPtr as pinion::PinionData>::get_layout() }
         },
         _ => todo!("can't make layout {:?}", ty),
     }

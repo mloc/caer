@@ -1,6 +1,6 @@
-use pinion::{gep_path, pinion_export_funcs, PinionBasicType, PinionStruct};
+use pinion::{gep_path, pinion_export_funcs, PinionData, PinionStruct};
 
-#[derive(PinionStruct)]
+#[derive(PinionData)]
 #[pinion(name = "foo")]
 #[repr(C)]
 struct Foo<'a> {
@@ -10,25 +10,25 @@ struct Foo<'a> {
     z: f32,
 }
 
-#[derive(PinionStruct)]
+#[derive(PinionData)]
 #[repr(C)]
 struct Ffff {
     sub: Subsub,
 }
 
-#[derive(PinionStruct)]
+#[derive(PinionData)]
 #[repr(C)]
 struct Subsub {
     fin: f64,
 }
 
-#[derive(PinionStruct)]
+#[derive(PinionData)]
 #[repr(C)]
 struct VtMock {
     fn_ptr: extern "C" fn(x: &Ffff) -> &Subsub,
 }
 
-#[derive(PinionStruct)]
+#[derive(PinionData)]
 #[repr(C)]
 struct ExFunc(extern "C" fn(x: &Ffff) -> &Subsub);
 

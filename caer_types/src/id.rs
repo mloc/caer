@@ -1,10 +1,10 @@
 use index_vec::define_index_type;
-use pinion::{Context, PinionBasicType};
+use pinion::{Context, PinionData};
 
 macro_rules! define_caer_id {
     ($name:ident: $pty:ident) => {
         define_index_type! {pub struct $name = $pty;}
-        impl PinionBasicType for $name {
+        impl PinionData for $name {
             fn create_in_context<C: Context>(ctx: &mut C) -> C::BasicType {
                 $pty::create_in_context(ctx)
             }

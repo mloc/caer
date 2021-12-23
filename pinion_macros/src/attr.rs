@@ -2,12 +2,12 @@ use std::error::Error;
 
 use syn::{parse_quote, Attribute, Lit, Meta};
 
-pub struct StructAttributes {
+pub struct DataAttributes {
     name: Option<String>,
     packed: bool,
 }
 
-impl StructAttributes {
+impl DataAttributes {
     pub fn from_attrs(attrs: &[Attribute]) -> Result<Self, Box<dyn Error>> {
         let mut name = None;
         let mut packed = None;

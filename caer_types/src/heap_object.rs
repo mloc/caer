@@ -5,7 +5,7 @@ use pinion::PinionStruct;
 use crate::layout;
 
 /// Header for heap objects
-#[derive(PinionStruct, Debug, Clone)]
+#[derive(PinionData, Debug, Clone)]
 #[repr(C)]
 pub struct HeapHeader {
     pub gc_marker: u8,

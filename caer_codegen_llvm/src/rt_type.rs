@@ -1,9 +1,9 @@
 use std::ptr::NonNull;
 
 use caer_types::id::InstanceTypeId;
-use pinion::{PinionOpaqueStruct, PinionStruct};
+use pinion::{PinionData, PinionOpaqueStruct};
 
-#[derive(PinionStruct)]
+#[derive(PinionData)]
 #[repr(C)]
 #[pinion(name = "val")]
 pub struct Val {
@@ -11,7 +11,7 @@ pub struct Val {
     data: ValUnion,
 }
 
-#[derive(PinionStruct)]
+#[derive(PinionData)]
 #[repr(C)]
 pub struct ValUnion {
     // Value for most, vtable ptr for ref
@@ -20,14 +20,14 @@ pub struct ValUnion {
     high: i64,
 }
 
-#[derive(PinionStruct)]
+#[derive(PinionData)]
 #[repr(C)]
 #[pinion(name = "runtime")]
 pub struct Runtime {
     inner: PinionOpaqueStruct,
 }
 
-#[derive(PinionStruct)]
+#[derive(PinionData)]
 #[repr(C)]
 #[pinion(name = "arg_pack_tuple")]
 pub struct ArgPackTuple {
@@ -35,7 +35,7 @@ pub struct ArgPackTuple {
     val: Val,
 }
 
-#[derive(PinionStruct)]
+#[derive(PinionData)]
 #[repr(C)]
 #[pinion(name = "arg_pack")]
 pub struct ArgPack {
@@ -46,7 +46,7 @@ pub struct ArgPack {
     src_val: Val,
 }
 
-#[derive(PinionStruct)]
+#[derive(PinionData)]
 #[repr(C)]
 #[pinion(name = "heap_header")]
 pub struct HeapHeader {
@@ -54,14 +54,14 @@ pub struct HeapHeader {
     gc_marker: i8,
 }
 
-#[derive(PinionStruct)]
+#[derive(PinionData)]
 #[repr(C)]
 #[pinion(name = "datum_header")]
 pub struct DatumCommon {
     header: HeapHeader,
 }
 
-#[derive(PinionStruct)]
+#[derive(PinionData)]
 #[repr(C)]
 #[pinion(name = "rt_string")]
 pub struct RtString {
@@ -70,7 +70,7 @@ pub struct RtString {
     ptr: NonNull<i8>,
 }
 
-#[derive(PinionStruct, Clone, Copy)]
+#[derive(PinionData, Clone, Copy)]
 #[repr(C)]
 #[pinion(name = "vt_entry")]
 pub struct Entry {
@@ -81,7 +81,7 @@ pub struct Entry {
     pub proc_lookup: extern "C" fn(proc: &RtString, rt: &mut Runtime) -> ProcPtr,
 }
 
-#[derive(PinionStruct, Clone, Copy)]
+#[derive(PinionData, Clone, Copy)]
 #[repr(C)]
 pub struct ProcPtr(extern "C" fn(arg_pack: *const ArgPack, rt: &mut Runtime, out: *mut Val));
 

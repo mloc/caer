@@ -4,13 +4,15 @@ use std::ptr::NonNull;
 use crate::interface::Context;
 use crate::types::{layout, Primitive};
 
-pub trait PinionBasicType {
+pub trait PinionData {
+    fn validate(&self);
+
     fn create_in_context<C: Context>(ctx: &mut C) -> C::BasicType;
 
     fn get_layout() -> &'static layout::CycleCell;
 }
 
-pub trait PinionStruct: PinionBasicType {
+pub trait PinionStruct: PinionData {
     fn get_gep_indices(path: &[&'static str]) -> Vec<u64> {
         let mut indices = vec![0];
 
@@ -30,7 +32,7 @@ pub trait PinionStruct: PinionBasicType {
 }
 
 // marker trait
-pub trait PinionPointerType: PinionBasicType {}
+pub trait PinionPointerType: PinionData {}
 
 pub trait PinionFuncCarrier {
     fn get_all_funcs<C: Context>(ctx: &mut C) -> Vec<(&'static str, C::FunctionType)>;
@@ -48,7 +50,9 @@ macro_rules! gep_path {
 macro_rules! prim_types {
     ($($($prim:ty)|+ => $var:ident),+ $(,)?) => {
         $($(
-            impl PinionBasicType for $prim {
+            impl PinionData for $prim {
+                fn validate(&self) {}
+
                 fn create_in_context<C: Context>(ctx: &mut C) -> C::BasicType {
                     ctx.make_primitive_type(Primitive::$var)
                 }
@@ -76,7 +80,15 @@ prim_types! {
 
 macro_rules! ptr_types {
     (@inner $t:tt, $res:tt, $ty:ty) => {
-        impl <$t: $res> PinionBasicType for $ty {
+        impl <$t: $res> PinionData for $ty {
+            fn validate(&self) {
+                assert_eq!(std::mem::size_of::<$ty>(), 8);
+                unsafe {
+                    let pptr: *const u64 = std::mem::transmute(self);
+                    assert_ne!(*pptr, 0);
+                }
+            }
+
             fn create_in_context<C: Context>(ctx: &mut C) -> C::BasicType {
                 let elem_type = $t::create_in_context(ctx);
                 ctx.make_pointer_type(elem_type, false)
@@ -110,9 +122,16 @@ macro_rules! ptr_types {
     }
 }
 
-ptr_types!(T: PinionBasicType, [&T, &mut T, *const T, *mut T, NonNull<T>]);
+ptr_types!(T: PinionData, [&T, &mut T, *const T, *mut T, NonNull<T>]);
 
-impl<T: PinionPointerType> PinionBasicType for Option<T> {
+impl<T: PinionPointerType> PinionData for Option<T> {
+    fn validate(&self) {
+        assert_eq!(std::mem::size_of::<Self>(), std::mem::size_of::<T>());
+        if let Some(x) = self {
+            x.validate()
+        }
+    }
+
     fn create_in_context<C: Context>(ctx: &mut C) -> C::BasicType {
         T::create_in_context(ctx)
     }
@@ -126,7 +145,9 @@ pub struct PinionFuncPtr {
     _dummy: (),
 }
 
-impl PinionBasicType for PinionFuncPtr {
+impl PinionData for PinionFuncPtr {
+    fn validate(&self) {}
+
     fn create_in_context<C: Context>(_ctx: &mut C) -> C::BasicType {
         panic!("can't call create_in_context directly for PinionFuncPtr")
     }
@@ -143,7 +164,9 @@ pub struct PinionOpaqueStruct {
     _dummy: (),
 }
 
-impl PinionBasicType for PinionOpaqueStruct {
+impl PinionData for PinionOpaqueStruct {
+    fn validate(&self) {}
+
     fn create_in_context<C: Context>(_ctx: &mut C) -> C::BasicType {
         panic!("can't call create_in_context directly for PinionOpaqueStruct")
     }
