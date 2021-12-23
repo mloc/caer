@@ -1,4 +1,4 @@
-use proc_macro2::TokenStream;
+use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::parse_quote;
 
@@ -45,7 +45,8 @@ impl DeriveCtx {
                 },
                 _ => panic!("struct must have fields"),
             },
-            _ => panic!("can only derive for structs"),
+            syn::Data::Enum(e) => self.derive_enum(e),
+            _ => panic!("can only derive for structs and enums"),
         }
     }
 
@@ -58,8 +59,14 @@ impl DeriveCtx {
             .map(|f| ident_to_litstr(f.ident.as_ref().unwrap()));
         let field_layouts = fields.iter().map(|f| ty::build_layout(&f.ty));
 
+        let field_validates = fields.iter().map(|f| {
+            let ident = f.ident.as_ref().unwrap();
+            let ptr = parse_quote! {(&(*sptr).#ident) as *const _ as *const u8};
+            ty::build_validate(&ptr, &f.ty)
+        });
+
         let name = self.attrs.name().unwrap_or("");
-        let packed = self.attrs.packed();
+        let packed = self.attrs.repr().as_struct().unwrap();
         let ident = &self.ident;
 
         let once_cell: syn::Path = parse_quote! { pinion::rex::once_cell };
@@ -96,8 +103,10 @@ impl DeriveCtx {
                     layout
                 }
 
-                fn validate(&self) {
-                    todo!();
+                unsafe fn validate(ptr: *const u8) {
+                    let sptr = ptr as *const Self;
+
+                    #(#field_validates;)*
                 }
             }
             #[automatically_derived]
@@ -114,6 +123,7 @@ impl DeriveCtx {
 
         let layout_b = ty::build_layout(s_ty);
         let ctxty = ty::build_type(&ctxq, s_ty);
+        let validate_body = ty::build_validate(&parse_quote! { ptr }, s_ty);
         let ident = &self.ident;
 
         let (impl_generics, ty_generics, where_clause) = self.generics.split_for_impl();
@@ -129,11 +139,69 @@ impl DeriveCtx {
                     #layout_b
                 }
 
-                fn validate(&self) {
-                    todo!();
+                unsafe fn validate(ptr: *const u8) {
+                    #validate_body
                 }
             }
             impl #impl_generics pinion::PinionStruct for #ident #ty_generics #where_clause {}
+        }
+    }
+
+    fn derive_enum(&self, enum_data: &syn::DataEnum) -> TokenStream {
+        let disc_width = self.attrs.repr().as_enum().unwrap();
+        let prim: syn::Type = match disc_width {
+            1 => parse_quote! {u8},
+            2 => parse_quote! {u16},
+            4 => parse_quote! {u32},
+            8 => parse_quote! {u64},
+            _ => unreachable!(),
+        };
+
+        enum_data.variants.iter().for_each(|v| {
+            if !matches!(v.fields, syn::Fields::Unit) {
+                todo!("handle fieldy enums")
+            }
+        });
+
+        let mut de_prev: (syn::Expr, isize) = (parse_quote! {0}, 0);
+        let disc_expr = enum_data.variants.iter().map(|v| -> syn::Expr {
+            if let Some((_, disc)) = &v.discriminant {
+                de_prev = (disc.clone(), 0);
+            }
+            let (expr, count) = &de_prev;
+            let count_lit = syn::LitInt::new(&count.to_string(), Span::call_site());
+            let out = parse_quote! { (#expr) + #count_lit };
+            de_prev.1 += 1;
+            out
+        });
+        let disc_const_names: Vec<syn::Ident> = (0..enum_data.variants.len())
+            .map(|i| syn::Ident::new(&format!("DISC_{}", i), Span::call_site()))
+            .collect();
+
+        let ident = &self.ident;
+        let (impl_generics, ty_generics, where_clause) = self.generics.split_for_impl();
+
+        quote! {
+            #[automatically_derived]
+            impl #impl_generics pinion::PinionData for #ident #ty_generics #where_clause {
+                fn create_in_context<C: pinion::Context>(ctx: &mut C) -> C::BasicType {
+                    <#prim as pinion::PinionData>::create_in_context(ctx)
+                }
+
+                fn get_layout() -> &'static pinion::types::layout::CycleCell {
+                    <#prim as pinion::PinionData>::get_layout()
+                }
+
+                unsafe fn validate(ptr: *const u8) {
+                    #(const #disc_const_names: #prim = #disc_expr;)*
+
+                    let disc: #prim = *(ptr as *const #prim);
+                    match disc {
+                        #(#disc_const_names)|* => {},
+                        _ => panic!(),
+                    }
+                }
+            }
         }
     }
 }

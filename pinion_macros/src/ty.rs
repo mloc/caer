@@ -46,3 +46,15 @@ pub fn build_layout(ty: &syn::Type) -> syn::Expr {
         _ => todo!("can't make layout {:?}", ty),
     }
 }
+
+pub fn build_validate(ptr: &syn::Expr, ty: &syn::Type) -> syn::Expr {
+    match ty {
+        syn::Type::Path(_) | syn::Type::Reference(_) | syn::Type::Ptr(_) => {
+            parse_quote! { <#ty as pinion::PinionData>::validate(#ptr) }
+        },
+        syn::Type::BareFn(_) => {
+            parse_quote! { {} } // maybe validate ptr..?
+        },
+        _ => todo!("can't make validate for {:?}", ty),
+    }
+}

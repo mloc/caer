@@ -5,7 +5,7 @@ use crate::interface::Context;
 use crate::types::{layout, Primitive};
 
 pub trait PinionData {
-    fn validate(&self);
+    unsafe fn validate(ptr: *const u8);
 
     fn create_in_context<C: Context>(ctx: &mut C) -> C::BasicType;
 
@@ -31,7 +31,7 @@ pub trait PinionStruct: PinionData {
     }
 }
 
-// marker trait
+// marker trait. must be a nicheable type
 pub trait PinionPointerType: PinionData {}
 
 pub trait PinionFuncCarrier {
@@ -51,7 +51,7 @@ macro_rules! prim_types {
     ($($($prim:ty)|+ => $var:ident),+ $(,)?) => {
         $($(
             impl PinionData for $prim {
-                fn validate(&self) {}
+                unsafe fn validate(_ptr: *const u8) {}
 
                 fn create_in_context<C: Context>(ctx: &mut C) -> C::BasicType {
                     ctx.make_primitive_type(Primitive::$var)
@@ -81,12 +81,10 @@ prim_types! {
 macro_rules! ptr_types {
     (@inner $t:tt, $res:tt, $ty:ty) => {
         impl <$t: $res> PinionData for $ty {
-            fn validate(&self) {
+            unsafe fn validate(ptr: *const u8) {
                 assert_eq!(std::mem::size_of::<$ty>(), 8);
-                unsafe {
-                    let pptr: *const u64 = std::mem::transmute(self);
-                    assert_ne!(*pptr, 0);
-                }
+                let pptr: *const u64 = ptr as _;
+                assert_ne!(*pptr, 0);
             }
 
             fn create_in_context<C: Context>(ctx: &mut C) -> C::BasicType {
@@ -125,10 +123,11 @@ macro_rules! ptr_types {
 ptr_types!(T: PinionData, [&T, &mut T, *const T, *mut T, NonNull<T>]);
 
 impl<T: PinionPointerType> PinionData for Option<T> {
-    fn validate(&self) {
+    unsafe fn validate(ptr: *const u8) {
         assert_eq!(std::mem::size_of::<Self>(), std::mem::size_of::<T>());
-        if let Some(x) = self {
-            x.validate()
+        assert_eq!(std::mem::size_of::<Self>(), 8);
+        if (ptr as *const Self).as_ref().is_some() {
+            T::validate(ptr)
         }
     }
 
@@ -146,7 +145,9 @@ pub struct PinionFuncPtr {
 }
 
 impl PinionData for PinionFuncPtr {
-    fn validate(&self) {}
+    unsafe fn validate(ptr: *const u8) {
+        assert!(!ptr.is_null());
+    }
 
     fn create_in_context<C: Context>(_ctx: &mut C) -> C::BasicType {
         panic!("can't call create_in_context directly for PinionFuncPtr")
@@ -165,7 +166,7 @@ pub struct PinionOpaqueStruct {
 }
 
 impl PinionData for PinionOpaqueStruct {
-    fn validate(&self) {}
+    unsafe fn validate(_ptr: *const u8) {}
 
     fn create_in_context<C: Context>(_ctx: &mut C) -> C::BasicType {
         panic!("can't call create_in_context directly for PinionOpaqueStruct")

@@ -48,3 +48,12 @@ impl SubsubExtern for Subsub {
 }
 
 export_subsub!(Subsub);
+
+#[derive(PinionData)]
+#[repr(u8)]
+enum WhateverState {
+    Whee,
+    Whoo,
+    Fwoo = 7,
+    Fwen,
+}
