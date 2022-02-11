@@ -1,3 +1,5 @@
+#![feature(arbitrary_enum_discriminant)]
+
 use pinion::layout_ctx::LayoutCtx;
 use pinion::{gep_path, pinion_export_funcs, PinionData, PinionStruct};
 
@@ -45,8 +47,9 @@ enum WhateverState {
 #[derive(PinionData)]
 #[repr(C, u8)]
 enum Fenum {
-    A(u8),
+    A(u8) = 7,
     B(u64),
+    W = 28,
     C(Ffff),
 }
 
@@ -54,6 +57,9 @@ fn main() {
     let mut ctx = LayoutCtx::new();
     let id = ctx.populate::<Foo>();
     println!("{:#?}", ctx.get(id));
+
+    let feid = ctx.populate::<Fenum>();
+    println!("{:#?}", ctx.get(feid));
 
     println!("{:#?}", ctx.get_gep_indices::<Foo>(gep_path!(y.sub.fin)));
 }

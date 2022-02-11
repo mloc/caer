@@ -6,6 +6,7 @@ use crate::attr::DataAttributes;
 use crate::ty;
 
 pub struct DeriveCtx {
+    vis: syn::Visibility,
     ident: syn::Ident,
     data: syn::Data,
     generics: syn::Generics,
@@ -15,6 +16,7 @@ pub struct DeriveCtx {
 impl DeriveCtx {
     pub fn create(input: syn::DeriveInput) -> Self {
         let syn::DeriveInput {
+            vis,
             ident,
             data,
             generics,
@@ -25,6 +27,7 @@ impl DeriveCtx {
         let attrs = DataAttributes::from_attrs(&attrs).unwrap();
 
         Self {
+            vis,
             ident,
             data,
             generics,
@@ -106,7 +109,6 @@ impl DeriveCtx {
         let s_ty = &fields.first().unwrap().ty;
 
         let ctxq: syn::Expr = parse_quote! { ctx };
-        let lctxq: syn::Ident = parse_quote! { lctx };
 
         let inner_data = ty::normalize_ty(s_ty);
         let ctxty = ty::build_type(&ctxq, s_ty);
@@ -145,30 +147,71 @@ impl DeriveCtx {
             _ => unreachable!(),
         };
 
-        enum_data.variants.iter().for_each(|v| {
-            if !matches!(v.fields, syn::Fields::Unit) {
-                assert!(has_c);
-                todo!("handle fieldy enums")
-            }
+        let has_fields = enum_data
+            .variants
+            .iter()
+            .any(|v| !matches!(v.fields, syn::Fields::Unit));
+
+        assert_eq!(has_fields, has_c);
+
+        // TODO(ERRH)
+        enum_data.variants.iter().for_each(|v| match &v.fields {
+            syn::Fields::Named(_) => panic!(),
+            syn::Fields::Unnamed(u) => assert_eq!(u.unnamed.len(), 1),
+            syn::Fields::Unit => {},
         });
 
-        let mut de_prev: (syn::Expr, isize) = (parse_quote! {0}, 0);
-        let disc_expr = enum_data.variants.iter().map(|v| -> syn::Expr {
-            if let Some((_, disc)) = &v.discriminant {
-                de_prev = (disc.clone(), 0);
-            }
-            let (expr, count) = &de_prev;
-            let count_lit = syn::LitInt::new(&count.to_string(), Span::call_site());
-            let out = parse_quote! { (#expr) + #count_lit };
-            de_prev.1 += 1;
-            out
-        });
+        let unit_enum_name = if has_fields {
+            // TODO: name from attr
+            syn::Ident::new(&format!("{}Variant", self.ident), self.ident.span())
+        } else {
+            self.ident.clone()
+        };
+
         let disc_const_names: Vec<syn::Ident> = (0..enum_data.variants.len())
             .map(|i| syn::Ident::new(&format!("DISC_{}", i), Span::call_site()))
+            .collect();
+        let disc_exprs: Vec<_> = enum_data
+            .variants
+            .iter()
+            .map(|v| -> syn::Expr {
+                let v_ident = &v.ident;
+                parse_quote! { #unit_enum_name::#v_ident as #prim }
+            })
             .collect();
 
         let ident = &self.ident;
         let (impl_generics, ty_generics, where_clause) = self.generics.split_for_impl();
+
+        let unit_enum = has_fields.then(|| {
+            let variants = enum_data.variants.iter().map(|v| syn::Variant {
+                attrs: vec![],
+                ident: v.ident.clone(),
+                fields: syn::Fields::Unit,
+                discriminant: v.discriminant.clone(),
+            });
+            let vis = &self.vis;
+
+            quote! {
+                #[repr(#prim)]
+                #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+                #vis enum #unit_enum_name {
+                    #(#variants,)*
+                }
+            }
+        });
+
+        let field_layouts = enum_data.variants.iter().filter_map(|v| match &v.fields {
+            syn::Fields::Named(_) => panic!(),
+            syn::Fields::Unnamed(u) => {
+                assert_eq!(u.unnamed.len(), 1);
+                let field_ty = &u.unnamed[0].ty;
+                let v_ident = &v.ident;
+                let disc_expr = quote! { #unit_enum_name::#v_ident as u64 };
+                Some(quote! {(#disc_expr, lctx.populate::<#field_ty>())})
+            },
+            syn::Fields::Unit => None,
+        });
 
         quote! {
             #[automatically_derived]
@@ -178,11 +221,16 @@ impl DeriveCtx {
                 }
 
                 fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::BasicType {
-                    <#prim as pinion::PinionData>::get_layout(lctx)
+                    let enum_layout = pinion::layout::Enum {
+                        disc_width: #disc_width,
+                        discs: vec![#(#disc_exprs as u64,)*],
+                        field_layouts: [#(#field_layouts,)*].into(),
+                    };
+                    pinion::layout::BasicType::Enum(enum_layout)
                 }
 
                 unsafe fn validate(ptr: *const u8) {
-                    #(const #disc_const_names: #prim = #disc_expr;)*
+                    #(const #disc_const_names: #prim = #disc_exprs;)*
 
                     let disc: #prim = *(ptr as *const #prim);
                     match disc {
@@ -191,6 +239,8 @@ impl DeriveCtx {
                     }
                 }
             }
+
+            #unit_enum
         }
     }
 }

@@ -1,10 +1,7 @@
-use std::any::TypeId;
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::ops::Deref;
-use std::sync::{RwLock, RwLockReadGuard};
 
-use crate::layout_ctx::{LayoutCtx, LayoutId};
+use crate::layout_ctx::LayoutId;
 use crate::types::Primitive;
 
 #[derive(Debug, Clone)]
@@ -36,7 +33,7 @@ impl StructLayout {
         }
     }
 
-    pub fn lookup_field<'l>(&self, field: &'static str) -> Option<(usize, LayoutId)> {
+    pub fn lookup_field(&self, field: &'static str) -> Option<(usize, LayoutId)> {
         self.name_lookup
             .get(field)
             .map(|idx| (*idx, self.fields[*idx]))
@@ -61,6 +58,8 @@ impl Pointer {
 
 #[derive(Debug, Clone)]
 pub struct Enum {
-    disc_width: i32,
-    discs: Vec<u64>,
+    pub disc_width: i32,
+    pub discs: Vec<u64>,
+    // Maps disc value to layout. No entry if unit field
+    pub field_layouts: HashMap<u64, LayoutId>,
 }

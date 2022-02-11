@@ -1,4 +1,3 @@
-use quote::quote;
 use syn::parse_quote;
 
 use crate::func;
