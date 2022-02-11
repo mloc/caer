@@ -1,12 +1,13 @@
+use pinion::layout_ctx::LayoutCtx;
 use pinion::{gep_path, pinion_export_funcs, PinionData, PinionStruct};
 
 #[derive(PinionData)]
 #[pinion(name = "foo")]
 #[repr(C)]
-struct Foo<'a> {
+struct Foo {
+    p: &'static Ffff,
     x: u8,
     y: Ffff,
-    p: &'a Ffff,
     z: f32,
 }
 
@@ -41,10 +42,20 @@ enum WhateverState {
     Fwen,
 }
 
-fn main() {
-    println!("{:#?}", Foo::get_layout());
+#[derive(PinionData)]
+#[repr(C, u8)]
+enum Fenum {
+    A(u8),
+    B(u64),
+    C(Ffff),
+}
 
-    println!("{:#?}", Foo::get_gep_indices(gep_path!(y.sub.fin)));
+fn main() {
+    let mut ctx = LayoutCtx::new();
+    let id = ctx.populate::<Foo>();
+    println!("{:#?}", ctx.get(id));
+
+    println!("{:#?}", ctx.get_gep_indices::<Foo>(gep_path!(y.sub.fin)));
 }
 
 #[pinion_export_funcs(SubsubExports, export_subsub)]
@@ -56,4 +67,4 @@ impl SubsubExtern for Subsub {
     fn foo(&self, s: WhateverState) {}
 }
 
-export_subsub!(Subsub);
+//export_subsub!(Subsub);

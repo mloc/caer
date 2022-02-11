@@ -6,11 +6,9 @@ mod ty;
 
 extern crate proc_macro;
 
-use attr::DataAttributes;
 use data::DeriveCtx;
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use quote::quote;
 use syn::{parse_macro_input, parse_quote, DeriveInput};
 
 #[proc_macro_derive(PinionData, attributes(pinion))]

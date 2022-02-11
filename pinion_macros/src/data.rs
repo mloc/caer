@@ -52,12 +52,16 @@ impl DeriveCtx {
 
     pub fn derive_named(&self, fields: &[syn::Field]) -> TokenStream {
         let ctxq: syn::Expr = parse_quote! { ctx };
+        let lctxq: syn::Ident = parse_quote! { lctx };
         let fq = fields.iter().map(|f| ty::build_type(&ctxq, &f.ty));
 
         let field_names = fields
             .iter()
             .map(|f| ident_to_litstr(f.ident.as_ref().unwrap()));
-        let field_layouts = fields.iter().map(|f| ty::build_layout(&f.ty));
+        let field_layouts = fields.iter().map(|f| -> syn::Expr {
+            let ty = ty::normalize_ty(&f.ty);
+            parse_quote! { #lctxq.populate::<#ty>() }
+        });
 
         let field_validates = fields.iter().map(|f| {
             let ident = f.ident.as_ref().unwrap();
@@ -69,9 +73,6 @@ impl DeriveCtx {
         let packed = self.attrs.repr().as_struct().unwrap();
         let ident = &self.ident;
 
-        let once_cell: syn::Path = parse_quote! { pinion::rex::once_cell };
-        let layout: syn::Path = parse_quote! { pinion::types::layout };
-
         let (impl_generics, ty_generics, where_clause) = self.generics.split_for_impl();
 
         quote! {
@@ -82,25 +83,10 @@ impl DeriveCtx {
                     ctx.make_struct_type(&fields, #packed, #name)
                 }
 
-                fn get_layout() -> &'static #layout::CycleCell {
-                    static LAYOUT: #once_cell::sync::OnceCell<#layout::CycleCell> = #once_cell::sync::OnceCell::new();
-
-                    if let Some(v) = LAYOUT.get() {
-                        return v
-                    }
-
-                    match LAYOUT.set(#layout::CycleCell::new_empty()) {
-                        Ok(()) => {},
-                        Err(_) => panic!(),
-                    }
-
+                fn get_layout(#lctxq: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::BasicType {
                     let fields = [#((#field_names,#field_layouts),)*];
-                    let struct_layout = #layout::StructLayout::new(&fields);
-                    let lty = #layout::BasicType::Struct(struct_layout);
-
-                    let layout = LAYOUT.get().unwrap();
-                    layout.update(lty);
-                    layout
+                    let struct_layout = pinion::layout::StructLayout::new(&fields);
+                    pinion::layout::BasicType::Struct(struct_layout)
                 }
 
                 unsafe fn validate(ptr: *const u8) {
@@ -120,8 +106,9 @@ impl DeriveCtx {
         let s_ty = &fields.first().unwrap().ty;
 
         let ctxq: syn::Expr = parse_quote! { ctx };
+        let lctxq: syn::Ident = parse_quote! { lctx };
 
-        let layout_b = ty::build_layout(s_ty);
+        let inner_data = ty::normalize_ty(s_ty);
         let ctxty = ty::build_type(&ctxq, s_ty);
         let validate_body = ty::build_validate(&parse_quote! { ptr }, s_ty);
         let ident = &self.ident;
@@ -135,20 +122,21 @@ impl DeriveCtx {
                     #ctxty
                 }
 
-                fn get_layout() -> &'static pinion::types::layout::CycleCell {
-                    #layout_b
+                fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::BasicType {
+                    <#inner_data as pinion::PinionData>::get_layout(lctx)
                 }
 
                 unsafe fn validate(ptr: *const u8) {
                     #validate_body
                 }
             }
+            #[automatically_derived]
             impl #impl_generics pinion::PinionStruct for #ident #ty_generics #where_clause {}
         }
     }
 
     fn derive_enum(&self, enum_data: &syn::DataEnum) -> TokenStream {
-        let disc_width = self.attrs.repr().as_enum().unwrap();
+        let (disc_width, has_c) = self.attrs.repr().as_enum().unwrap();
         let prim: syn::Type = match disc_width {
             1 => parse_quote! {u8},
             2 => parse_quote! {u16},
@@ -159,6 +147,7 @@ impl DeriveCtx {
 
         enum_data.variants.iter().for_each(|v| {
             if !matches!(v.fields, syn::Fields::Unit) {
+                assert!(has_c);
                 todo!("handle fieldy enums")
             }
         });
@@ -188,8 +177,8 @@ impl DeriveCtx {
                     <#prim as pinion::PinionData>::create_in_context(ctx)
                 }
 
-                fn get_layout() -> &'static pinion::types::layout::CycleCell {
-                    <#prim as pinion::PinionData>::get_layout()
+                fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::BasicType {
+                    <#prim as pinion::PinionData>::get_layout(lctx)
                 }
 
                 unsafe fn validate(ptr: *const u8) {

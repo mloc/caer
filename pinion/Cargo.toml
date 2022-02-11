@@ -10,5 +10,4 @@ description = "Mid-level wrappers around inkwell's API"
 [dependencies]
 inkwell = { git = "https://github.com/mloc/inkwell", branch = "exceptions" }
 pinion_macros = { path = "../pinion_macros" }
-pinion_types = { path = "../pinion_types" }
 once_cell = "1.4.0"

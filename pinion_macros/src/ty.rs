@@ -1,3 +1,4 @@
+use quote::quote;
 use syn::parse_quote;
 
 use crate::func;
@@ -29,19 +30,19 @@ pub fn build_type(ctx: &syn::Expr, ty: &syn::Type) -> syn::Expr {
     }
 }
 
-pub fn build_layout(ty: &syn::Type) -> syn::Expr {
+pub fn normalize_ty(ty: &syn::Type) -> syn::Type {
     match ty {
         syn::Type::Path(path) => {
-            parse_quote! { <#path as pinion::PinionData>::get_layout() }
+            parse_quote! { #path }
         },
         syn::Type::Reference(ptr) => {
-            parse_quote! { <#ptr as pinion::PinionData>::get_layout() }
+            parse_quote! { #ptr }
         },
         syn::Type::Ptr(ptr) => {
-            parse_quote! { <#ptr as pinion::PinionData>::get_layout() }
+            parse_quote! { #ptr }
         },
         syn::Type::BareFn(_bare_fn) => {
-            parse_quote! { <pinion::PinionFuncPtr as pinion::PinionData>::get_layout() }
+            parse_quote! { pinion::PinionFuncPtr }
         },
         _ => todo!("can't make layout {:?}", ty),
     }

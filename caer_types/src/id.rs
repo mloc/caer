@@ -9,8 +9,8 @@ macro_rules! define_caer_id {
                 $pty::create_in_context(ctx)
             }
 
-            fn get_layout() -> &'static pinion::types::layout::CycleCell {
-                $pty::get_layout()
+            fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::BasicType {
+                $pty::get_layout(lctx)
             }
 
             unsafe fn validate(ptr: *const u8) {

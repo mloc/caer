@@ -9,7 +9,7 @@ proc-macro = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-pinion_types = {path = "../pinion_types"}
 syn = {version="1.0.82", features=["full","fold","extra-traits"]}
 quote = "1.0.10"
 proc-macro2 = "1.0.19"
+anyhow = "1.0.53"

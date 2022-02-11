@@ -22,6 +22,7 @@ num-traits = "0.2.12"
 aed_server = { path = "../aed_server" }
 aed_common = { path = "../aed_common" }
 libunwind-rs = "0.3.1"
+pinion = { path = "../pinion" }
 
 [dependencies.llvm_stackmaps]
 path = "../llvm_stackmaps"

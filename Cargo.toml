@@ -16,7 +16,6 @@ members = [
     "llvm_stackmaps",
     "pinion",
     "pinion_macros",
-    "pinion_types",
     "pinion_work",
     "rustc_build_helper",
     "rustc_dwarf",

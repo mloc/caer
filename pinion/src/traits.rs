@@ -1,35 +1,21 @@
+use std::marker::Sized;
 use std::ops::Deref;
 use std::ptr::NonNull;
 
 use crate::interface::Context;
-use crate::types::{layout, Primitive};
+use crate::layout::{self, BasicType};
+use crate::layout_ctx::LayoutCtx;
+use crate::types::Primitive;
 
-pub trait PinionData {
+pub trait PinionData: Sized + 'static {
     unsafe fn validate(ptr: *const u8);
 
     fn create_in_context<C: Context>(ctx: &mut C) -> C::BasicType;
 
-    fn get_layout() -> &'static layout::CycleCell;
+    fn get_layout(lctx: &mut LayoutCtx) -> BasicType;
 }
 
-pub trait PinionStruct: PinionData {
-    fn get_gep_indices(path: &[&'static str]) -> Vec<u64> {
-        let mut indices = vec![0];
-
-        let mut cur_layout = Self::get_layout();
-        for part in path {
-            let (index, new_layout) = match cur_layout.get().deref() {
-                layout::BasicType::Struct(sl) => sl.lookup_field(part).unwrap(),
-                _ => panic!(),
-            };
-
-            cur_layout = new_layout;
-            indices.push(index as u64)
-        }
-
-        indices
-    }
-}
+pub trait PinionStruct: PinionData {}
 
 // marker trait. must be a nicheable type
 pub trait PinionPointerType: PinionData {}
@@ -57,11 +43,8 @@ macro_rules! prim_types {
                     ctx.make_primitive_type(Primitive::$var)
                 }
 
-                fn get_layout() -> &'static layout::CycleCell {
-                    static LAYOUT: once_cell::sync::OnceCell<layout::CycleCell> = once_cell::sync::OnceCell::new();
-                    LAYOUT.get_or_init(|| {
-                        layout::CycleCell::new_init(layout::BasicType::Primitive(Primitive::$var))
-                    })
+                fn get_layout(_lctx: &mut LayoutCtx) -> BasicType {
+                    layout::BasicType::Primitive(Primitive::$var)
                 }
             }
         )+)+
@@ -92,24 +75,8 @@ macro_rules! ptr_types {
                 ctx.make_pointer_type(elem_type, false)
             }
 
-            fn get_layout() -> &'static layout::CycleCell {
-                static LAYOUT: once_cell::sync::OnceCell<layout::CycleCell> =
-                    once_cell::sync::OnceCell::new();
-
-                if let Some(v) = LAYOUT.get() {
-                    return v;
-                }
-
-                match LAYOUT.set(layout::CycleCell::new_empty()) {
-                    Ok(()) => {},
-                    Err(_) => panic!(),
-                }
-
-                let ty = layout::BasicType::Pointer(layout::Pointer::new($t::get_layout(), false));
-
-                let layout = LAYOUT.get().unwrap();
-                layout.update(ty);
-                layout
+            fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
+                layout::BasicType::Pointer(layout::Pointer::new(lctx.populate::<$t>(), false))
             }
         }
         impl <$t: $res> PinionPointerType for $ty {}
@@ -120,7 +87,7 @@ macro_rules! ptr_types {
     }
 }
 
-ptr_types!(T: PinionData, [&T, &mut T, *const T, *mut T, NonNull<T>]);
+ptr_types!(T: PinionData, [&'static T, &'static mut T, *const T, *mut T, NonNull<T>]);
 
 impl<T: PinionPointerType> PinionData for Option<T> {
     unsafe fn validate(ptr: *const u8) {
@@ -135,8 +102,8 @@ impl<T: PinionPointerType> PinionData for Option<T> {
         T::create_in_context(ctx)
     }
 
-    fn get_layout() -> &'static layout::CycleCell {
-        T::get_layout()
+    fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
+        T::get_layout(lctx)
     }
 }
 
@@ -153,10 +120,8 @@ impl PinionData for PinionFuncPtr {
         panic!("can't call create_in_context directly for PinionFuncPtr")
     }
 
-    fn get_layout() -> &'static layout::CycleCell {
-        static LAYOUT: once_cell::sync::OnceCell<layout::CycleCell> =
-            once_cell::sync::OnceCell::new();
-        LAYOUT.get_or_init(|| layout::CycleCell::new_init(layout::BasicType::FuncPtr))
+    fn get_layout(_lctx: &mut LayoutCtx) -> BasicType {
+        layout::BasicType::FuncPtr
     }
 }
 impl PinionPointerType for PinionFuncPtr {}
@@ -172,9 +137,7 @@ impl PinionData for PinionOpaqueStruct {
         panic!("can't call create_in_context directly for PinionOpaqueStruct")
     }
 
-    fn get_layout() -> &'static layout::CycleCell {
-        static LAYOUT: once_cell::sync::OnceCell<layout::CycleCell> =
-            once_cell::sync::OnceCell::new();
-        LAYOUT.get_or_init(|| layout::CycleCell::new_init(layout::BasicType::OpaqueStruct))
+    fn get_layout(_lctx: &mut LayoutCtx) -> BasicType {
+        layout::BasicType::OpaqueStruct
     }
 }
