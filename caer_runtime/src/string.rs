@@ -1,11 +1,12 @@
 use std::ptr::NonNull;
 
 use caer_types::id::INSTANCE_TYPE_ID_STRING;
+use pinion::PinionData;
 
 use crate::alloc::Alloc;
 use crate::heap_object::HeapHeader;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PinionData)]
 #[repr(C)]
 pub struct RtString {
     pub heap_header: HeapHeader,

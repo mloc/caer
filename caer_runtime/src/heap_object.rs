@@ -1,7 +1,8 @@
 use caer_types::layout;
+use pinion::PinionData;
 
 /// Header for heap objects
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PinionData)]
 #[repr(C)]
 pub struct HeapHeader {
     pub gc_marker: GcMarker,
@@ -29,7 +30,7 @@ pub enum HeapKind {
     String = layout::HEAP_KIND_STRING,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PinionData)]
 #[repr(u8)]
 pub enum GcMarker {
     White = 0,

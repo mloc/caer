@@ -2,6 +2,8 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::ptr::NonNull;
 
+use pinion::PinionData;
+
 use crate::heap_object::HeapHeader;
 use crate::vtable;
 
@@ -21,7 +23,7 @@ where
     pub obj: T,
 }*/
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PinionData)]
 #[repr(C)]
 pub struct RttiRef {
     pub vptr: &'static vtable::Entry,

@@ -82,8 +82,11 @@ impl DeriveCtx {
             #[automatically_derived]
             impl #impl_generics pinion::PinionData for #ident #ty_generics #where_clause {
                 fn create_in_context<C: pinion::Context>(ctx: &mut C) -> C::BasicType {
+                    todo!();
+                    /*
                     let fields = [#(#fq,)*];
                     ctx.make_struct_type(&fields, #packed, #name)
+                    */
                 }
 
                 fn get_layout(#lctxq: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::BasicType {
@@ -205,7 +208,7 @@ impl DeriveCtx {
             syn::Fields::Named(_) => panic!(),
             syn::Fields::Unnamed(u) => {
                 assert_eq!(u.unnamed.len(), 1);
-                let field_ty = &u.unnamed[0].ty;
+                let field_ty = ty::normalize_ty(&u.unnamed[0].ty);
                 let v_ident = &v.ident;
                 let disc_expr = quote! { #unit_enum_name::#v_ident as u64 };
                 Some(quote! {(#disc_expr, lctx.populate::<#field_ty>())})

@@ -18,7 +18,7 @@ use crate::string_table::StringTable;
 
 // null must be first
 // TODO: not copy?
-#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone, PinionData)]
 #[repr(C, u8)]
 pub enum Val {
     Null = layout::VAL_DISCRIM_NULL,

@@ -13,7 +13,7 @@ impl FuncShape {
     fn ret_from_rty(rty: &syn::ReturnType) -> Option<syn::Type> {
         match rty {
             syn::ReturnType::Default => None,
-            syn::ReturnType::Type(_, ty) => Some(*ty.clone()),
+            syn::ReturnType::Type(_, ty) => Some(ty::normalize_ty(ty)),
         }
     }
 

@@ -1028,6 +1028,7 @@ version = "0.0.0"
 dependencies = [
  "inkwell",
  "once_cell",
+ "ordered-float",
  "pinion_macros",
 ]
 

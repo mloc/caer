@@ -25,3 +25,10 @@ pub fn pinion_export_funcs(attr: TokenStream, item: TokenStream) -> TokenStream 
     let args = parse_quote! { #attr_tok }; // meh, easy
     export::build_export_funcs(args, syn::parse(item).unwrap()).into()
 }
+
+#[proc_macro_attribute]
+pub fn pinion_export(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let attr_tok: TokenStream2 = attr.into();
+    let args = parse_quote! { #attr_tok }; // meh, easy
+    export::build_export_func(args, syn::parse(item).unwrap()).into()
+}

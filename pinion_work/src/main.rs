@@ -1,7 +1,7 @@
 #![feature(arbitrary_enum_discriminant)]
 
 use pinion::layout_ctx::LayoutCtx;
-use pinion::{gep_path, pinion_export_funcs, PinionData, PinionStruct};
+use pinion::{gep_path, pinion_export, pinion_export_funcs, PinionData, PinionStruct};
 
 #[derive(PinionData)]
 #[pinion(name = "foo")]
@@ -62,6 +62,8 @@ fn main() {
     println!("{:#?}", ctx.get(feid));
 
     println!("{:#?}", ctx.get_gep_indices::<Foo>(gep_path!(y.sub.fin)));
+
+    std::any::TypeId::of::<hhh>();
 }
 
 #[pinion_export_funcs(SubsubExports, export_subsub)]
@@ -74,3 +76,11 @@ impl SubsubExtern for Subsub {
 }
 
 //export_subsub!(Subsub);
+
+fn hhh(x: &u8) {
+    let mut ctx = LayoutCtx::new();
+    <&u8 as PinionData>::get_layout(&mut ctx);
+}
+
+#[pinion_export(pm_expo)]
+fn expo(x: &u8) {}

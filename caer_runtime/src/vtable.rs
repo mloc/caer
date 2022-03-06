@@ -3,6 +3,7 @@ use std::ops::Index;
 use std::slice::from_raw_parts;
 
 use caer_types::id::{FuncId, InstanceTypeId};
+use pinion::PinionData;
 
 use crate::arg_pack::ProcPack;
 use crate::datum::Datum;
@@ -63,7 +64,7 @@ impl FuncPtr {
 
 /// A single vtable entry for a type
 /// **MUST BE KEPT IN SYNC WITH LLVM TYPE**; if not, Bad Things will happen
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PinionData)]
 #[repr(C)]
 pub struct Entry {
     pub id: InstanceTypeId, // i32

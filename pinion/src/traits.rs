@@ -2,6 +2,8 @@ use std::marker::Sized;
 use std::ops::Deref;
 use std::ptr::NonNull;
 
+use ordered_float::OrderedFloat;
+
 use crate::interface::Context;
 use crate::layout::{self, BasicType};
 use crate::layout_ctx::LayoutCtx;
@@ -57,8 +59,8 @@ prim_types! {
     i16 | u16 => Int16,
     i32 | u32 => Int32,
     i64 | u64 => Int64,
-    f32 => Float32,
-    f64 => Float64,
+    f32 | OrderedFloat<f32> => Float32,
+    f64 | OrderedFloat<f64> => Float64,
 }
 
 macro_rules! ptr_types {

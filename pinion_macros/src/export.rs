@@ -112,3 +112,52 @@ pub fn build_export_funcs(
         }
     }
 }
+
+pub fn build_export_func(export_name: syn::Ident, fn_item: syn::ItemFn) -> TokenStream2 {
+    quote! {
+        #fn_item
+    }
+}
+
+fn extract_lifetimes(sig: &syn::Signature) -> Vec<syn::Lifetime> {
+    let mut out = vec![];
+
+    fn process_ty(ty: &syn::Type, out: &mut Vec<syn::Lifetime>) {
+        match ty {
+            syn::Type::Array(_) => panic!(),
+            syn::Type::BareFn(_) => panic!(),
+            syn::Type::Group(gty) => process_ty(&gty.elem, out),
+            syn::Type::ImplTrait(_) => panic!(),
+            syn::Type::Infer(_) => panic!(),
+            syn::Type::Macro(_) => panic!(),
+            syn::Type::Never(_) => panic!(),
+            syn::Type::Paren(_) => panic!(),
+            syn::Type::Path(_) => {},
+            syn::Type::Ptr(_) => {},
+            syn::Type::Reference(refty) => {
+                if let Some(lt) = &refty.lifetime {
+                    out.push(lt.clone());
+                }
+                process_ty(&refty.elem, out);
+            },
+            syn::Type::Slice(_) => todo!(),
+            syn::Type::TraitObject(_) => panic!(),
+            syn::Type::Tuple(_) => todo!(),
+            syn::Type::Verbatim(_) => todo!(),
+            _ => todo!(),
+        }
+    }
+
+    for arg in &sig.inputs {
+        match arg {
+            syn::FnArg::Receiver(r) => {
+                if let Some((_, Some(lt))) = &r.reference {
+                    out.push(lt.clone());
+                }
+            },
+            syn::FnArg::Typed(ty) => process_ty(&ty.ty, &mut out),
+        }
+    }
+
+    out
+}
