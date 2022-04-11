@@ -113,10 +113,49 @@ pub fn build_export_funcs(
     }
 }
 
-pub fn build_export_func(export_name: syn::Ident, fn_item: syn::ItemFn) -> TokenStream2 {
+pub fn build_export_func(mut fn_item: syn::ItemFn) -> TokenStream2 {
+    assert!(fn_item.sig.abi.is_none());
+    assert!(fn_item.attrs.is_empty());
+    fn_item.sig.abi = Some(parse_quote! {extern "C"});
+    fn_item.attrs.push(parse_quote! { #[no_mangle] });
+
+    let fnmeta_ident = make_fnmeta_ident(&fn_item.sig.ident);
+
+    let param_lids = fn_item.sig.inputs.iter().map(|arg| {
+        let param_ty = match arg {
+            syn::FnArg::Receiver(_) => panic!("no self in export"),
+            syn::FnArg::Typed(p) => &p.ty,
+        };
+
+        quote! {
+            lctx.populate::<#param_ty>()
+        }
+    });
+
+    let return_lid = match fn_item.sig.output {
+        syn::ReturnType::Default => quote! {None},
+        syn::ReturnType::Type(_, ref ty) => quote! { Some(lctx.populate::<#ty>)},
+    };
+
     quote! {
         #fn_item
+
+        #[doc(hidden)]
+        struct #fnmeta_ident;
+
+        impl pinion::PinionFunc for #fnmeta_ident {
+            fn get_func_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Func {
+                pinion::layout::Func {
+                    param_tys: vec![#(#param_lids,)*],
+                    return_ty: #return_lid,
+                }
+            }
+        }
     }
+}
+
+fn make_fnmeta_ident(base: &syn::Ident) -> syn::Ident {
+    syn::Ident::new(&format!("__PINION_EXPORT_FN__{}", base), base.span())
 }
 
 fn extract_lifetimes(sig: &syn::Signature) -> Vec<syn::Lifetime> {
@@ -160,4 +199,46 @@ fn extract_lifetimes(sig: &syn::Signature) -> Vec<syn::Lifetime> {
     }
 
     out
+}
+
+#[derive(Debug)]
+pub struct ModuleDef {
+    ident: syn::Ident,
+    comma: syn::token::Comma,
+    bracket_token: syn::token::Bracket,
+    func_idents: syn::punctuated::Punctuated<syn::Ident, syn::Token![,]>,
+}
+
+impl syn::parse::Parse for ModuleDef {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let funcs_inner;
+        Ok(ModuleDef {
+            ident: input.parse()?,
+            comma: input.parse()?,
+            bracket_token: syn::bracketed!(funcs_inner in input),
+            func_idents: funcs_inner.parse_terminated(syn::Ident::parse)?,
+        })
+    }
+}
+
+pub fn build_module_export(def: ModuleDef) -> TokenStream2 {
+    //panic!("{:#?}", def);
+    let mod_id = &def.ident;
+    let funcs = def.func_idents.iter().map(|id| {
+        let fnmeta_ident = make_fnmeta_ident(id);
+        let fn_str = id.to_string();
+        quote! {
+            (#fn_str, <#fnmeta_ident as pinion::PinionFunc>::get_func_layout(lctx))
+        }
+    });
+
+    quote! {
+        pub struct #mod_id;
+
+        impl pinion::PinionModule for #mod_id {
+            fn get_funcs(lctx: &mut pinion::layout_ctx::LayoutCtx) -> Vec<(&'static str, pinion::layout::Func)> {
+                vec![ #(#funcs,)* ]
+            }
+        }
+    }
 }

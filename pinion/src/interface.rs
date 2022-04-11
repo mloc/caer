@@ -14,5 +14,6 @@ pub trait Context {
     fn make_function_type(
         &mut self, param_tys: &[Self::BasicType], return_ty: Option<Self::BasicType>,
     ) -> Self::FunctionType;
+
     fn make_func_ptr_type(&mut self, func: Self::FunctionType) -> Self::BasicType;
 }

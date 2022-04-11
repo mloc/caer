@@ -63,3 +63,9 @@ pub struct Enum {
     // Maps disc value to layout. No entry if unit field
     pub field_layouts: HashMap<u64, LayoutId>,
 }
+
+#[derive(Debug, Clone)]
+pub struct Func {
+    pub param_tys: Vec<LayoutId>,
+    pub return_ty: Option<LayoutId>,
+}

@@ -5,7 +5,7 @@ use std::ptr::NonNull;
 use ordered_float::OrderedFloat;
 
 use crate::interface::Context;
-use crate::layout::{self, BasicType};
+use crate::layout::{self, BasicType, Func};
 use crate::layout_ctx::LayoutCtx;
 use crate::types::Primitive;
 
@@ -24,6 +24,14 @@ pub trait PinionPointerType: PinionData {}
 
 pub trait PinionFuncCarrier {
     fn get_all_funcs<C: Context>(ctx: &mut C) -> Vec<(&'static str, C::FunctionType)>;
+}
+
+pub trait PinionFunc {
+    fn get_func_layout(lctx: &mut LayoutCtx) -> Func;
+}
+
+pub trait PinionModule {
+    fn get_funcs(lctx: &mut LayoutCtx) -> Vec<(&'static str, Func)>;
 }
 
 // Everything below here should probably be moved...
