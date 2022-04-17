@@ -1,117 +1,6 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::parse_quote;
-use syn::spanned::Spanned;
-
-use crate::func::FuncShape;
-use crate::ty;
-
-struct ExtFunc {
-    name: syn::Ident,
-    shape: FuncShape,
-}
-
-impl ExtFunc {
-    fn build_shim(&self, ts: &syn::Type) -> TokenStream2 {
-        let name = &self.name;
-        let ret = self.shape.ret.as_ref().map(|ty| quote! { -> #ty });
-        let params = self.shape.params.iter().enumerate().map(|(i, ty)| {
-            let param_name = syn::Ident::new(&format!("arg{}", i), ty.span());
-            quote! {
-                #param_name: #ty
-            }
-        });
-        let args: Vec<_> = self
-            .shape
-            .params
-            .iter()
-            .enumerate()
-            .map(|(i, ty)| syn::Ident::new(&format!("arg{}", i), ty.span()))
-            .collect();
-
-        let validates = self.shape.params.iter().enumerate().map(|(i, ty)| {
-            let arg = &args[i];
-            let ptr = parse_quote! { &#arg as *const _ as *const u8 };
-            ty::build_validate(&ptr, ty)
-        });
-
-        quote! {
-            #[no_mangle]
-            #[doc(hidden)]
-            unsafe extern "C" fn #name ( #(#params),* ) #ret {
-                #(#validates;)*
-                #ts::#name ( #(#args),* )
-            }
-        }
-    }
-}
-
-pub fn build_export_funcs(
-    args: syn::punctuated::Punctuated<syn::Ident, syn::Token![,]>, trait_item: syn::ItemTrait,
-) -> TokenStream2 {
-    assert_eq!(args.len(), 2);
-    let carrier = &args[0];
-    let macro_name = &args[1];
-
-    assert_eq!(trait_item.generics, parse_quote! {});
-
-    let tsi = syn::Ident::new(
-        &format!("__TargetSelf__{}__{}", carrier, macro_name),
-        proc_macro2::Span::call_site(),
-    );
-    let ts = parse_quote! { #tsi };
-
-    let funcs: Vec<_> = trait_item
-        .items
-        .iter()
-        .map(|p| match p {
-            syn::TraitItem::Method(m) => {
-                assert_eq!(m.sig.generics, syn::Generics::default());
-                let shape = FuncShape::from_method(&m.sig, &ts);
-                ExtFunc {
-                    name: m.sig.ident.clone(),
-                    shape,
-                }
-            },
-            _ => panic!("trait can only contain methods"),
-        })
-        .collect();
-
-    let ctx: syn::Expr = parse_quote! { ctx };
-
-    let shims = funcs.iter().map(|e| e.build_shim(&ts));
-    let ctx_funcs = funcs.iter().map(|e| e.shape.build_type(&ctx));
-    let func_names = funcs.iter().map(|e| &e.name);
-    let func_names_str = funcs.iter().map(|e| e.name.to_string());
-
-    quote! {
-        #trait_item
-
-        #[allow(non_camel_case_types)]
-        #[allow(dead_code)]
-        enum #carrier {
-           #(#func_names),*
-        }
-
-        #[automatically_derived]
-        impl pinion::PinionFuncCarrier for #carrier {
-            fn get_all_funcs<C: pinion::Context>(ctx: &mut C) -> Vec<(&'static str, C::FunctionType)> {
-                type #ts = pinion::PinionOpaqueStruct;
-                [#((#func_names_str, #ctx_funcs)),*].into()
-            }
-        }
-
-        macro_rules! #macro_name {
-            ($target:ty) => {
-                #[doc(hidden)]
-                #[allow(non_camel_case_types)]
-                type #ts = $target;
-
-                #(#shims)*
-            };
-        }
-    }
-}
 
 pub fn build_export_func(mut fn_item: syn::ItemFn) -> TokenStream2 {
     assert!(fn_item.sig.abi.is_none());
@@ -120,6 +9,7 @@ pub fn build_export_func(mut fn_item: syn::ItemFn) -> TokenStream2 {
     fn_item.attrs.push(parse_quote! { #[no_mangle] });
 
     let fnmeta_ident = make_fnmeta_ident(&fn_item.sig.ident);
+    let vis = &fn_item.vis;
 
     let param_lids = fn_item.sig.inputs.iter().map(|arg| {
         let param_ty = match arg {
@@ -134,14 +24,14 @@ pub fn build_export_func(mut fn_item: syn::ItemFn) -> TokenStream2 {
 
     let return_lid = match fn_item.sig.output {
         syn::ReturnType::Default => quote! {None},
-        syn::ReturnType::Type(_, ref ty) => quote! { Some(lctx.populate::<#ty>)},
+        syn::ReturnType::Type(_, ref ty) => quote! { Some(lctx.populate::<#ty>())},
     };
 
     quote! {
         #fn_item
 
         #[doc(hidden)]
-        struct #fnmeta_ident;
+        #vis struct #fnmeta_ident;
 
         impl pinion::PinionFunc for #fnmeta_ident {
             fn get_func_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Func {
@@ -158,7 +48,7 @@ fn make_fnmeta_ident(base: &syn::Ident) -> syn::Ident {
     syn::Ident::new(&format!("__PINION_EXPORT_FN__{}", base), base.span())
 }
 
-fn extract_lifetimes(sig: &syn::Signature) -> Vec<syn::Lifetime> {
+/*fn extract_lifetimes(sig: &syn::Signature) -> Vec<syn::Lifetime> {
     let mut out = vec![];
 
     fn process_ty(ty: &syn::Type, out: &mut Vec<syn::Lifetime>) {
@@ -199,36 +89,62 @@ fn extract_lifetimes(sig: &syn::Signature) -> Vec<syn::Lifetime> {
     }
 
     out
-}
+}*/
 
 #[derive(Debug)]
 pub struct ModuleDef {
     ident: syn::Ident,
-    comma: syn::token::Comma,
-    bracket_token: syn::token::Bracket,
-    func_idents: syn::punctuated::Punctuated<syn::Ident, syn::Token![,]>,
+    _comma: syn::token::Comma,
+    _bracket_token: syn::token::Bracket,
+    func_idents: syn::punctuated::Punctuated<syn::Path, syn::Token![,]>,
 }
 
 impl syn::parse::Parse for ModuleDef {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let funcs_inner;
+        let ident = input.parse()?;
+        let _comma = input.parse()?;
+        let _bracket_token = syn::bracketed!(funcs_inner in input);
+        let func_idents = funcs_inner.parse_terminated(|x| {
+            let x = syn::Path::parse(x);
+            x
+        })?;
+
         Ok(ModuleDef {
-            ident: input.parse()?,
-            comma: input.parse()?,
-            bracket_token: syn::bracketed!(funcs_inner in input),
-            func_idents: funcs_inner.parse_terminated(syn::Ident::parse)?,
+            ident,
+            _comma,
+            _bracket_token,
+            func_idents,
         })
     }
+}
+
+fn get_last_id(path: &syn::Path) -> &syn::Ident {
+    let last_seg = path.segments.last().unwrap();
+    assert!(last_seg.arguments.is_empty());
+    &last_seg.ident
 }
 
 pub fn build_module_export(def: ModuleDef) -> TokenStream2 {
     //panic!("{:#?}", def);
     let mod_id = &def.ident;
-    let funcs = def.func_idents.iter().map(|id| {
-        let fnmeta_ident = make_fnmeta_ident(id);
-        let fn_str = id.to_string();
+    let funcs = def.func_idents.iter().map(|path| {
+        let func_id = get_last_id(path);
+        let fnmeta_ident = make_fnmeta_ident(func_id);
+        let mut fnmeta_path = path.clone();
+        fnmeta_path.segments.last_mut().unwrap().ident = fnmeta_ident;
         quote! {
-            (#fn_str, <#fnmeta_ident as pinion::PinionFunc>::get_func_layout(lctx))
+            (Self::Funcs::#func_id, <#fnmeta_path as pinion::PinionFunc>::get_func_layout(lctx))
+        }
+    });
+    let mod_funcs_enum =
+        syn::Ident::new(&format!("__PINION_EXPORT_FUNCS__{}", mod_id), mod_id.span());
+    let variants = def.func_idents.iter().map(get_last_id);
+    let variants_names = def.func_idents.iter().map(|path| {
+        let id = get_last_id(path);
+        let id_str = id.to_string();
+        quote! {
+            Self::#id => #id_str
         }
     });
 
@@ -236,8 +152,24 @@ pub fn build_module_export(def: ModuleDef) -> TokenStream2 {
         pub struct #mod_id;
 
         impl pinion::PinionModule for #mod_id {
-            fn get_funcs(lctx: &mut pinion::layout_ctx::LayoutCtx) -> Vec<(&'static str, pinion::layout::Func)> {
+            type Funcs = #mod_funcs_enum;
+            fn get_funcs(lctx: &mut pinion::layout_ctx::LayoutCtx) -> Vec<(Self::Funcs, pinion::layout::Func)> {
                 vec![ #(#funcs,)* ]
+            }
+        }
+
+        #[derive(Clone, Copy, Debug)]
+        #[doc(hidden)]
+        #[allow(non_camel_case_types)]
+        pub enum #mod_funcs_enum {
+            #(#[allow(non_camel_case_types)] #variants,)*
+        }
+
+        impl pinion::PinionModuleFuncsEnum for #mod_funcs_enum {
+            fn get_name(self) -> &'static str {
+                match self {
+                    #(#variants_names,)*
+                }
             }
         }
     }

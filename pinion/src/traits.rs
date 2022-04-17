@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::marker::Sized;
 use std::ops::Deref;
 use std::ptr::NonNull;
@@ -9,10 +10,10 @@ use crate::layout::{self, BasicType, Func};
 use crate::layout_ctx::LayoutCtx;
 use crate::types::Primitive;
 
-pub trait PinionData: Sized + 'static {
-    unsafe fn validate(ptr: *const u8);
+pub trait PinionData: Sized {
+    type Static: 'static;
 
-    fn create_in_context<C: Context>(ctx: &mut C) -> C::BasicType;
+    unsafe fn validate(ptr: *const u8);
 
     fn get_layout(lctx: &mut LayoutCtx) -> BasicType;
 }
@@ -31,7 +32,12 @@ pub trait PinionFunc {
 }
 
 pub trait PinionModule {
-    fn get_funcs(lctx: &mut LayoutCtx) -> Vec<(&'static str, Func)>;
+    type Funcs: PinionModuleFuncsEnum;
+    fn get_funcs(lctx: &mut LayoutCtx) -> Vec<(Self::Funcs, Func)>;
+}
+
+pub trait PinionModuleFuncsEnum: Clone + Copy + Debug {
+    fn get_name(self) -> &'static str;
 }
 
 // Everything below here should probably be moved...
@@ -47,11 +53,9 @@ macro_rules! prim_types {
     ($($($prim:ty)|+ => $var:ident),+ $(,)?) => {
         $($(
             impl PinionData for $prim {
-                unsafe fn validate(_ptr: *const u8) {}
+                type Static = Self;
 
-                fn create_in_context<C: Context>(ctx: &mut C) -> C::BasicType {
-                    ctx.make_primitive_type(Primitive::$var)
-                }
+                unsafe fn validate(_ptr: *const u8) {}
 
                 fn get_layout(_lctx: &mut LayoutCtx) -> BasicType {
                     layout::BasicType::Primitive(Primitive::$var)
@@ -74,15 +78,12 @@ prim_types! {
 macro_rules! ptr_types {
     (@inner $t:tt, $res:tt, $ty:ty) => {
         impl <$t: $res> PinionData for $ty {
+            type Static = $ty;
+
             unsafe fn validate(ptr: *const u8) {
                 assert_eq!(std::mem::size_of::<$ty>(), 8);
                 let pptr: *const u64 = ptr as _;
                 assert_ne!(*pptr, 0);
-            }
-
-            fn create_in_context<C: Context>(ctx: &mut C) -> C::BasicType {
-                let elem_type = $t::create_in_context(ctx);
-                ctx.make_pointer_type(elem_type, false)
             }
 
             fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
@@ -97,19 +98,45 @@ macro_rules! ptr_types {
     }
 }
 
-ptr_types!(T: PinionData, [&'static T, &'static mut T, *const T, *mut T, NonNull<T>]);
+ptr_types!(T: PinionData, [*const T, *mut T, NonNull<T>]);
+
+impl<'a, T: PinionData + 'a> PinionData for &'a T {
+    type Static = for<'b> fn(&'b T);
+
+    unsafe fn validate(ptr: *const u8) {
+        let pptr: *const u64 = ptr as _;
+        assert_ne!(*pptr, 0);
+    }
+
+    fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
+        layout::BasicType::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
+    }
+}
+impl<'a, T: PinionData> PinionPointerType for &'a T {}
+
+impl<'a, T: PinionData + 'a> PinionData for &'a mut T {
+    type Static = for<'b> fn(&'b mut T);
+
+    unsafe fn validate(ptr: *const u8) {
+        let pptr: *const u64 = ptr as _;
+        assert_ne!(*pptr, 0);
+    }
+
+    fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
+        layout::BasicType::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
+    }
+}
+impl<'a, T: PinionData> PinionPointerType for &'a mut T {}
 
 impl<T: PinionPointerType> PinionData for Option<T> {
+    type Static = Self;
+
     unsafe fn validate(ptr: *const u8) {
         assert_eq!(std::mem::size_of::<Self>(), std::mem::size_of::<T>());
         assert_eq!(std::mem::size_of::<Self>(), 8);
         if (ptr as *const Self).as_ref().is_some() {
             T::validate(ptr)
         }
-    }
-
-    fn create_in_context<C: Context>(ctx: &mut C) -> C::BasicType {
-        T::create_in_context(ctx)
     }
 
     fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
@@ -122,12 +149,10 @@ pub struct PinionFuncPtr {
 }
 
 impl PinionData for PinionFuncPtr {
+    type Static = Self;
+
     unsafe fn validate(ptr: *const u8) {
         assert!(!ptr.is_null());
-    }
-
-    fn create_in_context<C: Context>(_ctx: &mut C) -> C::BasicType {
-        panic!("can't call create_in_context directly for PinionFuncPtr")
     }
 
     fn get_layout(_lctx: &mut LayoutCtx) -> BasicType {
@@ -141,13 +166,11 @@ pub struct PinionOpaqueStruct {
 }
 
 impl PinionData for PinionOpaqueStruct {
+    type Static = Self;
+
     unsafe fn validate(_ptr: *const u8) {}
 
-    fn create_in_context<C: Context>(_ctx: &mut C) -> C::BasicType {
-        panic!("can't call create_in_context directly for PinionOpaqueStruct")
-    }
-
     fn get_layout(_lctx: &mut LayoutCtx) -> BasicType {
-        layout::BasicType::OpaqueStruct
+        layout::BasicType::OpaqueStruct(None)
     }
 }

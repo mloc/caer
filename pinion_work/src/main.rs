@@ -1,9 +1,7 @@
 #![feature(arbitrary_enum_discriminant)]
 
 use pinion::layout_ctx::LayoutCtx;
-use pinion::{
-    gep_path, pinion_export, pinion_export_funcs, pinion_module, PinionData, PinionStruct,
-};
+use pinion::{gep_path, pinion_export, pinion_module, PinionData, PinionStruct};
 
 #[derive(PinionData)]
 #[pinion(name = "foo")]
@@ -74,17 +72,6 @@ fn sub<'a>() {
     println!("{:#?}", ctx.get(feid));
 }
 
-#[pinion_export_funcs(SubsubExports, export_subsub)]
-trait SubsubExtern {
-    fn foo(&self, s: WhateverState);
-}
-
-impl SubsubExtern for Subsub {
-    fn foo(&self, s: WhateverState) {}
-}
-
-//export_subsub!(Subsub);
-
 fn hhh(x: &u8) {
     let mut ctx = LayoutCtx::new();
     <&u8 as PinionData>::get_layout(&mut ctx);
@@ -96,6 +83,6 @@ fn expo(x: &u8) {}
 pinion_module! {
     whee,
     [
-        expo,
+        ::expo,
     ]
 }

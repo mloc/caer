@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::mem;
+use std::mem::{self, size_of};
 use std::ptr::NonNull;
 
 use aed_common::messages;
@@ -9,6 +9,7 @@ use caer_types::id::{
 use caer_types::rt_env::RtEnvBundle;
 use caer_types::type_tree::Specialization;
 use ordered_float::OrderedFloat;
+use pinion::PinionData;
 
 use crate::alloc::Alloc;
 use crate::arg_pack::CallBundle;
@@ -43,6 +44,16 @@ pub struct Runtime {
     // TEMPORARY
     // TODO: replace with better message plumbing
     sync_send: aed_server::server::Server,
+}
+
+impl PinionData for Runtime {
+    unsafe fn validate(ptr: *const u8) {
+        // TODO: validate against some rust-side global?
+    }
+
+    fn get_layout(_lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::BasicType {
+        pinion::layout::BasicType::OpaqueStruct(Some(size_of::<Runtime>() as _))
+    }
 }
 
 // TODO: ERRH

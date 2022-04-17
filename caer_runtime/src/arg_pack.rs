@@ -4,6 +4,7 @@ use std::ptr::NonNull;
 
 use caer_types::func::CallingSpec;
 use caer_types::id::{FuncId, StringId};
+use pinion::PinionData;
 
 use crate::ffi::FfiArray;
 use crate::runtime::Runtime;
@@ -41,7 +42,7 @@ pub struct ProcArgs {
 impl ProcArgs {}
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, PinionData)]
 pub struct ProcPack<'a> {
     pub unnamed: FfiArray<Val>,
     pub named: FfiArray<(StringId, Val)>,

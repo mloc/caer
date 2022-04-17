@@ -13,7 +13,7 @@ pub struct LayoutId {
 impl LayoutId {
     fn of<T: PinionData>() -> Self {
         Self {
-            tyid: any::TypeId::of::<T>(),
+            tyid: any::TypeId::of::<T::Static>(),
         }
     }
 }

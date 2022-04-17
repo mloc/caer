@@ -1,6 +1,4 @@
-use pinion::{pinion_export_funcs, PinionData, PinionOpaqueStruct};
-
-use crate::op;
+use pinion::PinionData;
 
 #[derive(PinionData)]
 #[repr(C)]
@@ -17,12 +15,4 @@ pub struct ValUnion {
     low: i64,
     // Ptr for ref, unused for rest
     high: i64,
-}
-
-#[pinion_export_funcs(ValFuncs, export_val_funcs)]
-pub trait ValExport {
-    fn rt_val_binary_op(
-        rt: &mut PinionOpaqueStruct, op: op::BinaryOp, lhs: &ValFlat, rhs: &ValFlat,
-        out: &mut ValFlat,
-    );
 }

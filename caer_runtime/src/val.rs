@@ -7,7 +7,7 @@ use caer_types::type_tree::Specialization;
 use caer_types::val::ValFlat;
 use caer_types::{layout, op};
 use ordered_float::OrderedFloat;
-use pinion::PinionData;
+use pinion::{pinion_export, PinionData};
 
 use crate::arg_pack::ProcPack;
 use crate::list::List;
@@ -27,10 +27,8 @@ pub enum Val {
     Ref(RttiRef) = layout::VAL_DISCRIM_REF,
 }
 
-#[no_mangle]
-pub extern "C" fn rt_val_binary_op(
-    rt: &mut Runtime, op: op::BinaryOp, lhs: &Val, rhs: &Val, out: &mut Val,
-) {
+#[pinion_export]
+pub fn rt_val_binary_op(rt: &mut Runtime, op: op::BinaryOp, lhs: &Val, rhs: &Val, out: &mut Val) {
     match op {
         op::BinaryOp::Eq | op::BinaryOp::Ne | op::BinaryOp::Equiv | op::BinaryOp::NotEquiv => {
             *out = Val::handle_equality(rt, op, lhs, rhs);
@@ -63,13 +61,13 @@ pub extern "C" fn rt_val_binary_op(
 }
 
 // bad, needed for now
-#[no_mangle]
-pub extern "C" fn rt_val_cast_string_val(val: &Val, rt: &mut Runtime) -> NonNull<RtString> {
+#[pinion_export]
+pub fn rt_val_cast_string_val(val: &Val, rt: &mut Runtime) -> NonNull<RtString> {
     RtString::from_str(val.cast_string(rt)).heapify(&rt.alloc)
 }
 
-#[no_mangle]
-pub extern "C" fn rt_val_to_switch_disc(val: &Val) -> u32 {
+#[pinion_export]
+pub fn rt_val_to_switch_disc(val: &Val) -> u32 {
     match val {
         Val::Float(val) => (val.into_inner() != 0.0) as u32,
         Val::Null => 0,
@@ -79,8 +77,8 @@ pub extern "C" fn rt_val_to_switch_disc(val: &Val) -> u32 {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn rt_val_print(val: &Val, rt: &mut Runtime) {
+#[pinion_export]
+pub fn rt_val_print(val: &Val, rt: &mut Runtime) {
     let s = match val {
         Val::Null => "null".into(),
         Val::Float(n) => format!("{}", n),
@@ -92,24 +90,8 @@ pub extern "C" fn rt_val_print(val: &Val, rt: &mut Runtime) {
     rt.send_message(&messages::Server::Message(s));
 }
 
-#[no_mangle]
-pub extern "C" fn rt_val_cloned(val: &Val) {
-    if let Val::Ref(_) = val {
-        //unimplemented!("update refcounts")
-    }
-}
-
-// this is not Drop and shouldn't be treated as such.
-#[no_mangle]
-pub extern "C" fn rt_val_drop(val: &Val) {
-    if let Val::Ref(_) = val {
-        //unimplemented!("update refcounts")
-    }
-    //mem::forget(mem::replace(self, Val::Null));
-}
-
-#[no_mangle]
-pub extern "C" fn rt_val_call_proc(
+#[pinion_export]
+pub fn rt_val_call_proc(
     val: &Val, proc_name: &RtString, args: &ProcPack, rt: &mut Runtime, out: &mut Val,
 ) {
     val.call_proc(proc_name, args, rt, out)

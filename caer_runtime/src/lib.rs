@@ -7,6 +7,7 @@ pub mod datum;
 mod eh;
 pub mod environment;
 mod exec;
+pub mod export;
 pub mod ffi;
 mod gc;
 mod gc_stackmap;

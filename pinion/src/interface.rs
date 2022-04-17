@@ -16,4 +16,6 @@ pub trait Context {
     ) -> Self::FunctionType;
 
     fn make_func_ptr_type(&mut self, func: Self::FunctionType) -> Self::BasicType;
+
+    fn make_opaque_struct_type(&mut self, size: Option<u32>) -> Self::BasicType;
 }

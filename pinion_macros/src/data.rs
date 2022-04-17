@@ -81,14 +81,6 @@ impl DeriveCtx {
         quote! {
             #[automatically_derived]
             impl #impl_generics pinion::PinionData for #ident #ty_generics #where_clause {
-                fn create_in_context<C: pinion::Context>(ctx: &mut C) -> C::BasicType {
-                    todo!();
-                    /*
-                    let fields = [#(#fq,)*];
-                    ctx.make_struct_type(&fields, #packed, #name)
-                    */
-                }
-
                 fn get_layout(#lctxq: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::BasicType {
                     let fields = [#((#field_names,#field_layouts),)*];
                     let struct_layout = pinion::layout::StructLayout::new(&fields);
@@ -114,7 +106,6 @@ impl DeriveCtx {
         let ctxq: syn::Expr = parse_quote! { ctx };
 
         let inner_data = ty::normalize_ty(s_ty);
-        let ctxty = ty::build_type(&ctxq, s_ty);
         let validate_body = ty::build_validate(&parse_quote! { ptr }, s_ty);
         let ident = &self.ident;
 
@@ -123,10 +114,6 @@ impl DeriveCtx {
         quote! {
             #[automatically_derived]
             impl #impl_generics pinion::PinionData for #ident #ty_generics #where_clause {
-                fn create_in_context<C: pinion::Context>(ctx: &mut C) -> C::BasicType {
-                    #ctxty
-                }
-
                 fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::BasicType {
                     <#inner_data as pinion::PinionData>::get_layout(lctx)
                 }
@@ -219,10 +206,6 @@ impl DeriveCtx {
         quote! {
             #[automatically_derived]
             impl #impl_generics pinion::PinionData for #ident #ty_generics #where_clause {
-                fn create_in_context<C: pinion::Context>(ctx: &mut C) -> C::BasicType {
-                    <#prim as pinion::PinionData>::create_in_context(ctx)
-                }
-
                 fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::BasicType {
                     let enum_layout = pinion::layout::Enum {
                         disc_width: #disc_width,
