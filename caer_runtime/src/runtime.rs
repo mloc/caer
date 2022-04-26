@@ -47,6 +47,8 @@ pub struct Runtime {
 }
 
 impl PinionData for Runtime {
+    type Static = Runtime;
+
     unsafe fn validate(ptr: *const u8) {
         // TODO: validate against some rust-side global?
     }

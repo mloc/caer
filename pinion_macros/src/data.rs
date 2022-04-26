@@ -1,6 +1,9 @@
 use proc_macro2::{Span, TokenStream};
-use quote::quote;
-use syn::parse_quote;
+use quote::{quote, ToTokens};
+use syn::parse::{ParseStream, Parser};
+use syn::punctuated::Punctuated;
+use syn::token::Comma;
+use syn::{parse_quote, GenericParam, Generics, ImplGenerics, Token, TypeGenerics};
 
 use crate::attr::DataAttributes;
 use crate::ty;
@@ -76,11 +79,15 @@ impl DeriveCtx {
         let packed = self.attrs.repr().as_struct().unwrap();
         let ident = &self.ident;
 
-        let (impl_generics, ty_generics, where_clause) = self.generics.split_for_impl();
+        let (impl_generics, ty_generics, _) = self.generics.split_for_impl();
+        let static_params = make_ty_static(&ty_generics);
+        let where_clause = make_impl_bounds(&self.generics);
 
         quote! {
             #[automatically_derived]
             impl #impl_generics pinion::PinionData for #ident #ty_generics #where_clause {
+                type Static = #ident #static_params;
+
                 fn get_layout(#lctxq: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::BasicType {
                     let fields = [#((#field_names,#field_layouts),)*];
                     let struct_layout = pinion::layout::StructLayout::new(&fields);
@@ -109,11 +116,15 @@ impl DeriveCtx {
         let validate_body = ty::build_validate(&parse_quote! { ptr }, s_ty);
         let ident = &self.ident;
 
-        let (impl_generics, ty_generics, where_clause) = self.generics.split_for_impl();
+        let (impl_generics, ty_generics, _) = self.generics.split_for_impl();
+        let static_params = make_ty_static(&ty_generics);
+        let where_clause = make_impl_bounds(&self.generics);
 
         quote! {
             #[automatically_derived]
             impl #impl_generics pinion::PinionData for #ident #ty_generics #where_clause {
+                type Static = #ident #static_params;
+
                 fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::BasicType {
                     <#inner_data as pinion::PinionData>::get_layout(lctx)
                 }
@@ -171,7 +182,9 @@ impl DeriveCtx {
             .collect();
 
         let ident = &self.ident;
-        let (impl_generics, ty_generics, where_clause) = self.generics.split_for_impl();
+        let (impl_generics, ty_generics, _) = self.generics.split_for_impl();
+        let static_params = make_ty_static(&ty_generics);
+        let where_clause = make_impl_bounds(&self.generics);
 
         let unit_enum = has_fields.then(|| {
             let variants = enum_data.variants.iter().map(|v| syn::Variant {
@@ -206,6 +219,8 @@ impl DeriveCtx {
         quote! {
             #[automatically_derived]
             impl #impl_generics pinion::PinionData for #ident #ty_generics #where_clause {
+                type Static = #ident #static_params;
+
                 fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::BasicType {
                     let enum_layout = pinion::layout::Enum {
                         disc_width: #disc_width,
@@ -233,4 +248,52 @@ impl DeriveCtx {
 
 fn ident_to_litstr(ident: &syn::Ident) -> syn::LitStr {
     syn::LitStr::new(&ident.to_string(), ident.span())
+}
+
+fn make_ty_static(ty_generics: &TypeGenerics) -> TokenStream {
+    let ts = ty_generics.to_token_stream();
+    if ts.is_empty() {
+        return ts;
+    }
+
+    let params = parse_spec.parse2(ts).expect("weewhooo");
+
+    let tss = params.iter().map(|param| match param {
+        GenericParam::Lifetime(_) => parse_quote! {'static},
+        GenericParam::Type(ty) => quote! {<#ty as pinion::PinionData> :: Static},
+        GenericParam::Const(_) => panic!("can't handle const"),
+    });
+
+    quote! {
+        < #(#tss,)* >
+    }
+}
+
+fn parse_spec(input: ParseStream) -> Result<Punctuated<GenericParam, Comma>, syn::Error> {
+    let _: Token![<] = input.parse()?;
+    let res = Punctuated::<GenericParam, Comma>::parse_separated_nonempty(input)?;
+    let _: Token![>] = input.parse()?;
+    Ok(res)
+}
+
+fn make_impl_bounds(generics: &Generics) -> TokenStream {
+    if generics.params.is_empty() {
+        return quote! {};
+    }
+    let mut where_clauses: Vec<_> = generics
+        .where_clause
+        .as_ref()
+        .map(|c| c.predicates.iter().cloned().collect())
+        .unwrap_or_default();
+
+    for param in generics.params.iter() {
+        if let GenericParam::Type(ty) = param {
+            let ident = &ty.ident;
+            where_clauses.push(parse_quote! { #ident: pinion::PinionData })
+        }
+    }
+
+    quote! {
+        where #(#where_clauses),*
+    }
 }

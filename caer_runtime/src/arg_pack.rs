@@ -84,7 +84,7 @@ impl ProcPack<'_> {
             .get_proc_spec()
             .unwrap_or_else(|| panic!("func {:?} cannot be called as a proc", func_id));
         // compiler should ensure that targets is an array with the same sizes as the spec
-        let targets_arr = unsafe { FfiArray::with_len(target_ptrs, spec.params.len()) };
+        let targets_arr = unsafe { FfiArray::with_len(target_ptrs, spec.params.len() as u64) };
         let targets = targets_arr.as_slice();
 
         for (i, arg) in self.unnamed.as_slice().iter().enumerate() {

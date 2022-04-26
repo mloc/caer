@@ -5,6 +5,8 @@ macro_rules! define_caer_id {
     ($name:ident: $pty:ident) => {
         define_index_type! {pub struct $name = $pty;}
         impl PinionData for $name {
+            type Static = Self;
+
             fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::BasicType {
                 $pty::get_layout(lctx)
             }

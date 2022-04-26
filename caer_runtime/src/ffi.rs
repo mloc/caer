@@ -3,9 +3,10 @@ use std::ptr::NonNull;
 use std::slice::from_raw_parts;
 
 use num_traits::Zero;
+use pinion::PinionData;
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, PinionData)]
 pub struct FfiArray<T, I = u64> {
     len: I,
     data: NonNull<T>,
@@ -13,7 +14,8 @@ pub struct FfiArray<T, I = u64> {
 
 impl<T, I> FfiArray<T, I>
 where
-    I: Copy + Zero + Eq + TryFrom<usize>,
+    T: PinionData,
+    I: PinionData + Copy + Zero + Eq + TryFrom<usize>,
 {
     pub fn empty() -> Self {
         Self {
@@ -49,7 +51,8 @@ where
 
 impl<T, I> FfiArray<T, I>
 where
-    I: Copy + TryInto<usize>,
+    T: PinionData,
+    I: PinionData + Copy + TryInto<usize>,
     <I as TryInto<usize>>::Error: std::fmt::Debug, // meh
 {
     #[inline]

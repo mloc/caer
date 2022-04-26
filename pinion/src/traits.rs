@@ -1,12 +1,11 @@
 use std::fmt::Debug;
-use std::marker::Sized;
-use std::ops::Deref;
+use std::marker::{PhantomData, Sized};
 use std::ptr::NonNull;
 
 use ordered_float::OrderedFloat;
 
 use crate::interface::Context;
-use crate::layout::{self, BasicType, Func};
+use crate::layout::{self, BasicType, Func, StructLayout};
 use crate::layout_ctx::LayoutCtx;
 use crate::types::Primitive;
 
@@ -75,7 +74,29 @@ prim_types! {
     f64 | OrderedFloat<f64> => Float64,
 }
 
-macro_rules! ptr_types {
+// TODO: macro for tuples
+impl<A, B> PinionData for (A, B)
+where
+    A: PinionData,
+    B: PinionData,
+{
+    type Static = (A::Static, B::Static);
+
+    unsafe fn validate(ptr: *const u8) {
+        let tptr = ptr as *const Self;
+        <A as PinionData>::validate(&(*tptr).0 as *const _ as _);
+        <B as PinionData>::validate(&(*tptr).1 as *const _ as _);
+    }
+
+    fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
+        BasicType::Struct(StructLayout::new(&[
+            ("t0", lctx.populate::<A>()),
+            ("t1", lctx.populate::<B>()),
+        ]))
+    }
+}
+
+/*macro_rules! ptr_types {
     (@inner $t:tt, $res:tt, $ty:ty) => {
         impl <$t: $res> PinionData for $ty {
             type Static = $ty;
@@ -96,12 +117,52 @@ macro_rules! ptr_types {
     ($t:ident : $res:tt, [$($ty:ty),+$(,)?]) => {
         $(ptr_types!(@inner $t, $res, $ty);)+
     }
-}
+}*/
 
-ptr_types!(T: PinionData, [*const T, *mut T, NonNull<T>]);
+impl<'a, T: PinionData + 'a> PinionData for *const T {
+    type Static = *const T::Static;
+
+    unsafe fn validate(ptr: *const u8) {
+        let pptr: *const u64 = ptr as _;
+        assert_ne!(*pptr, 0);
+    }
+
+    fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
+        layout::BasicType::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
+    }
+}
+impl<'a, T: PinionData> PinionPointerType for *const T {}
+
+impl<'a, T: PinionData + 'a> PinionData for *mut T {
+    type Static = *mut T::Static;
+
+    unsafe fn validate(ptr: *const u8) {
+        let pptr: *const u64 = ptr as _;
+        assert_ne!(*pptr, 0);
+    }
+
+    fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
+        layout::BasicType::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
+    }
+}
+impl<'a, T: PinionData> PinionPointerType for *mut T {}
+
+impl<'a, T: PinionData + 'a> PinionData for NonNull<T> {
+    type Static = NonNull<T::Static>;
+
+    unsafe fn validate(ptr: *const u8) {
+        let pptr: *const u64 = ptr as _;
+        assert_ne!(*pptr, 0);
+    }
+
+    fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
+        layout::BasicType::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
+    }
+}
+impl<'a, T: PinionData> PinionPointerType for NonNull<T> {}
 
 impl<'a, T: PinionData + 'a> PinionData for &'a T {
-    type Static = for<'b> fn(&'b T);
+    type Static = &'static T::Static;
 
     unsafe fn validate(ptr: *const u8) {
         let pptr: *const u64 = ptr as _;
@@ -115,7 +176,7 @@ impl<'a, T: PinionData + 'a> PinionData for &'a T {
 impl<'a, T: PinionData> PinionPointerType for &'a T {}
 
 impl<'a, T: PinionData + 'a> PinionData for &'a mut T {
-    type Static = for<'b> fn(&'b mut T);
+    type Static = &'static mut T::Static;
 
     unsafe fn validate(ptr: *const u8) {
         let pptr: *const u64 = ptr as _;
@@ -129,7 +190,7 @@ impl<'a, T: PinionData + 'a> PinionData for &'a mut T {
 impl<'a, T: PinionData> PinionPointerType for &'a mut T {}
 
 impl<T: PinionPointerType> PinionData for Option<T> {
-    type Static = Self;
+    type Static = Option<T::Static>;
 
     unsafe fn validate(ptr: *const u8) {
         assert_eq!(std::mem::size_of::<Self>(), std::mem::size_of::<T>());
@@ -172,5 +233,17 @@ impl PinionData for PinionOpaqueStruct {
 
     fn get_layout(_lctx: &mut LayoutCtx) -> BasicType {
         layout::BasicType::OpaqueStruct(None)
+    }
+}
+
+impl<T> PinionData for PhantomData<T> {
+    type Static = PhantomData<()>;
+
+    unsafe fn validate(ptr: *const u8) {
+        panic!("should never interact with unsized type");
+    }
+
+    fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
+        BasicType::Unsized
     }
 }

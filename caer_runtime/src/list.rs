@@ -13,7 +13,7 @@ use crate::heap_object::HeapHeader;
 use crate::rtti::RttiRef;
 use crate::runtime::Runtime;
 use crate::string::RtString;
-use crate::val::{rt_val_drop, Val};
+use crate::val::Val;
 use crate::vtable::{Entry, ProcPtr};
 
 #[derive(Debug, Clone)]
@@ -47,13 +47,13 @@ impl AssocValue {
 
     fn update_val(&mut self, new_val: Val) {
         if let Some(old_val) = self.val.replace(new_val) {
-            rt_val_drop(&old_val);
+            //rt_val_drop(&old_val);
         }
     }
 
     fn remove_val(&mut self) {
         if let Some(old_val) = self.val.take() {
-            rt_val_drop(&old_val);
+            //rt_val_drop(&old_val);
         }
     }
 
@@ -179,7 +179,7 @@ impl List {
             map.get_mut(old_val).unwrap().remove_val();
         }
 
-        rt_val_drop(old_val);
+        //rt_val_drop(old_val);
         *old_val = new_val;
 
         map.entry(new_val).or_default().inc_count();

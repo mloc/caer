@@ -83,6 +83,6 @@ fn expo(x: &u8) {}
 pinion_module! {
     whee,
     [
-        ::expo,
+        crate::expo,
     ]
 }

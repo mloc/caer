@@ -12,6 +12,7 @@ pub enum BasicType {
     Enum(Enum),
     FuncPtr,
     OpaqueStruct(Option<u32>),
+    Unsized,
 }
 
 #[derive(Debug, Clone)]
