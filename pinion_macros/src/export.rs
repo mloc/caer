@@ -31,6 +31,7 @@ pub fn build_export_func(mut fn_item: syn::ItemFn) -> TokenStream2 {
         #fn_item
 
         #[doc(hidden)]
+        #[allow(non_camel_case_types)]
         #vis struct #fnmeta_ident;
 
         impl pinion::PinionFunc for #fnmeta_ident {

@@ -86,7 +86,7 @@ pub fn rt_val_print(val: &Val, rt: &mut Runtime) {
         Val::String(Some(s)) => unsafe { s.as_ref() }.as_str().into(),
         _ => val.cast_string(rt),
     };
-    //println!("{}", s);
+    println!("{}", s);
     rt.send_message(&messages::Server::Message(s));
 }
 

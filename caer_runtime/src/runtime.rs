@@ -54,7 +54,10 @@ impl PinionData for Runtime {
     }
 
     fn get_layout(_lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Layout {
-        pinion::layout::Layout::OpaqueStruct(Some(size_of::<Runtime>() as _))
+        pinion::layout::Layout::OpaqueStruct(pinion::layout::OpaqueLayout {
+            name: Some("runtime"),
+            size: Some(size_of::<Runtime>() as _),
+        })
     }
 }
 

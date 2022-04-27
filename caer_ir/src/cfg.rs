@@ -10,6 +10,7 @@ use serde::Serialize;
 use ty::Type;
 
 use super::id::*;
+use crate::module::Module;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Local {
@@ -365,7 +366,7 @@ impl<'a> Function {
         FuncInfo { calling_spec }
     }
 
-    pub fn dot(&self, name: &str) {
+    pub fn dot(&self, module: &Module, name: &str) {
         // TODO bad, for now we assume procs have unique names
         fs::create_dir_all("dbgout/dot/tino_cfg/").unwrap();
         fs::create_dir_all("dbgout/ir/").unwrap();
@@ -394,7 +395,12 @@ impl<'a> Function {
             .iter_enumerated()
             .map(|(id, l)| {
                 finagle(
-                    dot::LabelText::escaped(format!("{}: {:?}", id.index(), l.ty)).to_dot_string(),
+                    dot::LabelText::escaped(format!(
+                        "{}: {:?}",
+                        id.index(),
+                        module.types.get(l.ty)
+                    ))
+                    .to_dot_string(),
                 )
             })
             .collect::<Vec<_>>()
@@ -404,7 +410,22 @@ impl<'a> Function {
             .iter_enumerated()
             .map(|(id, v)| {
                 finagle(
-                    dot::LabelText::escaped(format!("{}: {:?}", id.index(), v.ty)).to_dot_string(),
+                    dot::LabelText::escaped(format!(
+                        "{}: {:?}",
+                        id.index(),
+                        module.types.get(v.ty)
+                    ))
+                    .to_dot_string(),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\\l");
+        let tys = module
+            .types
+            .iter()
+            .map(|(id, ty)| {
+                finagle(
+                    dot::LabelText::escaped(format!("{}: {:?}", id.index(), ty)).to_dot_string(),
                 )
             })
             .collect::<Vec<_>>()
@@ -419,6 +440,12 @@ impl<'a> Function {
             f,
             "vlegend[label=\"{{Vars\\l|{{{}\\l}}}}\"][shape=\"record\"];",
             vars
+        )
+        .unwrap();
+        writeln!(
+            f,
+            "tlegend[label=\"{{Types (global)\\l|{{{}\\l}}}}\"][shape=\"record\"];",
+            tys
         )
         .unwrap();
 

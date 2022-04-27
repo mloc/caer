@@ -89,10 +89,10 @@ where
     }
 
     fn get_layout(lctx: &mut LayoutCtx) -> Layout {
-        Layout::Struct(StructLayout::new(&[
-            ("t0", lctx.populate::<A>()),
-            ("t1", lctx.populate::<B>()),
-        ]))
+        Layout::Struct(StructLayout::new(
+            None,
+            &[("t0", lctx.populate::<A>()), ("t1", lctx.populate::<B>())],
+        ))
     }
 }
 
@@ -232,7 +232,10 @@ impl PinionData for PinionOpaqueStruct {
     unsafe fn validate(_ptr: *const u8) {}
 
     fn get_layout(_lctx: &mut LayoutCtx) -> Layout {
-        layout::Layout::OpaqueStruct(None)
+        layout::Layout::OpaqueStruct(layout::OpaqueLayout {
+            name: Some("opaque"),
+            size: None,
+        })
     }
 }
 

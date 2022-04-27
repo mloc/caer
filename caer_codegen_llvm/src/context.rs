@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::mem::size_of;
 
-use inkwell::types::{BasicType, BasicTypeEnum};
+use inkwell::types::{BasicType, BasicTypeEnum, StructType};
 use pinion::layout::Layout;
 use pinion::layout_ctx::{LayoutCtx, LayoutId};
 use pinion::types::Primitive;
+use pinion::PinionStruct;
 
 /// Only way of getting addressspace(1) in inkwell, for now
 /// Not really needed currently while using explicit forms
@@ -38,6 +39,16 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
         }
     }
 
+    pub fn get_struct<T: PinionStruct>(&mut self) -> StructType<'ctx> {
+        let id = self.layout_ctx.populate::<T>();
+        self.get_struct_from_id(id)
+    }
+
+    fn get_struct_from_id(&mut self, id: LayoutId) -> StructType<'ctx> {
+        let bty = self.build_layout(self.layout_ctx.get(id).unwrap());
+        bty.into_struct_type()
+    }
+
     fn build_layout(&self, layout: &Layout) -> BasicTypeEnum<'ctx> {
         match layout {
             Layout::Struct(sl) => {
@@ -67,6 +78,7 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
             },
             Layout::Enum(enum_layout) => {
                 assert!(enum_layout.alignment >= enum_layout.disc_width);
+                assert!(enum_layout.alignment <= 8);
                 assert_eq!(enum_layout.size % enum_layout.alignment, 0);
 
                 let disc_padding_length = enum_layout.alignment - enum_layout.disc_width;
@@ -85,7 +97,17 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
                     .i8_type()
                     .array_type(disc_padding_length as _)
                     .into();
-                let val_part = self.llvm_ctx.i8_type().array_type(val_length as _).into();
+
+                let align_part = match enum_layout.alignment {
+                    1 => self.llvm_ctx.i8_type(),
+                    2 => self.llvm_ctx.i16_type(),
+                    4 => self.llvm_ctx.i32_type(),
+                    8 => self.llvm_ctx.i64_type(),
+                    w => panic!("unsupported alignment: {}", w),
+                };
+                let val_part = align_part
+                    .array_type((val_length / enum_layout.alignment) as _)
+                    .into();
 
                 self.llvm_ctx
                     .struct_type(&[disc_part, disc_padding_part, val_part], false)
@@ -95,18 +117,21 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
                 let opaque_base = self.llvm_ctx.opaque_struct_type("");
                 opaque_base.ptr_type(inkwell::AddressSpace::Generic).into()
             },
-            Layout::OpaqueStruct(None) => self.llvm_ctx.opaque_struct_type("opaque").into(),
-            Layout::OpaqueStruct(Some(size)) => {
-                let name = &format!("opaque_{}", size);
-                self.llvm_ctx
-                    .named_struct_type(
-                        &[self.llvm_ctx.i8_type().array_type(*size).into()],
-                        false,
-                        name,
-                    )
-                    .into()
+            Layout::OpaqueStruct(opaque_layout) => {
+                let name = opaque_layout.name.unwrap_or_default();
+                if let Some(size) = opaque_layout.size {
+                    self.llvm_ctx
+                        .named_struct_type(
+                            &[self.llvm_ctx.i8_type().array_type(size).into()],
+                            false,
+                            name,
+                        )
+                        .into()
+                } else {
+                    self.llvm_ctx.opaque_struct_type(name).into()
+                }
             },
-            Layout::Unsized => todo!(),
+            Layout::Unsized => panic!("can't represent unsized type"),
         }
     }
 

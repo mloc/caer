@@ -14,6 +14,7 @@ use crate::val::Val;
 /// Convenience wrapper around the global static vtable
 #[derive(Debug)]
 pub struct Vtable {
+    // Indexed by InstanceTypeId
     table: &'static [Entry],
     funcs: &'static [FuncPtr],
 }

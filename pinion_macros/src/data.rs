@@ -78,6 +78,7 @@ impl DeriveCtx {
         let name = self.attrs.name().unwrap_or("");
         let packed = self.attrs.repr().as_struct().unwrap();
         let ident = &self.ident;
+        let ident_str = ident.to_string();
 
         let (impl_generics, ty_generics, _) = self.generics.split_for_impl();
         let static_params = make_ty_static(&ty_generics);
@@ -90,7 +91,7 @@ impl DeriveCtx {
 
                 fn get_layout(#lctxq: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Layout {
                     let fields = [#((#field_names,#field_layouts),)*];
-                    let struct_layout = pinion::layout::StructLayout::new(&fields);
+                    let struct_layout = pinion::layout::StructLayout::new(Some(#ident_str), &fields);
                     pinion::layout::Layout::Struct(struct_layout)
                 }
 
@@ -182,6 +183,7 @@ impl DeriveCtx {
             .collect();
 
         let ident = &self.ident;
+        let ident_str = ident.to_string();
         let (impl_generics, ty_generics, _) = self.generics.split_for_impl();
         let static_params = make_ty_static(&ty_generics);
         let where_clause = make_impl_bounds(&self.generics);
@@ -223,6 +225,7 @@ impl DeriveCtx {
 
                 fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Layout {
                     let enum_layout = pinion::layout::Enum {
+                        name: Some(#ident_str),
                         size: std::mem::size_of::<Self>() as _,
                         alignment: std::mem::align_of::<Self>() as _,
                         disc_width: #disc_width,

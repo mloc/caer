@@ -184,6 +184,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             func_specs,
             types: self.env.types.get_all(),
         };
+        bincode::serialize_into(File::create("environment.bincode").unwrap(), &rt_env).unwrap();
 
         // not used by runtime, just for debugging / aux tooling
         serde_json::to_writer_pretty(

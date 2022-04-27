@@ -11,20 +11,22 @@ pub enum Layout {
     Pointer(Pointer),
     Enum(Enum),
     FuncPtr,
-    OpaqueStruct(Option<u32>),
+    OpaqueStruct(OpaqueLayout),
     Unsized,
 }
 
 #[derive(Debug, Clone)]
 pub struct StructLayout {
+    pub name: Option<&'static str>,
     pub fields: Vec<LayoutId>,
     // hashmap here is not the best! but it's fiiiine. it's all compile-time
     name_lookup: HashMap<&'static str, usize>,
 }
 
 impl StructLayout {
-    pub fn new(fields: &[(&'static str, LayoutId)]) -> Self {
+    pub fn new(name: Option<&'static str>, fields: &[(&'static str, LayoutId)]) -> Self {
         Self {
+            name,
             fields: fields.iter().map(|(_, ty)| *ty).collect(),
             name_lookup: fields
                 .iter()
@@ -59,6 +61,8 @@ impl Pointer {
 
 #[derive(Debug, Clone)]
 pub struct Enum {
+    pub name: Option<&'static str>,
+
     pub size: i32,
     pub alignment: i32,
 
@@ -66,6 +70,12 @@ pub struct Enum {
     pub discs: Vec<u64>,
     // Maps disc value to layout. No entry if unit field
     pub field_layouts: HashMap<u64, LayoutId>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OpaqueLayout {
+    pub name: Option<&'static str>,
+    pub size: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
