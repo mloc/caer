@@ -88,10 +88,10 @@ impl DeriveCtx {
             impl #impl_generics pinion::PinionData for #ident #ty_generics #where_clause {
                 type Static = #ident #static_params;
 
-                fn get_layout(#lctxq: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::BasicType {
+                fn get_layout(#lctxq: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Layout {
                     let fields = [#((#field_names,#field_layouts),)*];
                     let struct_layout = pinion::layout::StructLayout::new(&fields);
-                    pinion::layout::BasicType::Struct(struct_layout)
+                    pinion::layout::Layout::Struct(struct_layout)
                 }
 
                 unsafe fn validate(ptr: *const u8) {
@@ -125,7 +125,7 @@ impl DeriveCtx {
             impl #impl_generics pinion::PinionData for #ident #ty_generics #where_clause {
                 type Static = #ident #static_params;
 
-                fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::BasicType {
+                fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Layout {
                     <#inner_data as pinion::PinionData>::get_layout(lctx)
                 }
 
@@ -221,13 +221,15 @@ impl DeriveCtx {
             impl #impl_generics pinion::PinionData for #ident #ty_generics #where_clause {
                 type Static = #ident #static_params;
 
-                fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::BasicType {
+                fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Layout {
                     let enum_layout = pinion::layout::Enum {
+                        size: std::mem::size_of::<Self>() as _,
+                        alignment: std::mem::align_of::<Self>() as _,
                         disc_width: #disc_width,
                         discs: vec![#(#disc_exprs as u64,)*],
                         field_layouts: [#(#field_layouts,)*].into(),
                     };
-                    pinion::layout::BasicType::Enum(enum_layout)
+                    pinion::layout::Layout::Enum(enum_layout)
                 }
 
                 unsafe fn validate(ptr: *const u8) {

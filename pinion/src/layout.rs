@@ -5,7 +5,7 @@ use crate::layout_ctx::LayoutId;
 use crate::types::Primitive;
 
 #[derive(Debug, Clone)]
-pub enum BasicType {
+pub enum Layout {
     Struct(StructLayout),
     Primitive(Primitive),
     Pointer(Pointer),
@@ -43,7 +43,7 @@ impl StructLayout {
 
 #[derive(Debug, Clone)]
 pub struct Pointer {
-    element: LayoutId,
+    pub element: LayoutId,
     pub gc: bool,
 }
 
@@ -59,6 +59,9 @@ impl Pointer {
 
 #[derive(Debug, Clone)]
 pub struct Enum {
+    pub size: i32,
+    pub alignment: i32,
+
     pub disc_width: i32,
     pub discs: Vec<u64>,
     // Maps disc value to layout. No entry if unit field

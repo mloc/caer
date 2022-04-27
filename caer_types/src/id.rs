@@ -7,7 +7,7 @@ macro_rules! define_caer_id {
         impl PinionData for $name {
             type Static = Self;
 
-            fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::BasicType {
+            fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Layout {
                 $pty::get_layout(lctx)
             }
 

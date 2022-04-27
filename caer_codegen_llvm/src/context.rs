@@ -1,7 +1,10 @@
+use std::collections::HashMap;
 use std::mem::size_of;
 
-use caer_types::layout;
-use inkwell::types::BasicType;
+use inkwell::types::{BasicType, BasicTypeEnum};
+use pinion::layout::Layout;
+use pinion::layout_ctx::{LayoutCtx, LayoutId};
+use pinion::types::Primitive;
 
 /// Only way of getting addressspace(1) in inkwell, for now
 /// Not really needed currently while using explicit forms
@@ -13,6 +16,9 @@ pub struct Context<'a, 'ctx> {
     pub builder: &'a inkwell::builder::Builder<'ctx>,
     pub module: &'a inkwell::module::Module<'ctx>,
     pub rt: RtFuncs<'ctx>,
+
+    layout_ctx: LayoutCtx,
+    basic_types: HashMap<LayoutId, BasicTypeEnum<'ctx>>,
 }
 
 impl<'a, 'ctx> Context<'a, 'ctx> {
@@ -27,6 +33,80 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
             module: llmod,
             llvm_ctx: llctx,
             rt,
+            layout_ctx: LayoutCtx::default(),
+            basic_types: HashMap::default(),
+        }
+    }
+
+    fn build_layout(&self, layout: &Layout) -> BasicTypeEnum<'ctx> {
+        match layout {
+            Layout::Struct(sl) => {
+                let fields: Vec<_> = sl
+                    .fields
+                    .iter()
+                    .map(|id| {
+                        let layout = self.layout_ctx.get(*id).unwrap();
+                        self.build_layout(layout)
+                    })
+                    .collect();
+                self.llvm_ctx.struct_type(&fields, false).into()
+            },
+            Layout::Primitive(prim) => match prim {
+                Primitive::Bool => self.llvm_ctx.bool_type().into(),
+                Primitive::Int8 => self.llvm_ctx.i8_type().into(),
+                Primitive::Int16 => self.llvm_ctx.i16_type().into(),
+                Primitive::Int32 => self.llvm_ctx.i32_type().into(),
+                Primitive::Int64 => self.llvm_ctx.i64_type().into(),
+                Primitive::Float16 => self.llvm_ctx.f16_type().into(),
+                Primitive::Float32 => self.llvm_ctx.f32_type().into(),
+                Primitive::Float64 => self.llvm_ctx.f64_type().into(),
+            },
+            Layout::Pointer(ptr) => {
+                let pointee = self.build_layout(self.layout_ctx.get(ptr.element).unwrap());
+                pointee.ptr_type(inkwell::AddressSpace::Generic).into()
+            },
+            Layout::Enum(enum_layout) => {
+                assert!(enum_layout.alignment >= enum_layout.disc_width);
+                assert_eq!(enum_layout.size % enum_layout.alignment, 0);
+
+                let disc_padding_length = enum_layout.alignment - enum_layout.disc_width;
+                let val_length = enum_layout.size - enum_layout.alignment;
+
+                // TODO: ick, there's a lot of roundtrips between reprs here
+                let disc_part = match enum_layout.disc_width {
+                    1 => self.llvm_ctx.i8_type().into(),
+                    2 => self.llvm_ctx.i16_type().into(),
+                    4 => self.llvm_ctx.i32_type().into(),
+                    8 => self.llvm_ctx.i64_type().into(),
+                    w => panic!("impossible disc_width: {}", w),
+                };
+                let disc_padding_part = self
+                    .llvm_ctx
+                    .i8_type()
+                    .array_type(disc_padding_length as _)
+                    .into();
+                let val_part = self.llvm_ctx.i8_type().array_type(val_length as _).into();
+
+                self.llvm_ctx
+                    .struct_type(&[disc_part, disc_padding_part, val_part], false)
+                    .into()
+            },
+            Layout::FuncPtr => {
+                let opaque_base = self.llvm_ctx.opaque_struct_type("");
+                opaque_base.ptr_type(inkwell::AddressSpace::Generic).into()
+            },
+            Layout::OpaqueStruct(None) => self.llvm_ctx.opaque_struct_type("opaque").into(),
+            Layout::OpaqueStruct(Some(size)) => {
+                let name = &format!("opaque_{}", size);
+                self.llvm_ctx
+                    .named_struct_type(
+                        &[self.llvm_ctx.i8_type().array_type(*size).into()],
+                        false,
+                        name,
+                    )
+                    .into()
+            },
+            Layout::Unsized => todo!(),
         }
     }
 

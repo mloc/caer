@@ -2,7 +2,7 @@ pub mod interface;
 pub mod layout;
 pub mod layout_ctx;
 pub mod traits;
-mod types;
+pub mod types;
 
 #[allow(unused_imports)]
 #[macro_use]

@@ -1,7 +1,7 @@
 use std::any;
 use std::collections::HashMap;
 
-use crate::layout::BasicType;
+use crate::layout::Layout;
 use crate::traits::PinionData;
 use crate::PinionStruct;
 
@@ -18,8 +18,9 @@ impl LayoutId {
     }
 }
 
+#[derive(Debug)]
 pub struct LayoutCtx {
-    layouts: HashMap<LayoutId, BasicType>,
+    layouts: HashMap<LayoutId, Layout>,
 }
 
 impl LayoutCtx {
@@ -38,11 +39,11 @@ impl LayoutCtx {
         id
     }
 
-    pub fn get(&self, id: LayoutId) -> Option<&BasicType> {
+    pub fn get(&self, id: LayoutId) -> Option<&Layout> {
         self.layouts.get(&id)
     }
 
-    pub fn get_ty<T: PinionData>(&self) -> Option<&BasicType> {
+    pub fn get_ty<T: PinionData>(&self) -> Option<&Layout> {
         self.layouts.get(&LayoutId::of::<T>())
     }
 
@@ -52,7 +53,7 @@ impl LayoutCtx {
         let mut cur_layout = self.populate::<T>();
         for part in path {
             let (index, new_layout) = match self.get(cur_layout).unwrap() {
-                BasicType::Struct(sl) => sl.lookup_field(part).unwrap(),
+                Layout::Struct(sl) => sl.lookup_field(part).unwrap(),
                 _ => panic!(),
             };
 

@@ -5,7 +5,7 @@ use std::ptr::NonNull;
 use ordered_float::OrderedFloat;
 
 use crate::interface::Context;
-use crate::layout::{self, BasicType, Func, StructLayout};
+use crate::layout::{self, Func, Layout, StructLayout};
 use crate::layout_ctx::LayoutCtx;
 use crate::types::Primitive;
 
@@ -14,7 +14,7 @@ pub trait PinionData: Sized {
 
     unsafe fn validate(ptr: *const u8);
 
-    fn get_layout(lctx: &mut LayoutCtx) -> BasicType;
+    fn get_layout(lctx: &mut LayoutCtx) -> Layout;
 }
 
 pub trait PinionStruct: PinionData {}
@@ -56,8 +56,8 @@ macro_rules! prim_types {
 
                 unsafe fn validate(_ptr: *const u8) {}
 
-                fn get_layout(_lctx: &mut LayoutCtx) -> BasicType {
-                    layout::BasicType::Primitive(Primitive::$var)
+                fn get_layout(_lctx: &mut LayoutCtx) -> Layout {
+                    layout::Layout::Primitive(Primitive::$var)
                 }
             }
         )+)+
@@ -88,8 +88,8 @@ where
         <B as PinionData>::validate(&(*tptr).1 as *const _ as _);
     }
 
-    fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
-        BasicType::Struct(StructLayout::new(&[
+    fn get_layout(lctx: &mut LayoutCtx) -> Layout {
+        Layout::Struct(StructLayout::new(&[
             ("t0", lctx.populate::<A>()),
             ("t1", lctx.populate::<B>()),
         ]))
@@ -127,8 +127,8 @@ impl<'a, T: PinionData + 'a> PinionData for *const T {
         assert_ne!(*pptr, 0);
     }
 
-    fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
-        layout::BasicType::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
+    fn get_layout(lctx: &mut LayoutCtx) -> Layout {
+        layout::Layout::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
     }
 }
 impl<'a, T: PinionData> PinionPointerType for *const T {}
@@ -141,8 +141,8 @@ impl<'a, T: PinionData + 'a> PinionData for *mut T {
         assert_ne!(*pptr, 0);
     }
 
-    fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
-        layout::BasicType::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
+    fn get_layout(lctx: &mut LayoutCtx) -> Layout {
+        layout::Layout::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
     }
 }
 impl<'a, T: PinionData> PinionPointerType for *mut T {}
@@ -155,8 +155,8 @@ impl<'a, T: PinionData + 'a> PinionData for NonNull<T> {
         assert_ne!(*pptr, 0);
     }
 
-    fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
-        layout::BasicType::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
+    fn get_layout(lctx: &mut LayoutCtx) -> Layout {
+        layout::Layout::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
     }
 }
 impl<'a, T: PinionData> PinionPointerType for NonNull<T> {}
@@ -169,8 +169,8 @@ impl<'a, T: PinionData + 'a> PinionData for &'a T {
         assert_ne!(*pptr, 0);
     }
 
-    fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
-        layout::BasicType::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
+    fn get_layout(lctx: &mut LayoutCtx) -> Layout {
+        layout::Layout::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
     }
 }
 impl<'a, T: PinionData> PinionPointerType for &'a T {}
@@ -183,8 +183,8 @@ impl<'a, T: PinionData + 'a> PinionData for &'a mut T {
         assert_ne!(*pptr, 0);
     }
 
-    fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
-        layout::BasicType::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
+    fn get_layout(lctx: &mut LayoutCtx) -> Layout {
+        layout::Layout::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
     }
 }
 impl<'a, T: PinionData> PinionPointerType for &'a mut T {}
@@ -200,7 +200,7 @@ impl<T: PinionPointerType> PinionData for Option<T> {
         }
     }
 
-    fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
+    fn get_layout(lctx: &mut LayoutCtx) -> Layout {
         T::get_layout(lctx)
     }
 }
@@ -216,8 +216,8 @@ impl PinionData for PinionFuncPtr {
         assert!(!ptr.is_null());
     }
 
-    fn get_layout(_lctx: &mut LayoutCtx) -> BasicType {
-        layout::BasicType::FuncPtr
+    fn get_layout(_lctx: &mut LayoutCtx) -> Layout {
+        layout::Layout::FuncPtr
     }
 }
 impl PinionPointerType for PinionFuncPtr {}
@@ -231,8 +231,8 @@ impl PinionData for PinionOpaqueStruct {
 
     unsafe fn validate(_ptr: *const u8) {}
 
-    fn get_layout(_lctx: &mut LayoutCtx) -> BasicType {
-        layout::BasicType::OpaqueStruct(None)
+    fn get_layout(_lctx: &mut LayoutCtx) -> Layout {
+        layout::Layout::OpaqueStruct(None)
     }
 }
 
@@ -243,7 +243,7 @@ impl<T> PinionData for PhantomData<T> {
         panic!("should never interact with unsized type");
     }
 
-    fn get_layout(lctx: &mut LayoutCtx) -> BasicType {
-        BasicType::Unsized
+    fn get_layout(lctx: &mut LayoutCtx) -> Layout {
+        Layout::Unsized
     }
 }
