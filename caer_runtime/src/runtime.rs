@@ -9,7 +9,7 @@ use caer_types::id::{
 use caer_types::rt_env::RtEnvBundle;
 use caer_types::type_tree::Specialization;
 use ordered_float::OrderedFloat;
-use pinion::PinionData;
+use pinion::{pinion_export, PinionData};
 
 use crate::alloc::Alloc;
 use crate::arg_pack::CallBundle;
@@ -55,7 +55,7 @@ impl PinionData for Runtime {
 
     fn get_layout(_lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Layout {
         pinion::layout::Layout::OpaqueStruct(pinion::layout::OpaqueLayout {
-            name: Some("runtime"),
+            name: Some("Runtime"),
             size: Some(size_of::<Runtime>() as _),
         })
     }
@@ -152,23 +152,22 @@ impl Runtime {
     }
 }
 
+#[pinion_export]
+pub fn rt_runtime_concat_strings(
+    rt: &mut Runtime, lhs: Option<NonNull<RtString>>, rhs: Option<NonNull<RtString>>,
+) -> NonNull<RtString> {
+    RtString::from_str(format!("{}{}", resolve_string(lhs), resolve_string(rhs))).heapify(&rt.alloc)
+}
+
+#[pinion_export]
+pub fn rt_runtime_string_to_id(rt: &mut Runtime, string: NonNull<RtString>) -> StringId {
+    rt.env
+        .string_table
+        .lookup(resolve_string(Some(string)))
+        .unwrap_or_else(|| StringId::from_raw(!0u64))
+}
+
 impl Runtime {
-    #[no_mangle]
-    pub extern "C" fn rt_runtime_concat_strings(
-        &mut self, lhs: Option<NonNull<RtString>>, rhs: Option<NonNull<RtString>>,
-    ) -> NonNull<RtString> {
-        RtString::from_str(format!("{}{}", resolve_string(lhs), resolve_string(rhs)))
-            .heapify(&self.alloc)
-    }
-
-    #[no_mangle]
-    pub extern "C" fn rt_runtime_string_to_id(&mut self, string: NonNull<RtString>) -> StringId {
-        self.env
-            .string_table
-            .lookup(resolve_string(Some(string)))
-            .unwrap_or_else(|| StringId::from_raw(!0u64))
-    }
-
     #[no_mangle]
     pub extern "C" fn rt_runtime_suspend(&mut self, sleep_duration: &Val) {
         println!("SLEEP({:?})", sleep_duration);

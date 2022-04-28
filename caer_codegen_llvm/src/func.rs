@@ -1,6 +1,7 @@
 use caer_ir::cfg::*;
 use caer_ir::id::{BlockId, LocalId, VarId};
 use caer_ir::walker::{CFGWalker, Lifetimes, WalkActor};
+use caer_runtime::string::RtString;
 use caer_types::id::{FuncId, StringId, TypeId};
 use caer_types::ty::{self, Layout, RefType, ScalarLayout};
 use caer_types::{layout, op};
@@ -10,7 +11,7 @@ use inkwell::types::{BasicType, PointerType};
 use inkwell::values::*;
 use ty::Type;
 
-use crate::context::{Context, GC_ADDRESS_SPACE};
+use crate::context::{Context, ExFunc, GC_ADDRESS_SPACE};
 use crate::prog::{Intrinsic, ProgEmit};
 use crate::value::{BveWrapper, StackValue};
 
@@ -109,7 +110,9 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
     fn build_val_alloca(&self, ty: &Type) -> PointerValue<'ctx> {
         match ty {
             Type::Float => self.build_gc_alloca(self.ctx.llvm_ctx.f32_type(), ""),
-            Type::Ref(RefType::String) => self.build_gc_alloca(self.ctx.rt.ty.string_type_ptr, ""),
+            Type::Ref(RefType::String) => {
+                self.build_gc_alloca(self.ctx.get_struct::<RtString>().ty, "")
+            },
             Type::Ref(_) => self.build_gc_alloca(self.ctx.rt.ty.datum_common_type_ptr, ""),
             Type::Null => self.build_gc_alloca(self.ctx.llvm_ctx.i64_type(), ""),
             Type::Any | Type::OneOf(_) => self.build_gc_alloca(self.ctx.rt.ty.val_type, ""),
@@ -1198,7 +1201,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             op::HardBinary::StringConcat => self
                 .build_call_catching(
                     block,
-                    self.ctx.rt.rt_runtime_concat_strings,
+                    self.ctx.get_func(ExFunc::rt_runtime_concat_strings),
                     &[self.prog_emit.rt_global.into(), lhs.into(), rhs.into()],
                 )
                 .unwrap(),

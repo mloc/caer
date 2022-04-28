@@ -1,6 +1,6 @@
 use pinion::pinion_module;
 
-use crate::val;
+use crate::{runtime, val};
 
 pinion_module! {
     Runtime,
@@ -10,5 +10,6 @@ pinion_module! {
         val::rt_val_to_switch_disc,
         val::rt_val_print,
         val::rt_val_call_proc,
+        runtime::rt_runtime_concat_strings,
     ]
 }

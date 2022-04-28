@@ -10,6 +10,7 @@ pub fn build_export_func(mut fn_item: syn::ItemFn) -> TokenStream2 {
 
     let fnmeta_ident = make_fnmeta_ident(&fn_item.sig.ident);
     let vis = &fn_item.vis;
+    let ident_str = fn_item.sig.ident.to_string();
 
     let param_lids = fn_item.sig.inputs.iter().map(|arg| {
         let param_ty = match arg {
@@ -37,6 +38,7 @@ pub fn build_export_func(mut fn_item: syn::ItemFn) -> TokenStream2 {
         impl pinion::PinionFunc for #fnmeta_ident {
             fn get_func_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Func {
                 pinion::layout::Func {
+                    name: #ident_str,
                     param_tys: vec![#(#param_lids,)*],
                     return_ty: #return_lid,
                 }
@@ -159,7 +161,7 @@ pub fn build_module_export(def: ModuleDef) -> TokenStream2 {
             }
         }
 
-        #[derive(Clone, Copy, Debug)]
+        #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
         #[doc(hidden)]
         #[allow(non_camel_case_types)]
         pub enum #mod_funcs_enum {

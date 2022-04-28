@@ -3,17 +3,19 @@ use std::collections::HashMap;
 use std::mem::size_of;
 use std::rc::Rc;
 
-use inkwell::types::{BasicType, BasicTypeEnum, StructType};
-use pinion::layout::Layout;
+use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, StructType};
+use inkwell::values::FunctionValue;
+use pinion::layout::{Func, Layout};
 use pinion::layout_ctx::{LayoutCtx, LayoutId};
 use pinion::types::Primitive;
-use pinion::{PinionEnum, PinionStruct};
+use pinion::{PinionEnum, PinionModule, PinionStruct};
 
 use crate::repr::{EnumRepr, ReprManager, StructRepr};
 
-/// Only way of getting addressspace(1) in inkwell, for now
-/// Not really needed currently while using explicit forms
-pub const GC_ADDRESS_SPACE: inkwell::AddressSpace = inkwell::AddressSpace::Global;
+pub type ExFunc = <caer_runtime::export::Runtime as PinionModule>::Funcs;
+
+/// Not really needed currently while using explicit forms- set to same as normal
+pub const GC_ADDRESS_SPACE: inkwell::AddressSpace = inkwell::AddressSpace::Generic;
 
 #[derive(Debug)]
 pub struct Context<'a, 'ctx> {
@@ -23,6 +25,7 @@ pub struct Context<'a, 'ctx> {
     pub rt: RtFuncs<'ctx>,
 
     repr_manager: RefCell<ReprManager<'ctx>>,
+    funcs: HashMap<ExFunc, (Func, FunctionValue<'ctx>)>,
 }
 
 impl<'a, 'ctx> Context<'a, 'ctx> {
@@ -32,12 +35,23 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
     ) -> Self {
         let rt = RtFuncs::new(llctx, llmod);
 
+        let mut repr_manager = ReprManager::new();
+        let funcs_vec = repr_manager.get_all_funcs::<caer_runtime::export::Runtime>(llctx);
+        let funcs = funcs_vec
+            .into_iter()
+            .map(|(id, (layout, ty))| {
+                let val = llmod.add_function(layout.name, ty, None);
+                (id, (layout, val))
+            })
+            .collect();
+
         Self {
             builder: llbuild,
             module: llmod,
             llvm_ctx: llctx,
             rt,
-            repr_manager: Default::default(),
+            repr_manager: RefCell::new(repr_manager),
+            funcs,
         }
     }
 
@@ -50,6 +64,10 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
 
     pub fn get_enum<T: PinionEnum>(&self) -> Rc<EnumRepr<'ctx>> {
         self.repr_manager.borrow_mut().get_enum::<T>(self.llvm_ctx)
+    }
+
+    pub fn get_func(&self, func: ExFunc) -> FunctionValue<'ctx> {
+        self.funcs.get(&func).unwrap().1
     }
 
     // wrong spot for this
@@ -219,10 +237,8 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
 
         let heap_header_type = ctx.named_struct_type(
             &[
-                // kind
-                ctx.i8_type().into(),
                 // gc marker
-                ctx.i8_type().into(),
+                ctx.struct_type(&[ctx.i8_type().into()], false).into(),
             ],
             false,
             "heap_header",
@@ -446,7 +462,6 @@ rt_funcs! {
 
         (rt_runtime_init, void_type~val, [rt_type~gptr, i8_type~gptr, i8_type~gptr, vt_entry_type~gptr, opaque_type_ptr~gptr, i64_type~val]),
         (rt_runtime_alloc_datum, datum_common_type~ptr, [rt_type~gptr, i32_type~val]),
-        (rt_runtime_concat_strings, string_type~ptr, [rt_type~gptr, string_type~ptr, string_type~ptr]),
         (rt_runtime_string_to_id, i64_type~val, [rt_type~gptr, string_type~ptr]),
         (rt_runtime_suspend, void_type~val, [rt_type~gptr, val_type~ptr]),
         (rt_runtime_spawn_closure, void_type~val, [

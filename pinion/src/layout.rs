@@ -80,6 +80,7 @@ pub struct OpaqueLayout {
 
 #[derive(Debug, Clone)]
 pub struct Func {
+    pub name: &'static str,
     pub param_tys: Vec<LayoutId>,
     pub return_ty: Option<LayoutId>,
 }
