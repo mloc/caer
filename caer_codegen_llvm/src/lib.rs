@@ -1,6 +1,7 @@
 mod context;
 mod func;
 mod prog;
+mod repr;
 mod rt_type;
 mod value;
 

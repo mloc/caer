@@ -190,12 +190,12 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         }
     }
 
-    fn finalize_entry_block(&self, entry: BasicBlock) {
+    /*fn finalize_entry_block(&self, entry: BasicBlock) {
         self.ctx.builder.position_at_end(entry);
         self.ctx
             .builder
             .build_unconditional_branch(self.blocks[BlockId::new(0)]);
-    }
+    }*/
 
     fn assign_literal(&mut self, lit: Literal, local_id: LocalId) {
         let val = self.build_literal(lit);
@@ -233,7 +233,6 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 return;
             },
             Layout::SoftRef => {
-                // Special case: need to update two fields
                 let vptr =
                     unsafe { self.const_gep_extractvalue(src_local.into_pointer_value(), &[0, 0]) };
                 let ptr =
@@ -436,8 +435,6 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
     fn copy_val(&self, src: PointerValue<'ctx>, dest: PointerValue<'ctx>) {
         self.prog_emit.copy_val(src, dest);
     }
-
-    fn build_memcpy(&self, src: PointerValue<'ctx>, dest: PointerValue<'ctx>) {}
 
     fn build_call_internal<F>(
         &self, func: F, args: &[BveWrapper<'ctx>],

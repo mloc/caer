@@ -3,10 +3,12 @@ use std::fs::{self, File};
 use caer_ir::cfg::*;
 use caer_ir::module::Module;
 use caer_ir::walker::CFGWalker;
+use caer_types::heap_object::{GcMarker, HeapHeader};
 use caer_types::id::{FuncId, InstanceTypeId, PathTypeId, StringId};
 use caer_types::instance::InstanceType;
 use caer_types::layout;
 use caer_types::rt_env::RtEnvBundle;
+use caer_types::string::RtString;
 use caer_types::ty::Type;
 use caer_types::type_tree::{PathType, Specialization};
 use index_vec::IndexVec;
@@ -266,6 +268,10 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     fn emit_string_table(&mut self) {
+        let string_repr = self.ctx.get_struct::<RtString>();
+        let hh_repr = self.ctx.get_struct::<HeapHeader>();
+        let gcm_repr = self.ctx.get_enum::<GcMarker>();
+
         let string_globals: IndexVec<StringId, _> = self
             .env
             .string_table
@@ -287,15 +293,18 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         self.string_allocs = string_globals
             .into_iter_enumerated()
             .map(|(id, (string_global, len))| {
-                let alloc_string = self.ctx.rt.ty.string_type.const_named_struct(&[
-                    self.ctx
-                        .rt
+                let alloc_string = string_repr.ty.const_named_struct(&[
+                    hh_repr
                         .ty
-                        .heap_header_type
-                        .const_named_struct(&[
-                            self.ctx.llvm_ctx.i8_type().const_int(1, false).into(),
-                            self.ctx.llvm_ctx.i8_type().const_int(0, false).into(),
-                        ])
+                        .const_named_struct(&[gcm_repr
+                            .ty
+                            .const_named_struct(&[self
+                                .ctx
+                                .llvm_ctx
+                                .i8_type()
+                                .const_int(GcMarker::White as _, false)
+                                .into()])
+                            .into()])
                         .into(),
                     self.ctx
                         .llvm_ctx
@@ -315,7 +324,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
                     .into(),
                 ]);
                 let asg = self.ctx.module.add_global(
-                    self.ctx.rt.ty.string_type,
+                    string_repr.ty,
                     Some(GC_ADDRESS_SPACE),
                     &format!("alloc_string_{}", id.raw()),
                 );

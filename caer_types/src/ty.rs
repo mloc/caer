@@ -25,58 +25,6 @@ pub enum Type {
 }
 
 impl Type {
-    pub fn is_any(&self) -> bool {
-        panic!();
-    }
-
-    // term any is overloaded.
-    // in this case it means any ty that needs RTTI
-    /*pub fn is_any(&self) -> bool {
-
-    pub trait Ty {
-        fn needs_destructor(&self) -> bool;
-        fn as_primitive(&self) -> Option<Type>;
-        fn is_primitive(&self, prim: Type) -> bool;
-    }
-            matches!(
-                self,
-                Type::Ref(RefType::Subtype(_) | RefType::Any) | Type::OneOf(_) | Type::Any
-            )
-        }*/
-
-    /*pub fn is_layout_val(&self) -> bool {
-        matches!(self, Type::OneOf(_) | Type::Any)
-    }
-
-    pub fn is_layout_vref(&self) -> bool {
-        matches!(self, Type::Ref(RefType::Subtype(_) | RefType::Any))
-    }*/
-
-    /*pub fn contains(&self, prim: Prim) -> bool {
-        match self {
-            Type::Any => true,
-            Type::Primitive(my_prim) => *my_prim == prim,
-            Type::OneOf(tys) => tys.iter().any(|ty| ty.contains(prim)),
-            _ => false,
-        }
-    }*/
-
-    // BAD. TODO: remove, x64 specific
-    /*pub fn get_store_size(&self) -> u64 {
-        if self.is_layout_val() {
-            24
-        } else if self.is_layout_vref() {
-            16
-        } else {
-            match self {
-                Type::Null
-                | Type::Float
-                | Type::Ref(RefType::String | RefType::Exact(_) | RefType::List(_)) => 8,
-                _ => panic!("can't get size of {:?}", self),
-            }
-        }
-    }*/
-
     pub fn get_layout(&self) -> Layout<'_> {
         match self {
             Type::Null => Layout::Scalar(ScalarLayout::Null),

@@ -20,7 +20,7 @@ pub struct StructLayout {
     pub name: Option<&'static str>,
     pub fields: Vec<LayoutId>,
     // hashmap here is not the best! but it's fiiiine. it's all compile-time
-    name_lookup: HashMap<&'static str, usize>,
+    pub name_lookup: HashMap<&'static str, usize>,
 }
 
 impl StructLayout {

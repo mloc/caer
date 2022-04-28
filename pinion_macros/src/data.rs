@@ -245,6 +245,8 @@ impl DeriveCtx {
                     }
                 }
             }
+            #[automatically_derived]
+            impl #impl_generics pinion::PinionEnum for #ident #ty_generics #where_clause {}
 
             #unit_enum
         }

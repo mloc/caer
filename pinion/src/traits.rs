@@ -18,6 +18,7 @@ pub trait PinionData: Sized {
 }
 
 pub trait PinionStruct: PinionData {}
+pub trait PinionEnum: PinionData {}
 
 // marker trait. must be a nicheable type
 pub trait PinionPointerType: PinionData {}

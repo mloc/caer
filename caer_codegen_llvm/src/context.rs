@@ -1,11 +1,15 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem::size_of;
+use std::rc::Rc;
 
 use inkwell::types::{BasicType, BasicTypeEnum, StructType};
 use pinion::layout::Layout;
 use pinion::layout_ctx::{LayoutCtx, LayoutId};
 use pinion::types::Primitive;
-use pinion::PinionStruct;
+use pinion::{PinionEnum, PinionStruct};
+
+use crate::repr::{EnumRepr, ReprManager, StructRepr};
 
 /// Only way of getting addressspace(1) in inkwell, for now
 /// Not really needed currently while using explicit forms
@@ -18,8 +22,7 @@ pub struct Context<'a, 'ctx> {
     pub module: &'a inkwell::module::Module<'ctx>,
     pub rt: RtFuncs<'ctx>,
 
-    layout_ctx: LayoutCtx,
-    basic_types: HashMap<LayoutId, BasicTypeEnum<'ctx>>,
+    repr_manager: RefCell<ReprManager<'ctx>>,
 }
 
 impl<'a, 'ctx> Context<'a, 'ctx> {
@@ -34,105 +37,19 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
             module: llmod,
             llvm_ctx: llctx,
             rt,
-            layout_ctx: LayoutCtx::default(),
-            basic_types: HashMap::default(),
+            repr_manager: Default::default(),
         }
     }
 
-    pub fn get_struct<T: PinionStruct>(&mut self) -> StructType<'ctx> {
-        let id = self.layout_ctx.populate::<T>();
-        self.get_struct_from_id(id)
+    // TODO: collapse the monomorphing here..? it's nice for the API but bad for code size
+    pub fn get_struct<T: PinionStruct>(&self) -> Rc<StructRepr<'ctx>> {
+        self.repr_manager
+            .borrow_mut()
+            .get_struct::<T>(self.llvm_ctx)
     }
 
-    fn get_struct_from_id(&mut self, id: LayoutId) -> StructType<'ctx> {
-        let bty = self.build_layout(self.layout_ctx.get(id).unwrap());
-        bty.into_struct_type()
-    }
-
-    fn build_layout(&self, layout: &Layout) -> BasicTypeEnum<'ctx> {
-        match layout {
-            Layout::Struct(sl) => {
-                let fields: Vec<_> = sl
-                    .fields
-                    .iter()
-                    .map(|id| {
-                        let layout = self.layout_ctx.get(*id).unwrap();
-                        self.build_layout(layout)
-                    })
-                    .collect();
-                self.llvm_ctx.struct_type(&fields, false).into()
-            },
-            Layout::Primitive(prim) => match prim {
-                Primitive::Bool => self.llvm_ctx.bool_type().into(),
-                Primitive::Int8 => self.llvm_ctx.i8_type().into(),
-                Primitive::Int16 => self.llvm_ctx.i16_type().into(),
-                Primitive::Int32 => self.llvm_ctx.i32_type().into(),
-                Primitive::Int64 => self.llvm_ctx.i64_type().into(),
-                Primitive::Float16 => self.llvm_ctx.f16_type().into(),
-                Primitive::Float32 => self.llvm_ctx.f32_type().into(),
-                Primitive::Float64 => self.llvm_ctx.f64_type().into(),
-            },
-            Layout::Pointer(ptr) => {
-                let pointee = self.build_layout(self.layout_ctx.get(ptr.element).unwrap());
-                pointee.ptr_type(inkwell::AddressSpace::Generic).into()
-            },
-            Layout::Enum(enum_layout) => {
-                assert!(enum_layout.alignment >= enum_layout.disc_width);
-                assert!(enum_layout.alignment <= 8);
-                assert_eq!(enum_layout.size % enum_layout.alignment, 0);
-
-                let disc_padding_length = enum_layout.alignment - enum_layout.disc_width;
-                let val_length = enum_layout.size - enum_layout.alignment;
-
-                // TODO: ick, there's a lot of roundtrips between reprs here
-                let disc_part = match enum_layout.disc_width {
-                    1 => self.llvm_ctx.i8_type().into(),
-                    2 => self.llvm_ctx.i16_type().into(),
-                    4 => self.llvm_ctx.i32_type().into(),
-                    8 => self.llvm_ctx.i64_type().into(),
-                    w => panic!("impossible disc_width: {}", w),
-                };
-                let disc_padding_part = self
-                    .llvm_ctx
-                    .i8_type()
-                    .array_type(disc_padding_length as _)
-                    .into();
-
-                let align_part = match enum_layout.alignment {
-                    1 => self.llvm_ctx.i8_type(),
-                    2 => self.llvm_ctx.i16_type(),
-                    4 => self.llvm_ctx.i32_type(),
-                    8 => self.llvm_ctx.i64_type(),
-                    w => panic!("unsupported alignment: {}", w),
-                };
-                let val_part = align_part
-                    .array_type((val_length / enum_layout.alignment) as _)
-                    .into();
-
-                self.llvm_ctx
-                    .struct_type(&[disc_part, disc_padding_part, val_part], false)
-                    .into()
-            },
-            Layout::FuncPtr => {
-                let opaque_base = self.llvm_ctx.opaque_struct_type("");
-                opaque_base.ptr_type(inkwell::AddressSpace::Generic).into()
-            },
-            Layout::OpaqueStruct(opaque_layout) => {
-                let name = opaque_layout.name.unwrap_or_default();
-                if let Some(size) = opaque_layout.size {
-                    self.llvm_ctx
-                        .named_struct_type(
-                            &[self.llvm_ctx.i8_type().array_type(size).into()],
-                            false,
-                            name,
-                        )
-                        .into()
-                } else {
-                    self.llvm_ctx.opaque_struct_type(name).into()
-                }
-            },
-            Layout::Unsized => panic!("can't represent unsized type"),
-        }
+    pub fn get_enum<T: PinionEnum>(&self) -> Rc<EnumRepr<'ctx>> {
+        self.repr_manager.borrow_mut().get_enum::<T>(self.llvm_ctx)
     }
 
     // wrong spot for this

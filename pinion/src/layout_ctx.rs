@@ -1,5 +1,7 @@
 use std::any;
+use std::borrow::Borrow;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::layout::Layout;
 use crate::traits::PinionData;
@@ -20,7 +22,7 @@ impl LayoutId {
 
 #[derive(Debug)]
 pub struct LayoutCtx {
-    layouts: HashMap<LayoutId, Layout>,
+    layouts: HashMap<LayoutId, Rc<Layout>>,
 }
 
 impl LayoutCtx {
@@ -34,17 +36,17 @@ impl LayoutCtx {
         let id = LayoutId::of::<T>();
         if !self.layouts.contains_key(&id) {
             let layout = T::get_layout(self);
-            self.layouts.insert(id, layout);
+            self.layouts.insert(id, Rc::new(layout));
         }
         id
     }
 
-    pub fn get(&self, id: LayoutId) -> Option<&Layout> {
-        self.layouts.get(&id)
+    pub fn get(&self, id: LayoutId) -> Option<Rc<Layout>> {
+        self.layouts.get(&id).cloned()
     }
 
-    pub fn get_ty<T: PinionData>(&self) -> Option<&Layout> {
-        self.layouts.get(&LayoutId::of::<T>())
+    pub fn get_ty<T: PinionData>(&self) -> Option<Rc<Layout>> {
+        self.layouts.get(&LayoutId::of::<T>()).cloned()
     }
 
     pub fn get_gep_indices<T: PinionStruct>(&mut self, path: &[&'static str]) -> Vec<u64> {
@@ -52,7 +54,7 @@ impl LayoutCtx {
 
         let mut cur_layout = self.populate::<T>();
         for part in path {
-            let (index, new_layout) = match self.get(cur_layout).unwrap() {
+            let (index, new_layout) = match self.get(cur_layout).unwrap().borrow() {
                 Layout::Struct(sl) => sl.lookup_field(part).unwrap(),
                 _ => panic!(),
             };
