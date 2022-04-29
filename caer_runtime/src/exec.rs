@@ -166,7 +166,7 @@ impl CoroCtx {
             unsafe { cargs.2.as_mut().on_wake() };
             let mut ret = Val::Null;
             let pack = (&cargs.1.as_pack()) as *const _;
-            cargs.0(pack, unsafe { cargs.2.as_mut() }, (&mut ret) as *mut _);
+            cargs.0 .0(pack, unsafe { cargs.2.as_mut() }, (&mut ret) as *mut _);
         }
         fn closure_entry(mut cargs: (ClosurePtr, ClosureArgs, NonNull<Runtime>)) {
             unsafe { cargs.2.as_mut().on_wake() };

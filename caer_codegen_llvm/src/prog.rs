@@ -4,6 +4,7 @@ use caer_ir::cfg::*;
 use caer_ir::module::Module;
 use caer_ir::walker::CFGWalker;
 use caer_runtime::arg_pack::ProcPack;
+use caer_runtime::datum::Datum;
 use caer_runtime::heap_object::{GcMarker, HeapHeader};
 use caer_runtime::runtime::Runtime;
 use caer_runtime::string::RtString;
@@ -107,13 +108,11 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     fn add_func(&mut self, ir_func: &'a Function) {
-        //let mut proc_emit = ProcEmit::new(self.ctx, proc, name);
-        let ty;
-        if ir_func.closure.is_some() {
-            ty = self.ctx.rt.ty.closure_type;
+        let ty = if ir_func.closure.is_some() {
+            self.ctx.rt.ty.closure_type
         } else {
-            ty = self.proc_type;
-        }
+            self.proc_type
+        };
 
         let ll_func =
             self.ctx
@@ -271,12 +270,9 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 
     fn populate_datum_types(&mut self) {
         for ty in self.env.type_tree.iter() {
-            let vars_field_ty = self.ctx.rt.ty.val_type.array_type(ty.vars.len() as u32);
+            let vars_field_ty = self.ctx.get_type::<Val>().array_type(ty.vars.len() as u32);
             let datum_ty = self.ctx.llvm_ctx.named_struct_type(
-                &[
-                    self.ctx.rt.ty.datum_common_type.into(),
-                    vars_field_ty.into(),
-                ],
+                &[self.ctx.get_type::<Datum>(), vars_field_ty.into()],
                 false,
                 &format!("datum_{}", ty.id.index()),
             );
@@ -401,9 +397,9 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
                         .const_int(ity.id.raw() as _, false)
                         .into(),
                     size_val.into(),
-                    self.ctx.rt.rt_list_var_get.into(),
-                    self.ctx.rt.rt_list_var_set.into(),
-                    self.ctx.rt.rt_list_proc_lookup.into(),
+                    self.ctx.get_func(ExFunc::rt_list_var_get).into(),
+                    self.ctx.get_func(ExFunc::rt_list_var_set).into(),
+                    self.ctx.get_func(ExFunc::rt_list_proc_lookup).into(),
                 ],
                 Specialization::String => {
                     [
@@ -574,7 +570,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             &[
                 datum_type_ptr.into(),
                 self.ctx.llvm_ctx.i64_type().into(),
-                self.ctx.rt.ty.val_type_ptr.into(),
+                self.ctx.get_type_ptr::<Val>().into(),
             ],
             false,
         );
@@ -628,7 +624,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             &[
                 datum_type_ptr.into(),
                 self.ctx.llvm_ctx.i64_type().into(),
-                self.ctx.rt.ty.val_type_ptr.into(),
+                self.ctx.get_type_ptr::<Val>().into(),
             ],
             false,
         );

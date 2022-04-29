@@ -1,3 +1,4 @@
+use std::ffi::c_void;
 use std::fmt::Debug;
 use std::marker::{PhantomData, Sized};
 use std::ptr::NonNull;
@@ -225,11 +226,7 @@ impl PinionData for PinionFuncPtr {
 }
 impl PinionPointerType for PinionFuncPtr {}*/
 
-pub struct PinionOpaqueStruct {
-    _dummy: (),
-}
-
-impl PinionData for PinionOpaqueStruct {
+impl PinionData for c_void {
     type Static = Self;
 
     unsafe fn validate(_ptr: *const u8) {}

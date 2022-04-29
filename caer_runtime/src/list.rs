@@ -1,14 +1,14 @@
 // TODO: maybe don't throw exceptions in methods, use result+unwrapper?
 
 use std::collections::{hash_map, HashMap};
+use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::slice;
 
-use caer_types::id::{PathTypeId, StringId, TYPE_ID_LIST};
 use caer_types::type_tree::Specialization;
+use pinion::pinion_export;
 
 use crate::arg_pack::ProcPack;
-use crate::datum::Datum;
 use crate::heap_object::HeapHeader;
 use crate::rtti::RttiRef;
 use crate::runtime::Runtime;
@@ -352,22 +352,24 @@ impl Drop for List {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn rt_list_var_get(list: &mut List, var: &RtString, out: &mut Val) {
+#[pinion_export]
+pub fn rt_list_var_get(list_ptr: NonNull<c_void>, var: &RtString, out: &mut Val) {
+    let list: &mut List = unsafe { list_ptr.cast().as_mut() };
     *out = list.var_get(var)
 }
 
-#[no_mangle]
-pub extern "C" fn rt_list_var_set(list: &mut List, var: &RtString, val: &Val) {
+#[pinion_export]
+pub fn rt_list_var_set(list_ptr: NonNull<c_void>, var: &RtString, val: &Val) {
+    let list: &mut List = unsafe { list_ptr.cast().as_mut() };
     list.var_set(var, *val)
 }
 
-#[no_mangle]
-pub extern "C" fn rt_list_proc_lookup(proc: &RtString, _rt: &mut Runtime) -> ProcPtr {
+#[pinion_export]
+pub fn rt_list_proc_lookup(proc: &RtString, _rt: &mut Runtime) -> ProcPtr {
     match proc.as_str() {
-        "Add" => List::proc_add,
-        "Copy" => List::proc_copy,
-        "Cut" => List::proc_cut,
+        "Add" => ProcPtr(List::proc_add),
+        "Copy" => ProcPtr(List::proc_copy),
+        "Cut" => ProcPtr(List::proc_cut),
         s => panic!("RTE bad proc for list: {:?}", s),
     }
 }

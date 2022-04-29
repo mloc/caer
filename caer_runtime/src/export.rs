@@ -1,6 +1,6 @@
 use pinion::pinion_module;
 
-use crate::{arg_pack, runtime, val};
+use crate::{arg_pack, list, runtime, val};
 
 pinion_module! {
     Runtime,
@@ -20,5 +20,9 @@ pinion_module! {
         runtime::rt_runtime_get_time,
 
         arg_pack::rt_arg_pack_unpack_into,
+
+        list::rt_list_var_get,
+        list::rt_list_var_set,
+        list::rt_list_proc_lookup,
     ]
 }

@@ -2,6 +2,8 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::parse_quote;
 
+use crate::ty;
+
 pub fn build_export_func(mut fn_item: syn::ItemFn) -> TokenStream2 {
     assert!(fn_item.sig.abi.is_none());
     assert!(!fn_item
@@ -11,6 +13,7 @@ pub fn build_export_func(mut fn_item: syn::ItemFn) -> TokenStream2 {
     fn_item.sig.abi = Some(parse_quote! {extern "C"});
     fn_item.attrs.push(parse_quote! { #[no_mangle] });
 
+    let lctxq: syn::Ident = parse_quote! { lctx };
     let fnmeta_ident = make_fnmeta_ident(&fn_item.sig.ident);
     let vis = &fn_item.vis;
     let ident_str = fn_item.sig.ident.to_string();
@@ -28,7 +31,10 @@ pub fn build_export_func(mut fn_item: syn::ItemFn) -> TokenStream2 {
 
     let return_lid = match fn_item.sig.output {
         syn::ReturnType::Default => quote! {None},
-        syn::ReturnType::Type(_, ref ty) => quote! { Some(lctx.populate::<#ty>())},
+        syn::ReturnType::Type(_, ref ty) => {
+            let layout = ty::populate_ty(&lctxq, ty);
+            quote! { Some(#layout)}
+        },
     };
 
     quote! {
