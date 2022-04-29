@@ -14,7 +14,7 @@ mod gc_stackmap;
 pub mod heap_object;
 pub mod list;
 mod meta_runtime;
-mod rtti;
+pub mod rtti;
 pub mod runtime;
 pub mod string;
 pub mod string_table;

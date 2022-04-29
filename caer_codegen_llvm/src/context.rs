@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use std::mem::size_of;
 use std::rc::Rc;
 
-use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, StructType};
+use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, PointerType, StructType};
 use inkwell::values::FunctionValue;
 use pinion::layout::{Func, Layout};
 use pinion::layout_ctx::{LayoutCtx, LayoutId};
 use pinion::types::Primitive;
-use pinion::{PinionEnum, PinionModule, PinionStruct};
+use pinion::{PinionData, PinionEnum, PinionModule, PinionStruct};
 
 use crate::repr::{EnumRepr, ReprManager, StructRepr};
 
@@ -68,6 +68,18 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
 
     pub fn get_func(&self, func: ExFunc) -> FunctionValue<'ctx> {
         self.funcs.get(&func).unwrap().1
+    }
+
+    pub fn get_type<T: PinionData>(&self) -> BasicTypeEnum<'ctx> {
+        self.repr_manager
+            .borrow_mut()
+            .get_type::<T>(self.llvm_ctx)
+            .expect("ty must be sized")
+    }
+
+    pub fn get_type_ptr<T: PinionData>(&self) -> PointerType<'ctx> {
+        self.get_type::<T>()
+            .ptr_type(inkwell::AddressSpace::Generic)
     }
 
     // wrong spot for this
@@ -452,7 +464,7 @@ macro_rules! rt_funcs {
 rt_funcs! {
     RtFuncs,
     [
-        (rt_val_binary_op, void_type~val, [rt_type~gptr, i32_type~val, val_type~ptr, val_type~ptr, val_type~ptr]),
+        /*(rt_val_binary_op, void_type~val, [rt_type~gptr, i32_type~val, val_type~ptr, val_type~ptr, val_type~ptr]),
         (rt_val_to_switch_disc, i32_type~val, [val_type~ptr]),
         (rt_val_print, void_type~val, [val_type~ptr, rt_type~gptr]),
         (rt_val_cloned, void_type~val, [val_type~ptr]),
@@ -474,7 +486,7 @@ rt_funcs! {
             val_type~ptr,
         ]),
 
-        (rt_arg_pack_unpack_into, void_type~val, [arg_pack_type~gptr, val_type_ptr~gptr, i64_type~val, rt_type~gptr]),
+        (rt_arg_pack_unpack_into, void_type~val, [arg_pack_type~gptr, val_type_ptr~gptr, i64_type~val, rt_type~gptr]),*/
 
         (rt_list_var_get, void_type~val, [opaque_type~ptr, i64_type~val, val_type~ptr]),
         (rt_list_var_set, void_type~val, [opaque_type~ptr, i64_type~val, val_type~ptr]),

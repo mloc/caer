@@ -66,8 +66,8 @@ impl PinionData for Runtime {
 /// Should only be called by generated code that knows what it's doing; in particular, the
 /// pointers need to be valid, and global_rt must point to an appropriately sized section of
 /// memory.
-#[no_mangle]
-pub unsafe extern "C" fn rt_runtime_init(
+#[pinion_export]
+pub unsafe fn rt_runtime_init(
     global_rt: &'static mut Runtime, stackmap_start: *const u8, stackmap_end: *const u8,
     vtable_ptr: *const vtable::Entry, funcs_ptr: *const vtable::FuncPtr, entry_proc: FuncId,
 ) {
@@ -119,7 +119,7 @@ impl Runtime {
     // TODO: fix lifetimes
     #[deprecated]
     pub fn new_datum(&mut self, ty: PathTypeId) -> &mut Datum {
-        unsafe { &mut *self.rt_runtime_alloc_datum(ty.index() as u32).as_ptr() }
+        unsafe { &mut *rt_runtime_alloc_datum(self, ty.index() as u32).as_ptr() }
     }
 
     // TODO: genericify? + break out of Runtime
@@ -167,71 +167,69 @@ pub fn rt_runtime_string_to_id(rt: &mut Runtime, string: NonNull<RtString>) -> S
         .unwrap_or_else(|| StringId::from_raw(!0u64))
 }
 
-impl Runtime {
-    #[no_mangle]
-    pub extern "C" fn rt_runtime_suspend(&mut self, sleep_duration: &Val) {
-        println!("SLEEP({:?})", sleep_duration);
-        self.sleep_duration = match sleep_duration {
-            Val::Float(f) => *f,
-            _ => panic!("invalid val for sleep(): {:?}", sleep_duration),
-        };
+#[pinion_export]
+pub fn rt_runtime_suspend(rt: &mut Runtime, sleep_duration: &Val) {
+    println!("SLEEP({:?})", sleep_duration);
+    rt.sleep_duration = match sleep_duration {
+        Val::Float(f) => *f,
+        _ => panic!("invalid val for sleep(): {:?}", sleep_duration),
+    };
 
-        self.yield_to_meta();
-    }
+    rt.yield_to_meta();
+}
 
-    #[no_mangle]
-    pub extern "C" fn rt_runtime_alloc_datum(&mut self, ty: u32) -> NonNull<Datum> {
-        let ty = InstanceTypeId::new(ty as usize);
-        let ventry = &self.vtable[ty];
-        // TODO: put spec in ventry?
-        let ity = self.env.instances.lookup_instance(ty).unwrap();
+#[pinion_export]
+pub fn rt_runtime_alloc_datum(rt: &mut Runtime, ty: u32) -> NonNull<Datum> {
+    let ty = InstanceTypeId::new(ty as usize);
+    let ventry = &rt.vtable[ty];
+    // TODO: put spec in ventry?
+    let ity = rt.env.instances.lookup_instance(ty).unwrap();
 
-        match ity.pty.specialization {
-            Specialization::Datum => {
-                unsafe {
-                    let mut ptr: NonNull<Datum> = self.alloc.alloc(ventry.size as usize, ty).cast();
+    match ity.pty.specialization {
+        Specialization::Datum => {
+            unsafe {
+                let mut ptr: NonNull<Datum> = rt.alloc.alloc(ventry.size as usize, ty).cast();
 
-                    // TODO: init vars instead of nulling
-                    for val in Datum::get_vars(ptr.as_mut(), ty, self) {
-                        *val = crate::val::Val::Null;
-                    }
-
-                    ptr
+                // TODO: init vars instead of nulling
+                for val in Datum::get_vars(ptr.as_mut(), ty, rt) {
+                    *val = crate::val::Val::Null;
                 }
-            },
-            Specialization::List => {
-                let mut ptr = self.alloc_list();
-                unsafe {
-                    *ptr.as_mut() = List::new();
-                }
-                ptr.cast()
-            },
-            _ => panic!("cannot alloc {:?} / {:?}", ity.pty.specialization, ty),
-        }
+
+                ptr
+            }
+        },
+        Specialization::List => {
+            let mut ptr = rt.alloc_list();
+            unsafe {
+                *ptr.as_mut() = List::new();
+            }
+            ptr.cast()
+        },
+        _ => panic!("cannot alloc {:?} / {:?}", ity.pty.specialization, ty),
     }
+}
 
-    #[no_mangle]
-    pub extern "C" fn rt_runtime_spawn_closure(
-        &mut self, closure_func: FuncId, num_args: u64, args: NonNull<Val>,
-    ) {
-        // TODO: handle delayed spawns
-        println!(
-            "doing spawn: {:?} / {:?} / {:?}",
-            closure_func, num_args, args
-        );
-        //let spec = &self.env.func_specs[closure_func];
-        let env = unsafe { std::slice::from_raw_parts(args.as_ptr(), num_args as usize).to_vec() };
+#[pinion_export]
+pub fn rt_runtime_spawn_closure(
+    rt: &mut Runtime, closure_func: FuncId, num_args: u64, args: NonNull<Val>,
+) {
+    // TODO: handle delayed spawns
+    println!(
+        "doing spawn: {:?} / {:?} / {:?}",
+        closure_func, num_args, args
+    );
+    //let spec = &self.env.func_specs[closure_func];
+    let env = unsafe { std::slice::from_raw_parts(args.as_ptr(), num_args as usize).to_vec() };
 
-        let args = crate::arg_pack::ClosureArgs { environment: env };
-        let bundle = crate::arg_pack::CallBundle::Closure((closure_func, args));
+    let args = crate::arg_pack::ClosureArgs { environment: env };
+    let bundle = crate::arg_pack::CallBundle::Closure((closure_func, args));
 
-        // DM fibres can't directly interact with the executor, so we queue spawns in the runtime
-        // to be picked up at next sleep
-        self.queued_funcs.push((bundle, 0));
-    }
+    // DM fibres can't directly interact with the executor, so we queue spawns in the runtime
+    // to be picked up at next sleep
+    rt.queued_funcs.push((bundle, 0));
+}
 
-    #[no_mangle]
-    pub extern "C" fn rt_runtime_get_time(&mut self) -> u64 {
-        self.world_time
-    }
+#[pinion_export]
+pub fn rt_runtime_get_time(rt: &mut Runtime) -> u64 {
+    rt.world_time
 }

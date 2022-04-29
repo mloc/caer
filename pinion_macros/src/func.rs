@@ -5,19 +5,19 @@ use crate::ty;
 
 #[derive(Debug, Clone)]
 pub struct FuncShape {
-    pub params: Vec<syn::Type>,
-    pub ret: Option<syn::Type>,
+    pub params: Vec<syn::Expr>,
+    pub ret: Option<syn::Expr>,
 }
 
 impl FuncShape {
-    fn ret_from_rty(rty: &syn::ReturnType) -> Option<syn::Type> {
+    fn ret_from_rty(lctx: &syn::Ident, rty: &syn::ReturnType) -> Option<syn::Expr> {
         match rty {
             syn::ReturnType::Default => None,
-            syn::ReturnType::Type(_, ty) => Some(ty::normalize_ty(ty)),
+            syn::ReturnType::Type(_, ty) => Some(ty::populate_ty(lctx, ty)),
         }
     }
 
-    pub fn from_method(sig: &syn::Signature, self_ty: &syn::Type) -> Self {
+    /*pub fn from_method(sig: &syn::Signature, self_ty: &syn::Type) -> Self {
         let params = sig
             .inputs
             .iter()
@@ -45,39 +45,35 @@ impl FuncShape {
             params,
             ret: Self::ret_from_rty(&sig.output),
         }
-    }
+    }*/
 
-    pub fn from_bare(bare: &syn::TypeBareFn) -> Self {
+    pub fn from_bare(lctx: &syn::Ident, bare: &syn::TypeBareFn) -> Self {
         let params = bare
             .inputs
             .iter()
-            .map(|inp| {
-                assert!(inp.attrs.is_empty());
-                inp.ty.clone()
-            })
+            .map(|inp| ty::populate_ty(lctx, &inp.ty))
             .collect();
 
         Self {
             params,
-            ret: Self::ret_from_rty(&bare.output),
+            ret: Self::ret_from_rty(lctx, &bare.output),
         }
     }
 
-    pub fn build_type(&self, ctx: &syn::Expr) -> syn::Expr {
-        let param_types = self.params.iter().map(|ty| ty::build_type(ctx, ty));
+    pub fn build_layout(&self, lctx: &syn::Ident) -> syn::Expr {
+        let param_types = self.params.iter();
         let ret_type: syn::Expr = match &self.ret {
-            Some(ty) => {
-                let ty = ty::build_type(ctx, ty);
-                parse_quote! {Some(#ty)}
+            Some(expr) => {
+                parse_quote! {Some(#expr)}
             },
             None => parse_quote! {None},
         };
 
         parse_quote! {
-            {
-                let params = [#(#param_types,)*];
-                let ret_ty = #ret_type;
-                #ctx.make_function_type(&params, ret_ty)
+            pinion::layout::Func {
+                name: "",
+                param_tys: vec![#(#param_types,)*],
+                return_ty: #ret_type,
             }
         }
     }

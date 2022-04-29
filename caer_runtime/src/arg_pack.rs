@@ -4,7 +4,7 @@ use std::ptr::NonNull;
 
 use caer_types::func::CallingSpec;
 use caer_types::id::{FuncId, StringId};
-use pinion::PinionData;
+use pinion::{pinion_export, PinionData};
 
 use crate::ffi::FfiArray;
 use crate::runtime::Runtime;
@@ -120,8 +120,8 @@ impl ProcPack<'_> {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn rt_arg_pack_unpack_into(
+#[pinion_export]
+pub fn rt_arg_pack_unpack_into(
     argpack: &ProcPack, target_ptrs: NonNull<*mut Val>, proc_id: FuncId, rt: &mut Runtime,
 ) {
     argpack.unpack_into(target_ptrs, proc_id, rt)

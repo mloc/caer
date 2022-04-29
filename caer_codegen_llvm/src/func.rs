@@ -1,7 +1,12 @@
 use caer_ir::cfg::*;
 use caer_ir::id::{BlockId, LocalId, VarId};
 use caer_ir::walker::{CFGWalker, Lifetimes, WalkActor};
+use caer_runtime::arg_pack::ProcPack;
+use caer_runtime::datum::Datum;
+use caer_runtime::rtti::RttiRef;
 use caer_runtime::string::RtString;
+use caer_runtime::val::Val;
+use caer_runtime::vtable;
 use caer_types::id::{FuncId, StringId, TypeId};
 use caer_types::ty::{self, Layout, RefType, ScalarLayout};
 use caer_types::{layout, op};
@@ -9,6 +14,7 @@ use index_vec::IndexVec;
 use inkwell::basic_block::BasicBlock;
 use inkwell::types::{BasicType, PointerType};
 use inkwell::values::*;
+use pinion::{PinionData, PinionEnum};
 use ty::Type;
 
 use crate::context::{Context, ExFunc, GC_ADDRESS_SPACE};
@@ -113,10 +119,10 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             Type::Ref(RefType::String) => {
                 self.build_gc_alloca(self.ctx.get_struct::<RtString>().ty, "")
             },
-            Type::Ref(_) => self.build_gc_alloca(self.ctx.rt.ty.datum_common_type_ptr, ""),
+            Type::Ref(_) => self.build_gc_alloca(self.ctx.get_type_ptr::<Datum>(), ""),
             Type::Null => self.build_gc_alloca(self.ctx.llvm_ctx.i64_type(), ""),
-            Type::Any | Type::OneOf(_) => self.build_gc_alloca(self.ctx.rt.ty.val_type, ""),
-            _ => unimplemented!("unhandled ty: {:?}", ty),
+            Type::Any | Type::OneOf(_) => self.build_gc_alloca(self.ctx.get_enum::<Val>().ty, ""),
+            //_ => unimplemented!("unhandled ty: {:?}", ty),
         }
     }
 
@@ -160,7 +166,10 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             }
         } else {
             let param_locals_arr = self.ctx.builder.build_array_alloca(
-                self.ctx.rt.ty.val_type_ptr,
+                self.ctx
+                    .get_enum::<Val>()
+                    .ty
+                    .ptr_type(inkwell::AddressSpace::Generic),
                 self.ctx
                     .llvm_ctx
                     .i64_type()
@@ -178,7 +187,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
 
             let argpack_local = self.ll_func.get_params()[0];
             self.build_call(
-                self.ctx.rt.rt_arg_pack_unpack_into,
+                self.ctx.get_func(ExFunc::rt_arg_pack_unpack_into),
                 &[
                     argpack_local.into(),
                     param_locals_arr.into(),
@@ -229,76 +238,49 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
     fn conv_any_into(
         &self, src_local: BasicValueEnum<'ctx>, src_ty: &Type, dest: PointerValue<'ctx>,
     ) {
-        let (disc, llval, llval2) = match src_ty.get_layout() {
+        // TODO: pinion enum helpers
+        println!("{:#?}", dest);
+        let dest_val = unsafe { self.const_gep(dest, &[0, 2]) };
+
+        let disc = match src_ty.get_layout() {
             Layout::Val => {
                 // Special case: can just memcpy directly
                 self.copy_val(src_local.into_pointer_value(), dest);
                 return;
             },
             Layout::SoftRef => {
-                let vptr =
-                    unsafe { self.const_gep_extractvalue(src_local.into_pointer_value(), &[0, 0]) };
-                let ptr =
-                    unsafe { self.const_gep_extractvalue(src_local.into_pointer_value(), &[0, 1]) };
-
-                let vptr_int = self.ctx.builder.build_ptr_to_int(
-                    vptr.into_pointer_value(),
-                    self.ctx.llvm_ctx.i64_type(),
-                    "vptr",
-                );
-                let ptr_int = self.ctx.builder.build_ptr_to_int(
-                    ptr.into_pointer_value(),
-                    self.ctx.llvm_ctx.i64_type(),
-                    "ptr",
-                );
-
-                (layout::VAL_DISCRIM_REF, vptr_int, Some(ptr_int))
+                self.copy_val(src_local.into_pointer_value(), dest_val);
+                layout::VAL_DISCRIM_REF
             },
 
             Layout::HardRef(RefType::String) => {
-                let ptr_as_int = self.ctx.builder.build_ptr_to_int(
-                    src_local.into_pointer_value(),
-                    self.ctx.llvm_ctx.i64_type(),
-                    "pack_val",
-                );
-                (layout::VAL_DISCRIM_STRING, ptr_as_int, None)
+                let dest_ref = self.bitcast_ptr::<*mut RtString>(dest_val);
+                self.ctx.builder.build_store(dest_ref, src_local);
+                layout::VAL_DISCRIM_STRING
             },
-            Layout::HardRef(_) => {
-                let ptr_as_int = self.ctx.builder.build_ptr_to_int(
-                    src_local.into_pointer_value(),
-                    self.ctx.llvm_ctx.i64_type(),
-                    "pack_val",
-                );
-                (layout::VAL_DISCRIM_REF, ptr_as_int, None)
+            Layout::HardRef(rt) => {
+                assert!(rt.get_layout().is_val());
+                let dest_ref = self.bitcast_ptr::<*mut RttiRef>(dest_val);
+                self.ctx.builder.build_store(dest_ref, src_local);
+                layout::VAL_DISCRIM_REF
             },
             Layout::Scalar(ScalarLayout::Null) => {
+                let dest_scalar = self.bitcast_ptr::<u64>(dest_val);
                 let null_val = self.ctx.llvm_ctx.i64_type().const_zero();
-                (layout::VAL_DISCRIM_NULL, null_val, None)
+                self.ctx.builder.build_store(dest_scalar, null_val);
+                layout::VAL_DISCRIM_NULL
             },
             Layout::Scalar(ScalarLayout::Float) => {
-                // TODO fix this, this is mega bad, won't work on big endian systems
-                let val_as_i32 = self.ctx.builder.build_bitcast(
-                    src_local,
-                    self.ctx.llvm_ctx.i32_type(),
-                    "pack_val",
-                );
-                let val_as_i64: IntValue = self.ctx.builder.build_int_z_extend(
-                    val_as_i32.into_int_value(),
-                    self.ctx.llvm_ctx.i64_type(),
-                    "pack_val",
-                );
-                (layout::VAL_DISCRIM_FLOAT, val_as_i64, None)
+                // TODO: is this valid?
+                let dest_float = self.bitcast_ptr::<f32>(dest_val);
+                self.ctx.builder.build_store(dest_float, src_local);
+                layout::VAL_DISCRIM_FLOAT
             },
         };
-        assert_eq!(llval.get_type().get_bit_width(), 64);
 
         let disc_val = self.ctx.llvm_ctx.i8_type().const_int(disc as u64, false);
         unsafe {
             self.const_gep_insertvalue(dest, &[0, 0], disc_val.into());
-            self.const_gep_insertvalue(dest, &[0, 1, 0], llval.into());
-            if let Some(llval2) = llval2 {
-                self.const_gep_insertvalue(dest, &[0, 1, 1], llval.into());
-            }
         }
     }
 
@@ -320,7 +302,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         // TODO: this probably doesn't need to be GC
         // it's required for now, since runtime funcs might be taking an actual stack GC val
         // maybe could addrspacecast them at the last minute?
-        let reified_alloca = self.build_gc_alloca(self.ctx.rt.ty.val_type, "");
+        let reified_alloca = self.build_gc_alloca(self.ctx.get_enum::<Val>().ty, "");
         self.conv_local_any_into(local_id, reified_alloca);
         reified_alloca
     }
@@ -336,7 +318,10 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         self.build_call(lts_intrinsic, &[self.ctx.llvm_ctx.i64_type().const_int(self.locals[local_id].ty.get_store_size(), false).into(), stackptr.into()]);
         */
 
-        val.set_name(&format!("local_{}", local_id.index()));
+        // Sketchy is-this-a-global check
+        if val.as_instruction_value().is_some() {
+            val.set_name(&format!("local_{}", local_id.index()));
+        }
         self.locals[local_id] = Some(val);
     }
 
@@ -421,7 +406,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     _ => unimplemented!(),
                 };
 
-                let mut local_struct = self.ctx.rt.ty.val_type.const_zero();
+                let mut local_struct = self.ctx.get_enum::<Val>().ty.const_zero();
                 local_struct = self.ctx.builder.build_insert_value(local_struct, self.ctx.llvm_ctx.i32_type().const_int(disc, false), 0, "").unwrap().into_struct_value();
                 local_struct = self.ctx.builder.build_insert_value(local_struct, llval, 1, "").unwrap().into_struct_value();
 
@@ -434,6 +419,17 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         }
     }
     */
+
+    fn bitcast_ptr<T: PinionData>(&self, ptr: PointerValue<'ctx>) -> PointerValue<'ctx> {
+        let dest_ty = self
+            .ctx
+            .get_type::<T>()
+            .ptr_type(inkwell::AddressSpace::Generic);
+        self.ctx
+            .builder
+            .build_bitcast(ptr, dest_ty, "")
+            .into_pointer_value()
+    }
 
     fn copy_val(&self, src: PointerValue<'ctx>, dest: PointerValue<'ctx>) {
         self.prog_emit.copy_val(src, dest);
@@ -634,7 +630,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 let local_val = match (var_ty.get_layout(), local_ty.get_layout()) {
                     // Val into val OR soft ref into soft ref: alloc and memcpy
                     (Layout::Val, Layout::Val) | (Layout::SoftRef, Layout::SoftRef) => {
-                        let copied_alloca = self.build_gc_alloca(self.ctx.rt.ty.val_type, "");
+                        let copied_alloca = self.build_gc_alloca(self.ctx.get_enum::<Val>().ty, "");
                         self.copy_val(self.var_allocs[*var].val, copied_alloca);
                         copied_alloca.into()
                     },
@@ -691,7 +687,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                         "trying to load val-layout var into non-val local"
                     );
                     // var points to reified val struct, so memcpy
-                    let copied_alloca = self.build_gc_alloca(self.ctx.rt.ty.val_type, "");
+                    let copied_alloca = self.build_gc_alloca(self.ctx.get_enum::<Val>().ty, "");
                     self.copy_val(self.var_allocs[*var].val, copied_alloca);
                     copied_alloca.into();
                 } else {
@@ -727,7 +723,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
 
                 self.build_call_catching(
                     block,
-                    self.ctx.rt.rt_val_print,
+                    self.ctx.get_func(ExFunc::rt_val_print),
                     &[norm.into(), self.prog_emit.rt_global.into()],
                 );
             },
@@ -737,10 +733,10 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 let rhs_ref = self.get_local_any_ro(*rhs);
                 let op_var = self.ctx.llvm_ctx.i32_type().const_int(*op as u64, false);
 
-                let res = self.build_gc_alloca(self.ctx.rt.ty.val_type, "");
+                let res = self.build_gc_alloca(self.ctx.get_enum::<Val>().ty, "");
                 self.build_call_catching(
                     block,
-                    self.ctx.rt.rt_val_binary_op,
+                    self.ctx.get_func(ExFunc::rt_val_binary_op),
                     &[
                         self.prog_emit.rt_global.into(),
                         op_var.into(),
@@ -766,7 +762,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 let func = self.prog_emit.sym[self.prog_emit.lookup_global_proc(*name)]
                     .as_global_value()
                     .as_pointer_value();
-                let res_alloca = self.build_gc_alloca(self.ctx.rt.ty.val_type, "");
+                let res_alloca = self.build_gc_alloca(self.ctx.get_enum::<Val>().ty, "");
                 self.build_call_statepoint(
                     block,
                     &walker.get_cur_lifetimes(),
@@ -791,7 +787,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 let res_llval = self
                     .build_call_catching(
                         block,
-                        self.ctx.rt.rt_val_cast_string_val,
+                        self.ctx.get_func(ExFunc::rt_val_cast_string_val),
                         &[src_llval.into(), self.prog_emit.rt_global.into()],
                     )
                     .unwrap();
@@ -828,7 +824,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 let datum_ptr = self
                     .build_call_catching(
                         block,
-                        self.ctx.rt.rt_runtime_alloc_datum,
+                        self.ctx.get_func(ExFunc::rt_runtime_alloc_datum),
                         &[
                             self.prog_emit.rt_global.into(),
                             self.ctx
@@ -840,7 +836,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     )
                     .unwrap();
 
-                let ref_ptr = self.build_alloca(self.ctx.rt.ty.ref_type, "ref_ptr");
+                let ref_ptr = self.build_alloca(self.ctx.get_type::<RttiRef>(), "ref_ptr");
                 unsafe { self.const_gep_insertvalue(ref_ptr, &[0, 0], vt_ptr.into()) };
                 unsafe { self.const_gep_insertvalue(ref_ptr, &[0, 1], datum_ptr) };
 
@@ -864,7 +860,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 // TODO: drop/cloned
 
                 dbg!(var_get_ptr);
-                let loaded_alloca = self.build_gc_alloca(self.ctx.rt.ty.val_type, "");
+                let loaded_alloca = self.build_gc_alloca(self.ctx.get_enum::<Val>().ty, "");
                 self.build_call_catching(
                     block,
                     var_get_ptr,
@@ -936,7 +932,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                             .unwrap()
                             .into_pointer_value();
 
-                        let res_alloca = self.build_gc_alloca(self.ctx.rt.ty.val_type, "");
+                        let res_alloca = self.build_gc_alloca(self.ctx.get_enum::<Val>().ty, "");
                         self.build_call_catching(
                             block,
                             proc_ptr,
@@ -951,13 +947,12 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     },
                     Type::Ref(RefType::String) | _ => {
                         // soft call
-                        let res_alloca = self.build_gc_alloca(self.ctx.rt.ty.val_type, "");
+                        let res_alloca = self.build_gc_alloca(self.ctx.get_enum::<Val>().ty, "");
                         self.build_call_statepoint(
                             block,
                             &walker.get_cur_lifetimes(),
                             self.ctx
-                                .rt
-                                .rt_val_call_proc
+                                .get_func(ExFunc::rt_val_call_proc)
                                 .as_global_value()
                                 .as_pointer_value(),
                             &[
@@ -1027,7 +1022,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 // TODO: support types on closure boundary
 
                 let cap_array = self.ctx.builder.build_array_alloca(
-                    self.ctx.rt.ty.val_type,
+                    self.ctx.get_enum::<Val>().ty,
                     self.ctx
                         .llvm_ctx
                         .i64_type()
@@ -1045,8 +1040,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     block,
                     &walker.get_cur_lifetimes(),
                     self.ctx
-                        .rt
-                        .rt_runtime_spawn_closure
+                        .get_func(ExFunc::rt_runtime_spawn_closure)
                         .as_global_value()
                         .as_pointer_value(),
                     &[
@@ -1064,7 +1058,14 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                         // Is this even valid?
                         self.ctx
                             .builder
-                            .build_address_space_cast(cap_array, self.ctx.rt.ty.val_type_ptr, "")
+                            .build_address_space_cast(
+                                cap_array,
+                                self.ctx
+                                    .get_enum::<Val>()
+                                    .ty
+                                    .ptr_type(inkwell::AddressSpace::Generic),
+                                "",
+                            )
                             .into(),
                     ],
                 );
@@ -1075,8 +1076,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 println!("{:?}", walker.get_cur_lifetimes());
                 self.build_call(
                     self.ctx
-                        .rt
-                        .rt_runtime_suspend
+                        .get_func(ExFunc::rt_runtime_suspend)
                         .as_global_value()
                         .as_pointer_value(),
                     &[
@@ -1138,7 +1138,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                         let disc_val = self.get_local_any_ro(*discriminant);
                         self.build_call_catching(
                             block,
-                            self.ctx.rt.rt_val_to_switch_disc,
+                            self.ctx.get_func(ExFunc::rt_val_to_switch_disc),
                             &[disc_val.into()],
                         )
                         .unwrap()
@@ -1372,7 +1372,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             .i64_type()
             .const_int(args.len() as u64, false);
         let argpack_unnamed = self.ctx.builder.build_array_alloca(
-            self.ctx.rt.ty.val_type,
+            self.ctx.get_enum::<Val>().ty,
             self.ctx
                 .llvm_ctx
                 .i64_type()
@@ -1384,17 +1384,17 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             self.conv_local_any_into(*arg, ptr);
         }
 
-        let argpack = self.build_alloca(self.ctx.rt.ty.arg_pack_type, "argpack");
+        let argpack = self.build_alloca(self.ctx.get_type::<ProcPack>(), "argpack");
         unsafe {
-            self.const_gep_insertvalue(argpack, &[0, 0], n_val.into());
-            self.const_gep_insertvalue(argpack, &[0, 1], argpack_unnamed.into());
+            self.const_gep_insertvalue(argpack, &[0, 0, 0], n_val.into());
+            self.const_gep_insertvalue(argpack, &[0, 0, 1], argpack_unnamed.into());
             self.const_gep_insertvalue(
                 argpack,
-                &[0, 2],
+                &[0, 1, 0],
                 self.ctx.llvm_ctx.i64_type().const_zero().into(),
             );
             if let Some(id) = src {
-                let ptr = self.const_gep(argpack, &[0, 4]);
+                let ptr = self.const_gep(argpack, &[0, 2]);
                 self.conv_local_any_into(id, ptr);
             }
         }
@@ -1445,12 +1445,12 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         (
             self.ctx.builder.build_int_to_ptr(
                 ref_vptr_int,
-                self.ctx.rt.ty.vt_entry_type_ptr,
+                self.ctx.get_type_ptr::<vtable::Entry>(),
                 "ref_vptr",
             ),
             self.ctx.builder.build_int_to_ptr(
                 ref_ptr_int,
-                self.ctx.rt.ty.datum_common_type_ptr,
+                self.ctx.get_type_ptr::<Datum>(),
                 "ref_ptr",
             ),
         )

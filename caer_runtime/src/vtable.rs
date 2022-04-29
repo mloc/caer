@@ -45,21 +45,19 @@ impl Index<InstanceTypeId> for Vtable {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-pub struct FuncPtr {
-    ptr: *const std::ffi::c_void,
-}
+#[derive(Debug, Clone, Copy, PinionData)]
+#[repr(transparent)]
+pub struct FuncPtr(*const u8);
 pub type ProcPtr = extern "C" fn(arg_pack: *const ProcPack, rt: &mut Runtime, out: *mut Val);
 pub type ClosurePtr = extern "C" fn(arg_pack: *const Val, rt: &mut Runtime, out: *mut Val);
 
 impl FuncPtr {
     pub unsafe fn as_proc(self) -> ProcPtr {
-        std::mem::transmute(self.ptr)
+        std::mem::transmute(self.0)
     }
 
     pub unsafe fn as_closure(self) -> ClosurePtr {
-        std::mem::transmute(self.ptr)
+        std::mem::transmute(self.0)
     }
 }
 
@@ -72,7 +70,12 @@ pub struct Entry {
     pub size: i64,
     pub var_get: extern "C" fn(datum: *mut Datum, var: &RtString, out: *mut Val),
     pub var_set: extern "C" fn(datum: *mut Datum, var: &RtString, val: *const Val),
-    pub proc_lookup: extern "C" fn(proc: &RtString, rt: &mut Runtime) -> ProcPtr,
+    pub proc_lookup:
+        extern "C" fn(
+            proc: &RtString,
+            rt: &mut Runtime,
+        )
+            -> extern "C" fn(arg_pack: *const ProcPack, rt: &mut Runtime, out: *mut Val),
 }
 
 impl Debug for Entry {

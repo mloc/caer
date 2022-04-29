@@ -4,46 +4,25 @@ use crate::func;
 
 // TODO: rename. type builders
 
-pub fn build_type(ctx: &syn::Expr, ty: &syn::Type) -> syn::Expr {
+pub fn populate_ty(lctx: &syn::Ident, ty: &syn::Type) -> syn::Expr {
     match ty {
         syn::Type::Path(path) => {
-            parse_quote! { <#path as pinion::PinionData>::create_in_context(#ctx) }
+            parse_quote! { #lctx.populate::<#path>() }
         },
         syn::Type::Reference(ptr) => {
-            parse_quote! { <#ptr as pinion::PinionData>::create_in_context(#ctx) }
+            parse_quote! { #lctx.populate::<#ptr>() }
         },
         syn::Type::Ptr(ptr) => {
-            parse_quote! { <#ptr as pinion::PinionData>::create_in_context(#ctx) }
+            parse_quote! { #lctx.populate::<#ptr>() }
         },
         syn::Type::BareFn(bare_fn) => {
             assert_eq!(bare_fn.abi, Some(parse_quote! { extern "C" }));
-            let func_ty = func::FuncShape::from_bare(bare_fn).build_type(ctx);
+            let func_ty = func::FuncShape::from_bare(lctx, bare_fn).build_layout(lctx);
             parse_quote! {
-                {
-                    let func = #func_ty;
-                    #ctx.make_func_ptr_type(func)
-                }
+                unsafe { #lctx.unchecked_populate_fn::<#bare_fn, _>(|#lctx| pinion::layout::Layout::FuncPtr(#func_ty)) }
             }
         },
         _ => todo!("can't synth type {:?}", ty),
-    }
-}
-
-pub fn normalize_ty(ty: &syn::Type) -> syn::Type {
-    match ty {
-        syn::Type::Path(path) => {
-            parse_quote! { #path }
-        },
-        syn::Type::Reference(ptr) => {
-            parse_quote! { #ptr }
-        },
-        syn::Type::Ptr(ptr) => {
-            parse_quote! { #ptr }
-        },
-        syn::Type::BareFn(_bare_fn) => {
-            parse_quote! { pinion::PinionFuncPtr }
-        },
-        _ => todo!("can't make layout {:?}", ty),
     }
 }
 

@@ -237,9 +237,9 @@ impl<'ctx> ReprManager<'ctx> {
                     )
                 }
             },
-            Layout::FuncPtr => {
-                let opaque_base = ctx.opaque_struct_type("");
-                Some(opaque_base.ptr_type(inkwell::AddressSpace::Generic).into())
+            Layout::FuncPtr(func) => {
+                let func_ty = self.build_func(func, ctx);
+                Some(func_ty.ptr_type(inkwell::AddressSpace::Generic).into())
             },
             Layout::OpaqueStruct(opaque_layout) => {
                 let name = opaque_layout.name.unwrap_or_default();

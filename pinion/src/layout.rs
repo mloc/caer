@@ -10,7 +10,7 @@ pub enum Layout {
     Primitive(Primitive),
     Pointer(Pointer),
     Enum(Enum),
-    FuncPtr,
+    FuncPtr(Func),
     OpaqueStruct(OpaqueLayout),
     Unsized,
 }

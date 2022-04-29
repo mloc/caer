@@ -1,6 +1,7 @@
 use std::slice::from_raw_parts_mut;
 
 use caer_types::id::InstanceTypeId;
+use pinion::PinionData;
 
 use crate::heap_object::HeapHeader;
 use crate::runtime::Runtime;
@@ -10,7 +11,7 @@ use crate::val::Val;
 
 /// Represents the statically-sized part of a datum struct.
 /// Datums in the runtime are DSTs due to their var array
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PinionData)]
 #[repr(C)]
 pub struct Datum {
     pub heap_header: HeapHeader,

@@ -4,7 +4,10 @@ use syn::parse_quote;
 
 pub fn build_export_func(mut fn_item: syn::ItemFn) -> TokenStream2 {
     assert!(fn_item.sig.abi.is_none());
-    assert!(fn_item.attrs.is_empty());
+    assert!(!fn_item
+        .attrs
+        .iter()
+        .any(|attr| attr.path != parse_quote! {doc}));
     fn_item.sig.abi = Some(parse_quote! {extern "C"});
     fn_item.attrs.push(parse_quote! { #[no_mangle] });
 

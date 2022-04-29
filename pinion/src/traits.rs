@@ -18,7 +18,9 @@ pub trait PinionData: Sized {
 }
 
 pub trait PinionStruct: PinionData {}
-pub trait PinionEnum: PinionData {}
+pub trait PinionEnum: PinionData {
+    type Variant;
+}
 
 // marker trait. must be a nicheable type
 pub trait PinionPointerType: PinionData {}
@@ -206,7 +208,7 @@ impl<T: PinionPointerType> PinionData for Option<T> {
     }
 }
 
-pub struct PinionFuncPtr {
+/*pub struct PinionFuncPtr {
     _dummy: (),
 }
 
@@ -221,7 +223,7 @@ impl PinionData for PinionFuncPtr {
         layout::Layout::FuncPtr
     }
 }
-impl PinionPointerType for PinionFuncPtr {}
+impl PinionPointerType for PinionFuncPtr {}*/
 
 pub struct PinionOpaqueStruct {
     _dummy: (),

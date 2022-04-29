@@ -59,15 +59,13 @@ impl DeriveCtx {
     pub fn derive_named(&self, fields: &[syn::Field]) -> TokenStream {
         let ctxq: syn::Expr = parse_quote! { ctx };
         let lctxq: syn::Ident = parse_quote! { lctx };
-        let fq = fields.iter().map(|f| ty::build_type(&ctxq, &f.ty));
 
         let field_names = fields
             .iter()
             .map(|f| ident_to_litstr(f.ident.as_ref().unwrap()));
-        let field_layouts = fields.iter().map(|f| -> syn::Expr {
-            let ty = ty::normalize_ty(&f.ty);
-            parse_quote! { #lctxq.populate::<#ty>() }
-        });
+        let field_layouts = fields
+            .iter()
+            .map(|f| -> syn::Expr { ty::populate_ty(&lctxq, &f.ty) });
 
         let field_validates = fields.iter().map(|f| {
             let ident = f.ident.as_ref().unwrap();
@@ -112,8 +110,9 @@ impl DeriveCtx {
         let s_ty = &fields.first().unwrap().ty;
 
         let ctxq: syn::Expr = parse_quote! { ctx };
+        let lctxq: syn::Ident = parse_quote! { lctx };
 
-        let inner_data = ty::normalize_ty(s_ty);
+        let inner_data = ty::populate_ty(&lctxq, s_ty);
         let validate_body = ty::build_validate(&parse_quote! { ptr }, s_ty);
         let ident = &self.ident;
 
@@ -126,8 +125,9 @@ impl DeriveCtx {
             impl #impl_generics pinion::PinionData for #ident #ty_generics #where_clause {
                 type Static = #ident #static_params;
 
-                fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Layout {
-                    <#inner_data as pinion::PinionData>::get_layout(lctx)
+                fn get_layout(#lctxq: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Layout {
+                    let id = #inner_data;
+                    (*#lctxq.get(id).unwrap()).clone()
                 }
 
                 unsafe fn validate(ptr: *const u8) {
@@ -140,6 +140,7 @@ impl DeriveCtx {
     }
 
     fn derive_enum(&self, enum_data: &syn::DataEnum) -> TokenStream {
+        let lctxq: syn::Ident = parse_quote! { lctx };
         let (disc_width, has_c) = self.attrs.repr().as_enum().unwrap();
         let prim: syn::Type = match disc_width {
             1 => parse_quote! {u8},
@@ -163,12 +164,8 @@ impl DeriveCtx {
             syn::Fields::Unit => {},
         });
 
-        let unit_enum_name = if has_fields {
-            // TODO: name from attr
-            syn::Ident::new(&format!("{}Variant", self.ident), self.ident.span())
-        } else {
-            self.ident.clone()
-        };
+        // TODO: name from attr
+        let unit_enum_name = syn::Ident::new(&format!("{}Variant", self.ident), self.ident.span());
 
         let disc_const_names: Vec<syn::Ident> = (0..enum_data.variants.len())
             .map(|i| syn::Ident::new(&format!("DISC_{}", i), Span::call_site()))
@@ -188,7 +185,7 @@ impl DeriveCtx {
         let static_params = make_ty_static(&ty_generics);
         let where_clause = make_impl_bounds(&self.generics);
 
-        let unit_enum = has_fields.then(|| {
+        let unit_enum = {
             let variants = enum_data.variants.iter().map(|v| syn::Variant {
                 attrs: vec![],
                 ident: v.ident.clone(),
@@ -204,16 +201,16 @@ impl DeriveCtx {
                     #(#variants,)*
                 }
             }
-        });
+        };
 
         let field_layouts = enum_data.variants.iter().filter_map(|v| match &v.fields {
             syn::Fields::Named(_) => panic!(),
             syn::Fields::Unnamed(u) => {
                 assert_eq!(u.unnamed.len(), 1);
-                let field_ty = ty::normalize_ty(&u.unnamed[0].ty);
+                let field_ty = ty::populate_ty(&lctxq, &u.unnamed[0].ty);
                 let v_ident = &v.ident;
                 let disc_expr = quote! { #unit_enum_name::#v_ident as u64 };
-                Some(quote! {(#disc_expr, lctx.populate::<#field_ty>())})
+                Some(quote! {(#disc_expr, #field_ty)})
             },
             syn::Fields::Unit => None,
         });
@@ -246,7 +243,9 @@ impl DeriveCtx {
                 }
             }
             #[automatically_derived]
-            impl #impl_generics pinion::PinionEnum for #ident #ty_generics #where_clause {}
+            impl #impl_generics pinion::PinionEnum for #ident #ty_generics #where_clause {
+                type Variant = #unit_enum_name;
+            }
 
             #unit_enum
         }

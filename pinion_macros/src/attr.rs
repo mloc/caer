@@ -87,6 +87,8 @@ impl DataAttributes {
         for part in repr_parts {
             match part.to_string().as_str() {
                 "C" if !has_c => has_c = true,
+                // TODO: hmmm
+                "transparent" if !has_c => has_c = true,
                 "u8" if width.is_none() => width = Some(1),
                 "u16" if width.is_none() => width = Some(2),
                 "u32" if width.is_none() => width = Some(4),
