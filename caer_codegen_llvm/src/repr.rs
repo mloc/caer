@@ -141,27 +141,20 @@ impl<'ctx> ReprManager<'ctx> {
         if let Some(bty) = self.basic_types.get(&id) {
             (layout, *bty)
         } else {
-            let bty = self.build_bty(layout.clone(), ctx);
+            let bty = self.build_bty_stage1(&layout, ctx);
             self.basic_types.insert(id, bty);
+            if let Some(bty) = bty {
+                self.build_bty_stage2(&layout, bty, ctx);
+            }
             (layout, bty)
         }
     }
 
-    fn build_bty(
-        &mut self, layout: Rc<Layout>, ctx: &'ctx inkwell::context::Context,
+    fn build_bty_stage1(
+        &mut self, layout: &Layout, ctx: &'ctx inkwell::context::Context,
     ) -> Option<BasicTypeEnum<'ctx>> {
-        match layout.borrow() {
-            Layout::Struct(sl) => {
-                let fields: Vec<_> = sl
-                    .fields
-                    .iter()
-                    .filter_map(|id| self.build_layout(*id, ctx).1)
-                    .collect();
-                Some(
-                    ctx.named_struct_type(&fields, false, sl.name.unwrap_or_default())
-                        .into(),
-                )
-            },
+        match layout {
+            Layout::Struct(sl) => Some(ctx.opaque_struct_type(sl.name.unwrap_or_default()).into()),
             Layout::Primitive(prim) => Some(match prim {
                 Primitive::Bool => ctx.bool_type().into(),
                 Primitive::Int8 => ctx.i8_type().into(),
@@ -181,62 +174,10 @@ impl<'ctx> ReprManager<'ctx> {
                         .into(),
                 )
             },
-            Layout::Enum(enum_layout) => {
-                if enum_layout.name == Some("GcMarker") {
-                    let x = 0;
-                }
-                assert!(enum_layout.alignment >= enum_layout.disc_width);
-                assert!(enum_layout.alignment <= 8);
-                assert_eq!(enum_layout.size % enum_layout.alignment, 0);
-
-                // TODO: ick, there's a lot of roundtrips between reprs here
-                let disc_part = match enum_layout.disc_width {
-                    1 => ctx.i8_type().into(),
-                    2 => ctx.i16_type().into(),
-                    4 => ctx.i32_type().into(),
-                    8 => ctx.i64_type().into(),
-                    w => panic!("impossible disc_width: {}", w),
-                };
-
-                if enum_layout.field_layouts.is_empty() {
-                    // Special case: fieldless enums consist of just the disc
-                    assert_eq!(enum_layout.alignment, enum_layout.disc_width);
-                    Some(
-                        ctx.named_struct_type(
-                            &[disc_part],
-                            false,
-                            enum_layout.name.unwrap_or_default(),
-                        )
-                        .into(),
-                    )
-                } else {
-                    let disc_padding_length = enum_layout.alignment - enum_layout.disc_width;
-                    let val_length = enum_layout.size - enum_layout.alignment;
-
-                    let disc_padding_part =
-                        ctx.i8_type().array_type(disc_padding_length as _).into();
-
-                    let align_part = match enum_layout.alignment {
-                        1 => ctx.i8_type(),
-                        2 => ctx.i16_type(),
-                        4 => ctx.i32_type(),
-                        8 => ctx.i64_type(),
-                        w => panic!("unsupported alignment: {}", w),
-                    };
-                    let val_part = align_part
-                        .array_type((val_length / enum_layout.alignment) as _)
-                        .into();
-
-                    Some(
-                        ctx.named_struct_type(
-                            &[disc_part, disc_padding_part, val_part],
-                            false,
-                            enum_layout.name.unwrap_or_default(),
-                        )
-                        .into(),
-                    )
-                }
-            },
+            Layout::Enum(enum_layout) => Some(
+                ctx.opaque_struct_type(enum_layout.name.unwrap_or_default())
+                    .into(),
+            ),
             Layout::FuncPtr(func) => {
                 let func_ty = self.build_func(func, ctx);
                 Some(func_ty.ptr_type(inkwell::AddressSpace::Generic).into())
@@ -257,6 +198,78 @@ impl<'ctx> ReprManager<'ctx> {
                 }
             },
             Layout::Unsized => None,
+        }
+    }
+
+    fn build_bty_stage2(
+        &mut self, layout: &Layout, to_fill: BasicTypeEnum<'ctx>,
+        ctx: &'ctx inkwell::context::Context,
+    ) {
+        match layout {
+            Layout::Struct(struct_layout) => {
+                self.build_struct(struct_layout, to_fill.into_struct_type(), ctx);
+            },
+            Layout::Enum(enum_layout) => {
+                self.build_enum(enum_layout, to_fill.into_struct_type(), ctx);
+            },
+            Layout::Primitive(_)
+            | Layout::Pointer(_)
+            | Layout::FuncPtr(_)
+            | Layout::OpaqueStruct(_)
+            | Layout::Unsized => {},
+        }
+    }
+
+    fn build_struct(
+        &mut self, layout: &StructLayout, to_fill: StructType<'ctx>,
+        ctx: &'ctx inkwell::context::Context,
+    ) {
+        let fields: Vec<_> = layout
+            .fields
+            .iter()
+            .filter_map(|id| self.build_layout(*id, ctx).1)
+            .collect();
+        to_fill.set_body(&fields, false);
+    }
+
+    fn build_enum(
+        &mut self, layout: &Enum, to_fill: StructType<'ctx>, ctx: &'ctx inkwell::context::Context,
+    ) {
+        assert!(layout.alignment >= layout.disc_width);
+        assert!(layout.alignment <= 8);
+        assert_eq!(layout.size % layout.alignment, 0);
+
+        // TODO: ick, there's a lot of roundtrips between reprs here
+        let disc_part = match layout.disc_width {
+            1 => ctx.i8_type().into(),
+            2 => ctx.i16_type().into(),
+            4 => ctx.i32_type().into(),
+            8 => ctx.i64_type().into(),
+            w => panic!("impossible disc_width: {}", w),
+        };
+
+        if layout.field_layouts.is_empty() {
+            // Special case: fieldless enums consist of just the disc
+            assert_eq!(layout.alignment, layout.disc_width);
+            to_fill.set_body(&[disc_part], false);
+        } else {
+            let disc_padding_length = layout.alignment - layout.disc_width;
+            let val_length = layout.size - layout.alignment;
+
+            let disc_padding_part = ctx.i8_type().array_type(disc_padding_length as _).into();
+
+            let align_part = match layout.alignment {
+                1 => ctx.i8_type(),
+                2 => ctx.i16_type(),
+                4 => ctx.i32_type(),
+                8 => ctx.i64_type(),
+                w => panic!("unsupported alignment: {}", w),
+            };
+            let val_part = align_part
+                .array_type((val_length / layout.alignment) as _)
+                .into();
+
+            to_fill.set_body(&[disc_part, disc_padding_part, val_part], false);
         }
     }
 }

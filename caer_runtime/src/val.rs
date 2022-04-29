@@ -2,19 +2,14 @@ use std::ops::*;
 use std::ptr::NonNull;
 
 use aed_common::messages;
-use caer_types::id::StringId;
-use caer_types::type_tree::Specialization;
-use caer_types::val::ValFlat;
 use caer_types::{layout, op};
 use ordered_float::OrderedFloat;
 use pinion::{pinion_export, PinionData};
 
 use crate::arg_pack::ProcPack;
-use crate::list::List;
 use crate::rtti::RttiRef;
 use crate::runtime::Runtime;
 use crate::string::{resolve_string, RtString};
-use crate::string_table::StringTable;
 
 // null must be first
 // TODO: not copy?
@@ -73,7 +68,7 @@ pub fn rt_val_to_switch_disc(val: &Val) -> u32 {
         Val::Null => 0,
         Val::String(None) => 0,
         Val::String(Some(s)) => !(unsafe { s.as_ref() }.as_str().is_empty()) as u32,
-        Val::Ref(ptr) => 1,
+        Val::Ref(_ptr) => 1,
     }
 }
 
@@ -147,7 +142,7 @@ impl Val {
         }
     }
 
-    pub fn binary_op_const(op: op::BinaryOp, lhs: &Val, rhs: &Val, st: &mut StringTable) -> Val {
+    /*pub fn binary_op_const(op: op::BinaryOp, lhs: &Val, rhs: &Val, st: &mut StringTable) -> Val {
         unimplemented!();
         /*let mut lhs = *lhs;
 
@@ -170,7 +165,7 @@ impl Val {
             },
             Val::Ref(_) => unimplemented!(),
         }*/
-    }
+    }*/
 
     fn wrap_bitop(f: impl FnOnce(u32, u32) -> u32) -> impl FnOnce(f32, f32) -> f32 {
         |lhs_f, rhs_f| {
@@ -238,13 +233,13 @@ impl Val {
     }
 
     // TODO: use cow
-    fn cast_string(&self, rt: &mut Runtime) -> String {
+    fn cast_string(&self, _rt: &mut Runtime) -> String {
         match self {
             Val::Null => "null".into(),
             Val::Float(n) => n.to_string(),
             //Val::Int(n) => n.to_string(),
             Val::String(s) => resolve_string(*s).into(),
-            Val::Ref(rr) => {
+            Val::Ref(_rr) => {
                 todo!("ref stringing");
                 /*let datum = unsafe { rr.ptr.as_ref() };
                 let dty = datum.ty;
@@ -260,14 +255,14 @@ impl Val {
         }
     }
 
-    fn cast_string_const(&self, st: &mut StringTable) -> StringId {
+    /*fn cast_string_const(&self, st: &mut StringTable) -> StringId {
         match self {
             Val::Null => st.put("null"),
             Val::Float(n) => st.put(n.to_string()),
             Val::String(s) => st.put(resolve_string(*s)),
             Val::Ref(_dp) => unimplemented!(),
         }
-    }
+    }*/
 
     fn zero_value(&self) -> Val {
         match self {

@@ -9,7 +9,7 @@ use caer_runtime::runtime::Runtime;
 use caer_runtime::string::RtString;
 use caer_runtime::val::Val;
 use caer_runtime::vtable::{self, FuncPtr};
-use caer_types::id::{FuncId, InstanceTypeId, PathTypeId, StringId};
+use caer_types::id::{FuncId, InstanceTypeId, StringId};
 use caer_types::instance::InstanceType;
 use caer_types::layout;
 use caer_types::rt_env::RtEnvBundle;
@@ -18,7 +18,6 @@ use caer_types::type_tree::{PathType, Specialization};
 use index_vec::IndexVec;
 use inkwell::types::{BasicType, FunctionType};
 use inkwell::values::{AnyValueEnum, FunctionValue, PointerValue};
-use pinion::{PinionData, PinionOpaqueStruct};
 
 use super::context::Context;
 use super::func::FuncEmit;
@@ -155,10 +154,12 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     pub(crate) fn copy_val(&self, src: PointerValue<'ctx>, dest: PointerValue<'ctx>) {
+        assert_eq!(src.get_type(), dest.get_type());
+
         let i8_ptr = self.ctx.llvm_ctx.i8_type().ptr_type(GC_ADDRESS_SPACE);
 
-        let src_i8 = self.ctx.builder.build_bitcast(src, i8_ptr, "");
-        let dest_i8 = self.ctx.builder.build_bitcast(dest, i8_ptr, "");
+        //let src_i8 = self.ctx.builder.build_bitcast(src, i8_ptr, "");
+        //let dest_i8 = self.ctx.builder.build_bitcast(dest, i8_ptr, "");
 
         let memcpy_intrinsic = unsafe {
             self.ctx
@@ -166,8 +167,8 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
                 .get_intrinsic(
                     "llvm.memcpy",
                     &[
-                        i8_ptr.into(),
-                        i8_ptr.into(),
+                        src.get_type().into(),
+                        dest.get_type().into(),
                         self.ctx.llvm_ctx.i64_type().into(),
                     ],
                 )
@@ -177,8 +178,8 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         self.ctx.builder.build_call(
             memcpy_intrinsic,
             &[
-                dest_i8,
-                src_i8,
+                dest.into(),
+                src.into(),
                 self.ctx
                     .llvm_ctx
                     .i64_type()
@@ -774,7 +775,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             pm_builder.set_optimization_level(inkwell::OptimizationLevel::Aggressive);
             let pm = inkwell::passes::PassManager::create(());
             pm_builder.populate_module_pass_manager(&pm);
-            pm.run_on(&self.ctx.module);
+            pm.run_on(self.ctx.module);
 
             //self.ctx.module.print_to_stderr();
             self.dump_module("opt");
