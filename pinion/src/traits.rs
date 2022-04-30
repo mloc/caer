@@ -242,11 +242,11 @@ impl PinionData for c_void {
 impl<T> PinionData for PhantomData<T> {
     type Static = PhantomData<()>;
 
-    unsafe fn validate(ptr: *const u8) {
+    unsafe fn validate(_ptr: *const u8) {
         panic!("should never interact with unsized type");
     }
 
-    fn get_layout(lctx: &mut LayoutCtx) -> Layout {
+    fn get_layout(_lctx: &mut LayoutCtx) -> Layout {
         Layout::Unsized
     }
 }

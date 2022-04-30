@@ -1,12 +1,10 @@
 use std::collections::{BTreeSet, HashMap};
 
 use caer_types::id::TypeId;
-use caer_types::ty;
 use ena::unify::{InPlace, Snapshot, UnificationTable, UnifyKey, UnifyValue};
 use index_vec::{Idx, IndexVec};
 use petgraph::graph::DiGraph;
 use thiserror::Error;
-use ty::Type;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct InferKey(u32);

@@ -1,8 +1,8 @@
 use caer_ir::cfg;
-use caer_ir::id::{BlockId, ClosureSlotId, LocalId, ScopeId, VarId};
+use caer_ir::id::{BlockId, LocalId, VarId};
 use caer_types::id::{PathTypeId, StringId, TYPE_ID_ANY, TYPE_ID_STRING};
 use caer_types::op::BinaryOp;
-use caer_types::ty::{self, RefType, Type};
+use caer_types::ty::{self, RefType};
 use dreammaker::ast;
 
 use super::func_builder::FuncBuilder;

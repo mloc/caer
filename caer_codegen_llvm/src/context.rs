@@ -6,11 +6,9 @@ use std::rc::Rc;
 
 use caer_runtime::runtime::Runtime;
 use caer_runtime::val::Val;
-use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, PointerType, StructType};
+use inkwell::types::{BasicType, BasicTypeEnum, PointerType};
 use inkwell::values::FunctionValue;
-use pinion::layout::{Func, Layout};
-use pinion::layout_ctx::{LayoutCtx, LayoutId};
-use pinion::types::Primitive;
+use pinion::layout::Func;
 use pinion::{PinionData, PinionEnum, PinionModule, PinionStruct};
 
 use crate::repr::{EnumRepr, ReprManager, StructRepr};

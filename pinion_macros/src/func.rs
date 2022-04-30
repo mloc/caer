@@ -1,4 +1,3 @@
-use quote::ToTokens;
 use syn::parse_quote;
 
 use crate::ty;
@@ -60,7 +59,7 @@ impl FuncShape {
         }
     }
 
-    pub fn build_layout(&self, lctx: &syn::Ident) -> syn::Expr {
+    pub fn build_layout(&self) -> syn::Expr {
         let param_types = self.params.iter();
         let ret_type: syn::Expr = match &self.ret {
             Some(expr) => {

@@ -155,11 +155,6 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     pub(crate) fn copy_val(&self, src: PointerValue<'ctx>, dest: PointerValue<'ctx>) {
         assert_eq!(src.get_type(), dest.get_type());
 
-        let i8_ptr = self.ctx.llvm_ctx.i8_type().ptr_type(GC_ADDRESS_SPACE);
-
-        //let src_i8 = self.ctx.builder.build_bitcast(src, i8_ptr, "");
-        //let dest_i8 = self.ctx.builder.build_bitcast(dest, i8_ptr, "");
-
         let memcpy_intrinsic = unsafe {
             self.ctx
                 .module

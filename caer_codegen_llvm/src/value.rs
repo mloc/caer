@@ -1,5 +1,4 @@
 use caer_types::id::TypeId;
-use caer_types::ty;
 use inkwell::values::{BasicValue, BasicValueEnum, GlobalValue, IntValue, PointerValue};
 
 #[derive(Debug, Clone)]

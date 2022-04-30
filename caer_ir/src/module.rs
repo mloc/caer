@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use caer_types::id::{FuncId, InstanceTypeId, StringId};
 use caer_types::instance::InstanceTypes;
 use caer_types::type_tree::{Specialization, TypeTree};

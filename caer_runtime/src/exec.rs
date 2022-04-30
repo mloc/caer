@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ptr::NonNull;
 
-use index_vec::{define_index_type, IndexVec};
+use index_vec::define_index_type;
 
 use crate::arg_pack::{CallBundle, ClosureArgs, ProcArgs};
 use crate::meta_runtime;

@@ -16,7 +16,7 @@ use crate::string::RtString;
 use crate::val::Val;
 use crate::vtable::{Entry, ProcPtr};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 #[repr(C)]
 pub struct List {
     heap_header: HeapHeader,
@@ -24,7 +24,7 @@ pub struct List {
     map: Option<HashMap<Val, AssocValue>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct AssocValue {
     key_count: usize,
     // TODO: use null as empty val? some other variant?
@@ -46,13 +46,13 @@ impl AssocValue {
     }
 
     fn update_val(&mut self, new_val: Val) {
-        if let Some(old_val) = self.val.replace(new_val) {
+        if let Some(_old_val) = self.val.replace(new_val) {
             //rt_val_drop(&old_val);
         }
     }
 
     fn remove_val(&mut self) {
-        if let Some(old_val) = self.val.take() {
+        if let Some(_old_val) = self.val.take() {
             //rt_val_drop(&old_val);
         }
     }
@@ -67,22 +67,9 @@ impl AssocValue {
     }
 }
 
-impl Default for AssocValue {
-    fn default() -> Self {
-        Self {
-            key_count: 0,
-            val: None,
-        }
-    }
-}
-
 impl List {
     pub fn new() -> Self {
-        Self {
-            heap_header: HeapHeader::new(),
-            vec: Vec::new(),
-            map: None,
-        }
+        Default::default()
     }
 
     pub fn on_gc_heap(rt: &mut Runtime, list: List) -> &mut Self {
@@ -448,7 +435,6 @@ impl<'a> GcIterator<'a> {
 
 #[cfg(test)]
 mod tests {
-    use caer_types::id::StringId;
 
     use super::List;
     use crate::val::Val;

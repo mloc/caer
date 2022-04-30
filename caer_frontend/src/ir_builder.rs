@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use caer_ir::cfg::{self, Function};
+use caer_ir::cfg::Function;
 use caer_ir::id::ScopeId;
 use caer_ir::module::Module;
 use caer_types::id::{FuncId, StringId};

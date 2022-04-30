@@ -3,9 +3,7 @@ use std::mem::{self, size_of};
 use std::ptr::NonNull;
 
 use aed_common::messages;
-use caer_types::id::{
-    FuncId, InstanceTypeId, PathTypeId, StringId, TypeId, INSTANCE_TYPE_ID_LIST, TYPE_ID_LIST,
-};
+use caer_types::id::{FuncId, InstanceTypeId, PathTypeId, StringId, INSTANCE_TYPE_ID_LIST};
 use caer_types::rt_env::RtEnvBundle;
 use caer_types::type_tree::Specialization;
 use ordered_float::OrderedFloat;
@@ -49,7 +47,7 @@ pub struct Runtime {
 impl PinionData for Runtime {
     type Static = Runtime;
 
-    unsafe fn validate(ptr: *const u8) {
+    unsafe fn validate(_ptr: *const u8) {
         // TODO: validate against some rust-side global?
     }
 

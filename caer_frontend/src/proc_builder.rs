@@ -1,13 +1,11 @@
-use caer_ir::cfg;
 use caer_ir::cfg::Function;
 use caer_ir::module::Module;
 use caer_types::func::{CallingSpec, ProcSpec};
 use caer_types::id::{FuncId, TYPE_ID_ANY};
-use caer_types::ty;
 use dreammaker::objtree::{self, ProcValue};
 
 use super::func_builder::FuncBuilder;
-use crate::ir_builder::{FuncQueue, FuncRecipe};
+use crate::ir_builder::FuncQueue;
 use crate::objtree_wrapper::ObjtreeWrapper;
 
 pub struct ProcBuilder<'a, 'ot> {

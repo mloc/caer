@@ -1,16 +1,12 @@
 use std::borrow::Borrow;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, StructType};
-use inkwell::values::FunctionValue;
 use pinion::layout::{Enum, Func, Layout, StructLayout};
 use pinion::layout_ctx::{LayoutCtx, LayoutId};
 use pinion::types::Primitive;
 use pinion::{PinionData, PinionEnum, PinionModule, PinionStruct};
-
-use crate::context::Context;
 
 #[derive(Debug)]
 pub struct StructRepr<'ctx> {

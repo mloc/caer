@@ -7,14 +7,14 @@ use caer_runtime::rtti::RttiRef;
 use caer_runtime::string::RtString;
 use caer_runtime::val::Val;
 use caer_runtime::vtable;
-use caer_types::id::{FuncId, StringId, TypeId};
+use caer_types::id::{FuncId, TypeId};
 use caer_types::ty::{self, Layout, RefType, ScalarLayout};
 use caer_types::{layout, op};
 use index_vec::IndexVec;
 use inkwell::basic_block::BasicBlock;
-use inkwell::types::{BasicType, PointerType};
+use inkwell::types::BasicType;
 use inkwell::values::*;
-use pinion::{PinionData, PinionEnum};
+use pinion::PinionData;
 use ty::Type;
 
 use crate::context::{Context, ExFunc, GC_ADDRESS_SPACE};
@@ -900,9 +900,9 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 );
             },
 
-            Op::DatumCallProc(dst, src, proc_name, args) => {
+            Op::DatumCallProc(_dst, _src, _proc_name, _args) => {
                 todo!("very broken");
-                let argpack_ptr = self.build_argpack(Some(*src), args);
+                /*let argpack_ptr = self.build_argpack(Some(*src), args);
                 let _src_val = self.get_local(*src);
                 let src_val_any = self.get_local_any_ro(*src);
                 match self.get_ty(self.ir_func.locals[*src].ty) {
@@ -970,7 +970,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
 
                         self.set_local(*dst, res_alloca.into());
                     },
-                }
+                }*/
             },
 
             Op::Throw(exception_local) => {
@@ -1569,7 +1569,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
     fn finalize_block(&self, block: &Block) {
         if block.scope_end {
             for local_id in self.ir_func.scopes[block.scope].destruct_locals.iter() {
-                let local = &self.ir_func.locals[*local_id];
+                //let local = &self.ir_func.locals[*local_id];
                 /*if local.ty.needs_destructor() {
                     self.build_call(
                         self.ctx.rt.rt_val_drop,

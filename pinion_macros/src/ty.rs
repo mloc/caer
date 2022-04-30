@@ -17,7 +17,7 @@ pub fn populate_ty(lctx: &syn::Ident, ty: &syn::Type) -> syn::Expr {
         },
         syn::Type::BareFn(bare_fn) => {
             assert_eq!(bare_fn.abi, Some(parse_quote! { extern "C" }));
-            let func_ty = func::FuncShape::from_bare(lctx, bare_fn).build_layout(lctx);
+            let func_ty = func::FuncShape::from_bare(lctx, bare_fn).build_layout();
             parse_quote! {
                 unsafe { #lctx.unchecked_populate_fn::<#bare_fn, _>(|#lctx| pinion::layout::Layout::FuncPtr(#func_ty)) }
             }

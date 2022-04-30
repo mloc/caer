@@ -1,7 +1,7 @@
 #![feature(arbitrary_enum_discriminant)]
 
 use pinion::layout_ctx::LayoutCtx;
-use pinion::{gep_path, pinion_export, pinion_module, PinionData, PinionStruct};
+use pinion::{gep_path, pinion_export, pinion_module, PinionData};
 
 #[derive(PinionData)]
 #[pinion(name = "foo")]
@@ -72,16 +72,16 @@ fn sub<'a>() {
     println!("{:#?}", ctx.get(feid));
 }
 
-fn hhh(x: &u8) {
+fn hhh(_x: &u8) {
     let mut ctx = LayoutCtx::new();
     <&u8 as PinionData>::get_layout(&mut ctx);
 }
 
 #[pinion_export]
-fn expo(x: &u8) {}
+fn expo(_x: &u8) {}
 
 pinion_module! {
-    whee,
+    Whee,
     [
         crate::expo,
     ]

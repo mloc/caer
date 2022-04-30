@@ -3,7 +3,7 @@ use std::fs::{self, File};
 use std::io::{Seek, SeekFrom, Write};
 
 use caer_types::func::{CallingSpec, ClosureSpec, FuncInfo};
-use caer_types::id::{FuncId, InstanceTypeId, PathTypeId, StringId, TypeId, TYPE_ID_ANY};
+use caer_types::id::{FuncId, PathTypeId, StringId, TypeId, TYPE_ID_ANY};
 use caer_types::ty::{self, RefType};
 use index_vec::IndexVec;
 use serde::Serialize;

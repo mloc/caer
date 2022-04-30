@@ -3,7 +3,7 @@ use quote::{quote, ToTokens};
 use syn::parse::{ParseStream, Parser};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
-use syn::{parse_quote, GenericParam, Generics, ImplGenerics, Token, TypeGenerics};
+use syn::{parse_quote, GenericParam, Generics, Token, TypeGenerics};
 
 use crate::attr::DataAttributes;
 use crate::ty;
@@ -57,7 +57,6 @@ impl DeriveCtx {
     }
 
     pub fn derive_named(&self, fields: &[syn::Field]) -> TokenStream {
-        let ctxq: syn::Expr = parse_quote! { ctx };
         let lctxq: syn::Ident = parse_quote! { lctx };
 
         let field_names = fields
@@ -73,8 +72,6 @@ impl DeriveCtx {
             ty::build_validate(&ptr, &f.ty)
         });
 
-        let name = self.attrs.name().unwrap_or("");
-        let packed = self.attrs.repr().as_struct().unwrap();
         let ident = &self.ident;
         let ident_str = ident.to_string();
 
@@ -109,7 +106,6 @@ impl DeriveCtx {
 
         let s_ty = &fields.first().unwrap().ty;
 
-        let ctxq: syn::Expr = parse_quote! { ctx };
         let lctxq: syn::Ident = parse_quote! { lctx };
 
         let inner_data = ty::populate_ty(&lctxq, s_ty);

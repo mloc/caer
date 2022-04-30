@@ -3,9 +3,9 @@
 use caer_ir::cfg;
 use caer_ir::id::{BlockId, ClosureSlotId, LocalId, ScopeId, VarId};
 use caer_ir::module::Module;
-use caer_types::id::{FuncId, PathTypeId, StringId, TypeId, TYPE_ID_ANY};
-use caer_types::ty::{self, Type};
-use dreammaker::{ast, objtree};
+use caer_types::id::{FuncId, PathTypeId, StringId, TYPE_ID_ANY};
+use caer_types::ty::Type;
+use dreammaker::ast;
 use index_vec::IndexVec;
 
 use crate::block_builder::BlockBuilder;

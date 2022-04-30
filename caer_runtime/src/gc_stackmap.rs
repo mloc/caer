@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use caer_types::id::{InstanceTypeId, TypeId};
+use caer_types::id::InstanceTypeId;
 use caer_types::layout::GC_STACKMAP_ID;
 pub use llvm_stackmaps::LocationPointer;
 use llvm_stackmaps::{Function, LittleEndian, Location, Parser, Record};
@@ -36,7 +36,7 @@ impl GcStackmap {
         }
 
         let stackmap = Parser::<LittleEndian>::parse(sect).unwrap();
-        let mut addr_to_record = HashMap::new();
+        let addr_to_record = HashMap::new();
         let mut func_has_maps = HashSet::new();
 
         for function in stackmap.functions {

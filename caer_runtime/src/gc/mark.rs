@@ -1,11 +1,11 @@
 use std::ptr::NonNull;
 
-use caer_types::id::{InstanceTypeId, PathTypeId, TypeId};
+use caer_types::id::InstanceTypeId;
 use caer_types::type_tree::Specialization;
 
 use super::state::State;
 use crate::datum::Datum;
-use crate::heap_object::{GcMarker, HeapHeader, HeapKind};
+use crate::heap_object::{GcMarker, HeapHeader};
 use crate::list::List;
 use crate::runtime::Runtime;
 use crate::string::RtString;
@@ -119,7 +119,6 @@ impl<'rt> Mark<'rt> {
     }
 
     fn mark_datum(&self, mut datum_ptr: NonNull<Datum>, ty: InstanceTypeId) {
-        let datum_ref = unsafe { datum_ptr.as_ref() };
         println!(
             "found datum at {:?} with pathty {:?}",
             datum_ptr.as_ptr(),

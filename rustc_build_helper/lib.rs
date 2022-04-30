@@ -70,7 +70,10 @@ pub fn run(cmd: &mut Command) {
 pub fn try_run(cmd: &mut Command) -> bool {
     let status = match cmd.status() {
         Ok(status) => status,
-        Err(e) => fail(&format!("failed to execute command: {:?}\nerror: {}", cmd, e)),
+        Err(e) => fail(&format!(
+            "failed to execute command: {:?}\nerror: {}",
+            cmd, e
+        )),
     };
     if !status.success() {
         println!(
@@ -91,7 +94,10 @@ pub fn run_suppressed(cmd: &mut Command) {
 pub fn try_run_suppressed(cmd: &mut Command) -> bool {
     let output = match cmd.output() {
         Ok(status) => status,
-        Err(e) => fail(&format!("failed to execute command: {:?}\nerror: {}", cmd, e)),
+        Err(e) => fail(&format!(
+            "failed to execute command: {:?}\nerror: {}",
+            cmd, e
+        )),
     };
     if !output.status.success() {
         println!(
@@ -134,7 +140,10 @@ pub fn make(host: &str) -> PathBuf {
 pub fn output(cmd: &mut Command) -> String {
     let output = match cmd.stderr(Stdio::inherit()).output() {
         Ok(status) => status,
-        Err(e) => fail(&format!("failed to execute command: {:?}\nerror: {}", cmd, e)),
+        Err(e) => fail(&format!(
+            "failed to execute command: {:?}\nerror: {}",
+            cmd, e
+        )),
     };
     if !output.status.success() {
         panic!(
@@ -165,7 +174,9 @@ pub fn rerun_if_changed_anything_in_dir(dir: &Path) {
 
 /// Returns the last-modified time for `path`, or zero if it doesn't exist.
 pub fn mtime(path: &Path) -> SystemTime {
-    fs::metadata(path).and_then(|f| f.modified()).unwrap_or(UNIX_EPOCH)
+    fs::metadata(path)
+        .and_then(|f| f.modified())
+        .unwrap_or(UNIX_EPOCH)
 }
 
 /// Returns `true` if `dst` is up to date given that the file or files in `src`

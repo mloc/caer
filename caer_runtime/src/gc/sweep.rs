@@ -1,8 +1,7 @@
 use std::mem::ManuallyDrop;
 use std::ptr::NonNull;
 
-use caer_types::id::{InstanceTypeId, TypeId};
-use caer_types::ty::Type;
+use caer_types::id::InstanceTypeId;
 use caer_types::type_tree::Specialization;
 
 use crate::heap_object::{GcMarker, HeapHeader};
