@@ -1,25 +1,30 @@
+use std::ffi::c_void;
+use std::ptr::NonNull;
+
 use caer_ir::cfg::*;
 use caer_ir::id::{BlockId, LocalId, VarId};
 use caer_ir::walker::{CFGWalker, Lifetimes, WalkActor};
 use caer_runtime::arg_pack::ProcPack;
 use caer_runtime::datum::Datum;
+use caer_runtime::ffi::FfiArray;
+use caer_runtime::heap_object::HeapHeader;
 use caer_runtime::rtti::RttiRef;
 use caer_runtime::string::RtString;
 use caer_runtime::val::Val;
-use caer_runtime::vtable;
-use caer_types::id::{FuncId, TypeId};
+use caer_runtime::vtable::Entry;
+use caer_types::id::{FuncId, StringId, TypeId};
 use caer_types::ty::{self, Layout, RefType, ScalarLayout};
 use caer_types::{layout, op};
 use index_vec::IndexVec;
 use inkwell::basic_block::BasicBlock;
 use inkwell::types::BasicType;
 use inkwell::values::*;
-use pinion::PinionData;
+use pinion::{PinionData, PinionPointerType, PinionStruct};
 use ty::Type;
 
 use crate::context::{Context, ExFunc, GC_ADDRESS_SPACE};
 use crate::prog::{Intrinsic, ProgEmit};
-use crate::value::{BveWrapper, StackValue};
+use crate::value::{BrandedStackValue, BrandedValue, BveWrapper, StackValue};
 
 #[derive(Debug)]
 pub struct FuncEmit<'a, 'p, 'ctx> {
@@ -27,8 +32,8 @@ pub struct FuncEmit<'a, 'p, 'ctx> {
     ir_func: &'a Function,
     prog_emit: &'a ProgEmit<'p, 'ctx>,
 
-    var_allocs: IndexVec<VarId, StackValue<'ctx>>,
-    locals: IndexVec<LocalId, Option<BasicValueEnum<'ctx>>>,
+    var_allocs: IndexVec<VarId, BrandedStackValue<'ctx>>,
+    locals: IndexVec<LocalId, Option<BrandedStackValue<'ctx>>>,
     jumper: Option<InstructionValue<'ctx>>,
     blocks: IndexVec<BlockId, BasicBlock<'ctx>>,
     ll_func: FunctionValue<'ctx>,
@@ -113,15 +118,22 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             .build_address_space_cast(alloca, ty.ptr_type(GC_ADDRESS_SPACE), "")
     }
 
-    fn build_val_alloca(&self, ty: &Type) -> PointerValue<'ctx> {
+    fn build_val_alloca(&self, ty: &Type) -> BrandedStackValue<'ctx> {
         match ty {
-            Type::Float => self.build_gc_alloca(self.ctx.llvm_ctx.f32_type(), ""),
+            Type::Float => BrandedValue::<*mut f32>::build_as_alloca(self.ctx).into(),
             Type::Ref(RefType::String) => {
-                self.build_gc_alloca(self.ctx.get_struct::<RtString>().ty, "")
+                BrandedValue::<*mut Option<NonNull<RtString>>>::build_as_alloca(self.ctx).into()
             },
-            Type::Ref(_) => self.build_gc_alloca(self.ctx.get_type_ptr::<Datum>(), ""),
+            Type::Ref(_) => BrandedValue::<*mut RttiRef>::build_as_alloca(self.ctx).into(),
+            Type::Null => BrandedStackValue::Null,
+            Type::Any | Type::OneOf(_) => {
+                BrandedValue::<*mut Val>::build_as_alloca(self.ctx).into()
+            },
+            /*Type::Float => self.build_gc_alloca(self.ctx.llvm_ctx.f32_type(), ""),
+            Type::Ref(RefType::String) => self.build_gc_alloca(self.ctx.get_type::<RtString>(), ""),
+            Type::Ref(_) => self.build_gc_alloca(self.ctx.get_type::<RttiRef>(), ""),
             Type::Null => self.build_gc_alloca(self.ctx.llvm_ctx.i64_type(), ""),
-            Type::Any | Type::OneOf(_) => self.build_gc_alloca(self.ctx.get_enum::<Val>().ty, ""),
+            Type::Any | Type::OneOf(_) => self.build_gc_alloca(self.ctx.get_enum::<Val>().ty, ""),*/
             //_ => unimplemented!("unhandled ty: {:?}", ty),
         }
     }
@@ -143,7 +155,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
 
             let alloca = self.build_val_alloca(self.get_ty(var.ty));
             alloca.set_name(name);
-            self.var_allocs.push(StackValue::new(alloca, var.ty));
+            self.var_allocs.push(alloca);
         }
 
         // TODO: Bring Back SSAValue
@@ -160,10 +172,11 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             let mut cvars = closure.captured.clone();
             cvars.sort_unstable_by_key(|(_, id)| *id);
             let env_arg = self.ll_func.get_params()[0].into_pointer_value();
-            for (i, (var_id, _)) in cvars.into_iter().enumerate() {
+            todo!();
+            /*for (i, (var_id, _)) in cvars.into_iter().enumerate() {
                 let ptr = unsafe { self.const_gep(env_arg, &[i as u64]) };
                 self.copy_val(ptr, self.var_allocs[var_id].val);
-            }
+            }*/
         } else {
             let param_locals_arr = self.ctx.builder.build_array_alloca(
                 self.ctx
@@ -181,7 +194,11 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 let alloc = &self.var_allocs[*var_id];
                 // TODO: handle keyword args
                 unsafe {
-                    self.const_gep_insertvalue(param_locals_arr, &[i as u64], alloc.val.into());
+                    self.const_gep_insertvalue(
+                        param_locals_arr,
+                        &[i as u64],
+                        alloc.as_val().expect("arg var must be Val").val,
+                    );
                 }
             }
 
@@ -196,7 +213,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                         .i64_type()
                         .const_int(self.ir_func.id.index() as u64, false)
                         .into(),
-                    self.prog_emit.rt_global.into(),
+                    self.prog_emit.rt_global.as_basic_value_enum(),
                 ],
             );
         }
@@ -214,14 +231,17 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         self.set_local(local_id, val)
     }
 
-    fn build_literal(&self, lit: Literal) -> BasicValueEnum<'ctx> {
-        let val: BasicValueEnum = match lit {
-            Literal::Num(x) => self.ctx.llvm_ctx.f32_type().const_float(x as f64).into(),
+    fn build_literal(&self, lit: Literal) -> BrandedStackValue<'ctx> {
+        match lit {
+            Literal::Num(x) => {
+                let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
+                alloca.build_store(self.ctx, BrandedValue::<f32>::literal(x, self.ctx));
+                alloca.into()
+            },
             Literal::String(id) => self.prog_emit.string_allocs[id].into(),
-            Literal::Null => self.ctx.llvm_ctx.i64_type().const_zero().into(),
+            Literal::Null => BrandedStackValue::Null,
             _ => unimplemented!("{:?}", lit),
-        };
-        val
+        }
     }
 
     fn get_zero_value(&self, layout: ScalarLayout) -> Literal {
@@ -231,83 +251,76 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         }
     }
 
-    fn get_local(&self, local: LocalId) -> BasicValueEnum<'ctx> {
+    fn get_local(&self, local: LocalId) -> BrandedStackValue<'ctx> {
         self.locals[local].unwrap_or_else(|| panic!("could not load local {:?}", local))
     }
 
     fn conv_any_into(
-        &self, src_local: BasicValueEnum<'ctx>, src_ty: &Type, dest: PointerValue<'ctx>,
+        &self, src_local: BrandedStackValue<'ctx>, src_ty: &Type,
+        dest: BrandedValue<'ctx, *mut Val>,
     ) {
-        // TODO: pinion enum helpers
+        // TODO: pinion enum helpers: types for fields, discriminants
         println!("{:#?}", dest);
-        let dest_val = unsafe { self.const_gep(dest, &[0, 2]) };
+        let dest_val = dest.gep_value(self.ctx);
 
         let disc = match src_ty.get_layout() {
             Layout::Val => {
                 // Special case: can just memcpy directly
-                self.copy_val(src_local.into_pointer_value(), dest);
+                self.copy_branded_val(src_local.as_val().unwrap(), dest);
                 return;
             },
             Layout::SoftRef => {
-                self.copy_val(src_local.into_pointer_value(), dest_val);
+                let dest_ptr = unsafe { dest_val.cast_value(self.ctx) };
+                self.copy_branded_val(src_local.as_ref().unwrap(), dest_ptr);
                 layout::VAL_DISCRIM_REF
             },
 
             Layout::HardRef(RefType::String) => {
-                let dest_ref = self.bitcast_ptr::<*mut RtString>(dest_val);
-                self.ctx.builder.build_store(dest_ref, src_local);
+                let dest_ptr = unsafe { dest_val.cast_value(self.ctx) };
+                self.copy_branded_val(src_local.as_string().unwrap(), dest_ptr);
                 layout::VAL_DISCRIM_STRING
             },
             Layout::HardRef(rt) => {
                 assert!(rt.get_layout().is_val());
-                let dest_ref = self.bitcast_ptr::<*mut RttiRef>(dest_val);
-                self.ctx.builder.build_store(dest_ref, src_local);
+                let dest_ptr = unsafe { dest_val.cast_value(self.ctx) };
+                self.copy_branded_val(src_local.as_ref().unwrap(), dest_ptr);
                 layout::VAL_DISCRIM_REF
             },
-            Layout::Scalar(ScalarLayout::Null) => {
-                let dest_scalar = self.bitcast_ptr::<u64>(dest_val);
-                let null_val = self.ctx.llvm_ctx.i64_type().const_zero();
-                self.ctx.builder.build_store(dest_scalar, null_val);
-                layout::VAL_DISCRIM_NULL
-            },
+            Layout::Scalar(ScalarLayout::Null) => layout::VAL_DISCRIM_NULL,
             Layout::Scalar(ScalarLayout::Float) => {
                 // TODO: is this valid?
-                let dest_float = self.bitcast_ptr::<f32>(dest_val);
-                self.ctx.builder.build_store(dest_float, src_local);
+                let dest_ptr = unsafe { dest_val.cast_value(self.ctx) };
+                self.copy_branded_val(src_local.as_float().unwrap(), dest_ptr);
                 layout::VAL_DISCRIM_FLOAT
             },
         };
 
-        let disc_val = self.ctx.llvm_ctx.i8_type().const_int(disc as u64, false);
-        unsafe {
-            self.const_gep_insertvalue(dest, &[0, 0], disc_val.into());
-        }
+        dest.gep_disc(self.ctx)
+            .build_store(self.ctx, BrandedValue::<'ctx, u8>::literal(disc, self.ctx));
     }
 
-    fn conv_local_any_into(&self, local_id: LocalId, into: PointerValue<'ctx>) {
-        let local = self.locals[local_id].unwrap();
+    fn conv_local_any_into(&self, local_id: LocalId, into: BrandedValue<'ctx, *mut Val>) {
+        let local = self.get_local(local_id);
         let ty = self.get_ty(self.ir_func.locals[local_id].ty);
         self.conv_any_into(local, ty, into);
     }
 
-    fn get_local_any_ro(&self, local_id: LocalId) -> PointerValue<'ctx> {
-        let local = self.locals[local_id].unwrap();
-        let ty = self.get_ty(self.ir_func.locals[local_id].ty);
+    fn get_local_any_ro(&self, local_id: LocalId) -> BrandedValue<'ctx, *mut Val> {
+        let local = self.get_local(local_id);
 
         // local already points to a val-layout struct
-        if let Layout::Val = ty.get_layout() {
-            return local.into_pointer_value();
+        if let Some(val) = local.as_val() {
+            return val;
         }
 
-        // TODO: this probably doesn't need to be GC
-        // it's required for now, since runtime funcs might be taking an actual stack GC val
-        // maybe could addrspacecast them at the last minute?
-        let reified_alloca = self.build_gc_alloca(self.ctx.get_enum::<Val>().ty, "");
+        let ty = self.get_ty(self.ir_func.locals[local_id].ty);
+
+        let reified_alloca = BrandedValue::<*mut Val>::build_as_alloca(self.ctx);
         self.conv_local_any_into(local_id, reified_alloca);
         reified_alloca
     }
 
-    fn set_local(&mut self, local_id: LocalId, val: BasicValueEnum<'ctx>) {
+    fn set_local(&mut self, local_id: LocalId, val: BrandedStackValue<'ctx>) {
         assert!(self.locals[local_id].is_none());
 
         // TODO: do we need lifetimes on locals?
@@ -319,7 +332,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         */
 
         // Sketchy is-this-a-global check
-        if val.as_instruction_value().is_some() {
+        if val.as_bve().unwrap().as_instruction_value().is_some() {
             val.set_name(&format!("local_{}", local_id.index()));
         }
         self.locals[local_id] = Some(val);
@@ -435,21 +448,33 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         self.prog_emit.copy_val(src, dest);
     }
 
+    fn copy_branded_val<T: PinionPointerType>(
+        &self, src: BrandedValue<'ctx, T>, dest: BrandedValue<'ctx, T>,
+    ) {
+        self.copy_val(src.val.into_pointer_value(), dest.val.into_pointer_value())
+    }
+
+    fn build_store<P>(&self, ptr: BrandedValue<'ctx, P>, val: BrandedValue<'ctx, P::Element>)
+    where
+        P: PinionPointerType,
+    {
+        self.ctx.builder.build_store(ptr.ptr_val(), val.val);
+    }
+
     fn build_call_internal<F>(
-        &self, func: F, args: &[BveWrapper<'ctx>],
+        &self, func: F, args: &[BasicValueEnum<'ctx>],
     ) -> Option<BasicValueEnum<'ctx>>
     where
         F: Into<either::Either<FunctionValue<'ctx>, PointerValue<'ctx>>>,
     {
-        let args_ll: Vec<_> = args.iter().map(|arg| arg.bve).collect();
         self.ctx
             .builder
-            .build_call(func, &args_ll, "")
+            .build_call(func, &args, "")
             .try_as_basic_value()
             .left()
     }
 
-    fn build_call<F>(&self, func: F, args: &[BveWrapper<'ctx>]) -> Option<BasicValueEnum<'ctx>>
+    fn build_call<F>(&self, func: F, args: &[BasicValueEnum<'ctx>]) -> Option<BasicValueEnum<'ctx>>
     where
         F: Into<either::Either<FunctionValue<'ctx>, PointerValue<'ctx>>>,
     {
@@ -463,7 +488,8 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
     }
 
     fn build_call_statepoint(
-        &self, block: &Block, live: &Lifetimes, func: PointerValue<'ctx>, args: &[BveWrapper<'ctx>],
+        &self, block: &Block, live: &Lifetimes, func: PointerValue<'ctx>,
+        args: &[BasicValueEnum<'ctx>],
     ) -> Option<BasicValueEnum<'ctx>> {
         // TODO: NEEDS TO USE OP BUNDLES FOR LLVM 12+
 
@@ -473,13 +499,13 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 .get_intrinsic("llvm.experimental.gc.statepoint", &[func.get_type().into()])
                 .unwrap()
         };
-        let args_ll: Vec<_> = args.iter().map(|arg| arg.bve).collect();
 
         let mut stack_ptrs: Vec<BasicValueEnum> = Vec::new();
         for live_local in live.local.iter().copied() {
-            if self.locals[live_local].unwrap().is_pointer_value() {
+            let local = self.locals[live_local].unwrap();
+            if local.is_heapptr() {
                 let local_ty_id = self.ir_func.locals[live_local].ty;
-                stack_ptrs.push(self.locals[live_local].unwrap());
+                stack_ptrs.push(local.as_bve().unwrap());
                 stack_ptrs.push(
                     self.ctx
                         .llvm_ctx
@@ -493,7 +519,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             let var_ty_id = self.ir_func.vars[live_var].ty;
             let var_ty = self.prog_emit.env.types.get(var_ty_id);
             if var_ty.get_layout().is_val() {
-                stack_ptrs.push(self.var_allocs[live_var].val.into());
+                stack_ptrs.push(self.var_allocs[live_var].as_bve().unwrap());
                 stack_ptrs.push(
                     self.ctx
                         .llvm_ctx
@@ -523,7 +549,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             ]
             .iter(),
         );
-        sp_args.extend(args_ll.into_iter());
+        sp_args.extend(args.into_iter());
         sp_args.extend(
             [
                 self.ctx.llvm_ctx.i32_type().const_zero().into(), // # transition args
@@ -582,25 +608,25 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
     }
 
     fn build_call_intrinsic(
-        &mut self, intrinsic: Intrinsic, args: &[BveWrapper<'ctx>],
+        &mut self, intrinsic: Intrinsic, args: &[BasicValueEnum<'ctx>],
     ) -> Option<BasicValueEnum<'ctx>> {
         let func = self.prog_emit.get_intrinsic(intrinsic);
         self.build_call_internal(func, args)
     }
 
+    // TODO: take the right args, or some kind of BrandedValue<ANY>?
     fn build_call_catching<F>(
-        &self, block: &Block, func: F, args: &[BveWrapper<'ctx>],
+        &self, block: &Block, func: F, args: &[BasicValueEnum<'ctx>],
     ) -> Option<BasicValueEnum<'ctx>>
     where
         F: Into<either::Either<FunctionValue<'ctx>, PointerValue<'ctx>>>,
     {
         if let Some(pad) = self.ir_func.scopes[block.scope].landingpad {
-            let args_ll: Vec<_> = args.iter().map(|arg| arg.bve).collect();
             let continuation = self.ctx.llvm_ctx.append_basic_block(self.ll_func, "");
             let res = self
                 .ctx
                 .builder
-                .build_invoke(func, &args_ll, continuation, self.blocks[pad], "")
+                .build_invoke(func, &args, continuation, self.blocks[pad], "")
                 .try_as_basic_value()
                 .left();
             self.ctx.builder.position_at_end(continuation);
@@ -628,10 +654,24 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 let var_ty = self.get_ty(self.ir_func.vars[*var].ty);
 
                 let local_val = match (var_ty.get_layout(), local_ty.get_layout()) {
-                    // Val into val OR soft ref into soft ref: alloc and memcpy
-                    (Layout::Val, Layout::Val) | (Layout::SoftRef, Layout::SoftRef) => {
-                        let copied_alloca = self.build_gc_alloca(self.ctx.get_enum::<Val>().ty, "");
-                        self.copy_val(self.var_allocs[*var].val, copied_alloca);
+                    // Val into val: alloc and memcpy
+                    (Layout::Val, Layout::Val) => {
+                        let copied_alloca = BrandedValue::<*mut Val>::build_as_alloca(&self.ctx);
+                        self.copy_branded_val(
+                            self.var_allocs[*var].as_val().unwrap(),
+                            copied_alloca,
+                        );
+                        copied_alloca.into()
+                    },
+
+                    // Soft ref into soft ref: same
+                    (Layout::SoftRef, Layout::SoftRef) => {
+                        let copied_alloca =
+                            BrandedValue::<*mut RttiRef>::build_as_alloca(&self.ctx);
+                        self.copy_branded_val(
+                            self.var_allocs[*var].as_ref().unwrap(),
+                            copied_alloca,
+                        );
                         copied_alloca.into()
                     },
 
@@ -677,7 +717,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                                 lhs, rhs
                             );
                         }
-                        self.ctx.builder.build_load(self.var_allocs[*var].val, "")
+                        self.var_allocs[*var].copy_to_alloca(self.ctx)
                     },
                 };
 
@@ -707,14 +747,19 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 let local_ty = self.get_ty(self.ir_func.locals[*local].ty);
 
                 if var_ty.get_layout().is_val() {
-                    self.conv_local_any_into(*local, self.var_allocs[*var].val);
+                    self.conv_local_any_into(*local, self.var_allocs[*var].as_val().unwrap());
                 } else {
                     // trust that types are compatible
                     // tyinfer wouldn't lie to us
                     assert!(local_ty == var_ty);
 
+                    // hmmmm
                     let val = self.get_local(*local);
-                    self.ctx.builder.build_store(self.var_allocs[*var].val, val);
+                    let dest = self.var_allocs[*var];
+                    self.copy_val(
+                        val.as_bve().unwrap().into_pointer_value(),
+                        dest.as_bve().unwrap().into_pointer_value(),
+                    );
                 };
             },
 
@@ -724,7 +769,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 self.build_call_catching(
                     block,
                     self.ctx.get_func(ExFunc::rt_val_print),
-                    &[norm.into(), self.prog_emit.rt_global.into()],
+                    &[norm.val, self.prog_emit.rt_global.as_basic_value_enum()],
                 );
             },
 
@@ -733,16 +778,16 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 let rhs_ref = self.get_local_any_ro(*rhs);
                 let op_var = self.ctx.llvm_ctx.i32_type().const_int(*op as u64, false);
 
-                let res = self.build_gc_alloca(self.ctx.get_enum::<Val>().ty, "");
+                let res = BrandedValue::<*mut Val>::build_as_alloca(self.ctx);
                 self.build_call_catching(
                     block,
                     self.ctx.get_func(ExFunc::rt_val_binary_op),
                     &[
-                        self.prog_emit.rt_global.into(),
+                        self.prog_emit.rt_global.as_basic_value_enum(),
                         op_var.into(),
-                        lhs_ref.into(),
-                        rhs_ref.into(),
-                        res.into(),
+                        lhs_ref.val,
+                        rhs_ref.val,
+                        res.val,
                     ],
                 );
                 self.set_local(*id, res.into());
@@ -751,7 +796,12 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             Op::HardBinary(id, op, lhs, rhs) => {
                 let lhs_val = self.get_local(*lhs);
                 let rhs_val = self.get_local(*rhs);
-                let res = self.emit_binary(block, *op, lhs_val, rhs_val);
+                let res = self.emit_binary(
+                    block,
+                    *op,
+                    lhs_val.as_bve().unwrap(),
+                    rhs_val.as_bve().unwrap(),
+                );
                 self.set_local(*id, res);
             },
 
@@ -762,15 +812,15 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 let func = self.prog_emit.sym[self.prog_emit.lookup_global_proc(*name)]
                     .as_global_value()
                     .as_pointer_value();
-                let res_alloca = self.build_gc_alloca(self.ctx.get_enum::<Val>().ty, "");
+                let res_alloca = BrandedValue::<*mut Val>::build_as_alloca(self.ctx);
                 self.build_call_statepoint(
                     block,
                     &walker.get_cur_lifetimes(),
                     func,
                     &[
-                        argpack_ptr.into(),
-                        self.prog_emit.rt_global.into(),
-                        res_alloca.into(),
+                        argpack_ptr.val,
+                        self.prog_emit.rt_global.as_basic_value_enum(),
+                        res_alloca.val,
                     ],
                 );
                 self.set_local(*id, res_alloca.into());
@@ -788,10 +838,16 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     .build_call_catching(
                         block,
                         self.ctx.get_func(ExFunc::rt_val_cast_string_val),
-                        &[src_llval.into(), self.prog_emit.rt_global.into()],
+                        &[
+                            src_llval.val,
+                            self.prog_emit.rt_global.as_basic_value_enum(),
+                        ],
                     )
                     .unwrap();
-                self.set_local(*dst, res_llval);
+                let res = unsafe {
+                    BrandedValue::<*mut Option<NonNull<RtString>>>::materialize(res_llval)
+                };
+                self.set_local(*dst, res.into());
             },
 
             Op::AllocDatum(dst, ity_id) => {
@@ -802,11 +858,12 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     .i32_type()
                     .const_int(ity_id.raw() as u64, false);
                 let vt_ptr = unsafe {
-                    self.ctx.builder.build_in_bounds_gep(
+                    let ptr = self.ctx.builder.build_in_bounds_gep(
                         self.prog_emit.vt_global.as_pointer_value(),
                         &[self.ctx.llvm_ctx.i32_type().const_zero(), ty_id_val],
                         "vt_ptr",
-                    )
+                    );
+                    BrandedValue::<*mut Entry>::materialize(ptr.into())
                 };
 
                 // TODO: impl eq for prim<->complex
@@ -826,7 +883,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                         block,
                         self.ctx.get_func(ExFunc::rt_runtime_alloc_datum),
                         &[
-                            self.prog_emit.rt_global.into(),
+                            self.prog_emit.rt_global.as_basic_value_enum(),
                             self.ctx
                                 .llvm_ctx
                                 .i32_type()
@@ -835,10 +892,20 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                         ],
                     )
                     .unwrap();
+                let hh_ptr = unsafe {
+                    let datum_ptr = BrandedValue::<*mut Datum>::materialize(datum_ptr);
+                    datum_ptr.cast_value::<*mut HeapHeader>(self.ctx)
+                };
 
-                let ref_ptr = self.build_alloca(self.ctx.get_type::<RttiRef>(), "ref_ptr");
-                unsafe { self.const_gep_insertvalue(ref_ptr, &[0, 0], vt_ptr.into()) };
-                unsafe { self.const_gep_insertvalue(ref_ptr, &[0, 1], datum_ptr) };
+                // SETNAME ref_ptr
+                let ref_ptr = BrandedValue::<*mut RttiRef>::build_as_alloca(self.ctx);
+
+                ref_ptr
+                    .gep_field(self.ctx, <RttiRef as PinionStruct>::Fields::vptr())
+                    .build_store(self.ctx, vt_ptr.cast_ptr());
+                ref_ptr
+                    .gep_field(self.ctx, <RttiRef as PinionStruct>::Fields::ptr())
+                    .build_store(self.ctx, hh_ptr.cast_ptr());
 
                 // TODO: embed datum ty info
                 self.set_local(*dst, ref_ptr.into());
@@ -850,52 +917,57 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     .get_layout()
                     .is_val());
 
-                let rval_ptr = self.get_local_any_ro(*src);
+                let rval_ptr = self.get_local(*src).as_ref().unwrap();
                 let (ref_vptr, ref_ptr) = self.build_extract_ref_ptrs(rval_ptr);
-                let var_get_ptr = self
-                    .build_vtentry_extract(ref_vptr, layout::VTABLE_VAR_GET_FIELD_OFFSET)
-                    .into_pointer_value();
+                let var_get_ptr = ref_vptr
+                    .gep_field(self.ctx, <Entry as PinionStruct>::Fields::var_get())
+                    .build_load(self.ctx);
                 dbg!(rval_ptr, ref_ptr);
 
                 // TODO: drop/cloned
 
-                dbg!(var_get_ptr);
-                let loaded_alloca = self.build_gc_alloca(self.ctx.get_enum::<Val>().ty, "");
+                let loaded_alloca = BrandedValue::<*mut Val>::build_as_alloca(self.ctx);
                 self.build_call_catching(
                     block,
-                    var_get_ptr,
+                    var_get_ptr.val.into_pointer_value(),
                     &[
-                        ref_ptr.into(),
+                        ref_ptr.val,
                         self.ctx
                             .llvm_ctx
                             .i64_type()
                             .const_int(var_id.index() as u64, false)
                             .into(),
-                        loaded_alloca.into(),
+                        loaded_alloca.val,
                     ],
                 );
                 self.set_local(*dst, loaded_alloca.into());
             },
 
             Op::DatumStoreVar(dst, var_id, src) => {
-                let lval_ptr = self.get_local_any_ro(*dst);
+                println!(
+                    "whopr {:?} {:?} {:?}",
+                    dst,
+                    self.get_ty(self.ir_func.locals[*dst].ty),
+                    self.get_local(*dst)
+                );
+                let lval_ptr = self.get_local(*dst).as_ref().unwrap();
                 let (ref_vptr, ref_ptr) = self.build_extract_ref_ptrs(lval_ptr);
-                let var_set_ptr = self
-                    .build_vtentry_extract(ref_vptr, layout::VTABLE_VAR_SET_FIELD_OFFSET)
-                    .into_pointer_value();
+                let var_set_ptr = ref_vptr
+                    .gep_field(self.ctx, <Entry as PinionStruct>::Fields::var_set())
+                    .build_load(self.ctx);
 
                 let src_val = self.get_local_any_ro(*src);
                 self.build_call_catching(
                     block,
-                    var_set_ptr,
+                    var_set_ptr.val.into_pointer_value(),
                     &[
-                        ref_ptr.into(),
+                        ref_ptr.val,
                         self.ctx
                             .llvm_ctx
                             .i64_type()
                             .const_int(var_id.index() as u64, false)
                             .into(),
-                        src_val.into(),
+                        src_val.val,
                     ],
                 );
             },
@@ -975,7 +1047,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
 
             Op::Throw(exception_local) => {
                 let exception_val = self.get_local_any_ro(*exception_local);
-                self.build_call_catching(block, self.ctx.rt.rt_throw, &[exception_val.into()]);
+                self.build_call_catching(block, self.ctx.rt.rt_throw, &[exception_val.val]);
             },
 
             Op::CatchException(maybe_except_var) => {
@@ -1003,14 +1075,15 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                         self.ctx.rt.rt_exception_get_val,
                         &[
                             exception_container.into(),
-                            self.var_allocs[*except_var].val.into(),
+                            self.var_allocs[*except_var].as_bve().unwrap().into(),
                         ],
                     );
                 }
             },
 
             Op::Spawn(closure_slot, delay) => {
-                assert!(delay.is_none());
+                todo!();
+                /*assert!(delay.is_none());
                 println!("in spawn");
 
                 let func_id = self.ir_func.child_closures[*closure_slot];
@@ -1068,7 +1141,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                             )
                             .into(),
                     ],
-                );
+                );*/
             },
 
             Op::Sleep(delay) => {
@@ -1081,7 +1154,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                         .as_pointer_value(),
                     &[
                         self.prog_emit.rt_global.as_pointer_value().into(),
-                        local.into(),
+                        local.as_val().unwrap().val,
                     ],
                 );
             },
@@ -1095,13 +1168,13 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             Terminator::Return => {
                 self.finalize_block(block);
                 // TODO: rewrite, kludge
-                let ret_out = self.ll_func.get_params()[2].into_pointer_value();
+                let ret_out =
+                    unsafe { BrandedValue::<*mut Val>::materialize(self.ll_func.get_params()[2]) };
                 let ret_ty = self.get_ty(self.ir_func.vars[0].ty);
                 if ret_ty.get_layout().is_val() {
-                    self.copy_val(self.var_allocs[0].val, ret_out);
+                    self.copy_branded_val(self.var_allocs[0].as_val().unwrap(), ret_out);
                 } else {
-                    let ret = self.ctx.builder.build_load(self.var_allocs[0].val, "");
-                    self.conv_any_into(ret, ret_ty, ret_out);
+                    self.conv_any_into(self.var_allocs[0], ret_ty, ret_out);
                 }
                 self.ctx.builder.build_return(None);
             },
@@ -1121,28 +1194,25 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 let disc_local = &self.ir_func.locals[*discriminant];
 
                 let disc_int = match self.get_ty(disc_local.ty) {
-                    Type::Null => self.ctx.llvm_ctx.i32_type().const_int(0, false),
+                    Type::Null => BrandedValue::<i32>::literal(0, self.ctx),
                     Type::Float => {
-                        let disc_val = self.get_local(*discriminant);
-                        self.ctx
-                            .builder
-                            .build_cast(
-                                InstructionOpcode::FPToSI,
-                                disc_val,
-                                self.ctx.llvm_ctx.i32_type(),
-                                "disc",
-                            )
-                            .into_int_value()
+                        let disc_val = self
+                            .get_local(*discriminant)
+                            .as_float()
+                            .unwrap()
+                            .build_load(self.ctx);
+                        disc_val.cast_f32_to_i32(self.ctx)
                     },
                     Type::Any | Type::OneOf(_) => {
-                        let disc_val = self.get_local_any_ro(*discriminant);
-                        self.build_call_catching(
-                            block,
-                            self.ctx.get_func(ExFunc::rt_val_to_switch_disc),
-                            &[disc_val.into()],
-                        )
-                        .unwrap()
-                        .into_int_value()
+                        let disc_val = self.get_local(*discriminant).as_val().unwrap();
+                        let ret = self
+                            .build_call_catching(
+                                block,
+                                self.ctx.get_func(ExFunc::rt_val_to_switch_disc),
+                                &[disc_val.val],
+                            )
+                            .unwrap();
+                        unsafe { BrandedValue::<i32>::materialize(ret) }
                     },
                     _ => unimplemented!("{:?}", disc_local.ty),
                 };
@@ -1158,9 +1228,11 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     })
                     .collect::<Vec<_>>();
 
-                self.ctx
-                    .builder
-                    .build_switch(disc_int, self.blocks[*default], &llvm_branches[..]);
+                self.ctx.builder.build_switch(
+                    disc_int.val.into_int_value(),
+                    self.blocks[*default],
+                    &llvm_branches[..],
+                );
             },
 
             Terminator::TryCatch { try_block, .. } => {
@@ -1196,43 +1268,81 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
     fn emit_binary(
         &mut self, block: &Block, op: op::HardBinary, lhs: BasicValueEnum<'ctx>,
         rhs: BasicValueEnum<'ctx>,
-    ) -> BasicValueEnum<'ctx> {
-        let res = match op {
-            op::HardBinary::StringConcat => self
-                .build_call_catching(
-                    block,
-                    self.ctx.get_func(ExFunc::rt_runtime_concat_strings),
-                    &[self.prog_emit.rt_global.into(), lhs.into(), rhs.into()],
-                )
-                .unwrap(),
-            op::HardBinary::FloatAdd => self
-                .ctx
-                .builder
-                .build_float_add(lhs.into_float_value(), rhs.into_float_value(), "")
-                .into(),
-            op::HardBinary::FloatSub => self
-                .ctx
-                .builder
-                .build_float_sub(lhs.into_float_value(), rhs.into_float_value(), "")
-                .into(),
-            op::HardBinary::FloatMul => self
-                .ctx
-                .builder
-                .build_float_mul(lhs.into_float_value(), rhs.into_float_value(), "")
-                .into(),
-            op::HardBinary::FloatDiv => self
-                .ctx
-                .builder
-                .build_float_div(lhs.into_float_value(), rhs.into_float_value(), "")
-                .into(),
-            op::HardBinary::FloatMod => self
-                .ctx
-                .builder
-                .build_float_rem(lhs.into_float_value(), rhs.into_float_value(), "")
-                .into(),
-            op::HardBinary::FloatPow => self
-                .build_call_intrinsic(Intrinsic::FPow, &[lhs.into(), rhs.into()])
-                .unwrap(),
+    ) -> BrandedStackValue<'ctx> {
+        match op {
+            op::HardBinary::StringConcat => {
+                let res = self
+                    .build_call_catching(
+                        block,
+                        self.ctx.get_func(ExFunc::rt_runtime_concat_strings),
+                        &[
+                            self.prog_emit.rt_global.as_basic_value_enum(),
+                            lhs.into(),
+                            rhs.into(),
+                        ],
+                    )
+                    .unwrap();
+                unsafe { BrandedValue::<*mut Option<NonNull<RtString>>>::materialize(res) }.into()
+            },
+            op::HardBinary::FloatAdd => {
+                let res = self
+                    .ctx
+                    .builder
+                    .build_float_add(lhs.into_float_value(), rhs.into_float_value(), "")
+                    .into();
+                // ewwww TODO: cleanup cleanup
+                let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
+                alloca.build_store(self.ctx, unsafe { BrandedValue::<f32>::materialize(res) });
+                alloca.into()
+            },
+            op::HardBinary::FloatSub => {
+                let res = self
+                    .ctx
+                    .builder
+                    .build_float_sub(lhs.into_float_value(), rhs.into_float_value(), "")
+                    .into();
+                let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
+                alloca.build_store(self.ctx, unsafe { BrandedValue::<f32>::materialize(res) });
+                alloca.into()
+            },
+            op::HardBinary::FloatMul => {
+                let res = self
+                    .ctx
+                    .builder
+                    .build_float_mul(lhs.into_float_value(), rhs.into_float_value(), "")
+                    .into();
+                let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
+                alloca.build_store(self.ctx, unsafe { BrandedValue::<f32>::materialize(res) });
+                alloca.into()
+            },
+            op::HardBinary::FloatDiv => {
+                let res = self
+                    .ctx
+                    .builder
+                    .build_float_div(lhs.into_float_value(), rhs.into_float_value(), "")
+                    .into();
+                let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
+                alloca.build_store(self.ctx, unsafe { BrandedValue::<f32>::materialize(res) });
+                alloca.into()
+            },
+            op::HardBinary::FloatMod => {
+                let res = self
+                    .ctx
+                    .builder
+                    .build_float_rem(lhs.into_float_value(), rhs.into_float_value(), "")
+                    .into();
+                let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
+                alloca.build_store(self.ctx, unsafe { BrandedValue::<f32>::materialize(res) });
+                alloca.into()
+            },
+            op::HardBinary::FloatPow => {
+                let res = self
+                    .build_call_intrinsic(Intrinsic::FPow, &[lhs.into(), rhs.into()])
+                    .unwrap();
+                let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
+                alloca.build_store(self.ctx, unsafe { BrandedValue::<f32>::materialize(res) });
+                alloca.into()
+            },
             op::HardBinary::FloatCmp(pred) => {
                 let bool_res = self.ctx.builder.build_float_compare(
                     Self::conv_pred(pred),
@@ -1240,10 +1350,14 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     rhs.into_float_value(),
                     "",
                 );
-                self.ctx
+                let res = self
+                    .ctx
                     .builder
                     .build_unsigned_int_to_float(bool_res, self.ctx.llvm_ctx.f32_type(), "")
-                    .into()
+                    .into();
+                let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
+                alloca.build_store(self.ctx, unsafe { BrandedValue::<f32>::materialize(res) });
+                alloca.into()
             },
             op::HardBinary::FloatBitOp(bitop) => {
                 let lhs_i24 = self.float_to_i24(lhs.into_float_value());
@@ -1258,10 +1372,12 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                         .builder
                         .build_right_shift(lhs_i24, rhs_i24, false, ""),
                 };
-                self.i24_to_float(res_i24).into()
+                let res = self.i24_to_float(res_i24).into();
+                let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
+                alloca.build_store(self.ctx, unsafe { BrandedValue::<f32>::materialize(res) });
+                alloca.into()
             },
-        };
-        res
+        }
     }
 
     // convert an f32 val into a signed i32, saturating at min/max values
@@ -1365,37 +1481,52 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             .build_in_bounds_gep(ptr, &gep_indexes, "gepiv_ptr")
     }
 
-    fn build_argpack(&self, src: Option<LocalId>, args: &[LocalId]) -> PointerValue<'ctx> {
+    fn build_argpack(
+        &self, src: Option<LocalId>, args: &[LocalId],
+    ) -> BrandedValue<'ctx, *mut ProcPack> {
         let n_val = self
             .ctx
             .llvm_ctx
             .i64_type()
             .const_int(args.len() as u64, false);
-        let argpack_unnamed = self.ctx.builder.build_array_alloca(
-            self.ctx.get_enum::<Val>().ty,
-            self.ctx
-                .llvm_ctx
-                .i64_type()
-                .const_int(args.len() as u64, false),
-            "unnamed_args",
-        );
+        // SETNAME unnamed_args
+        let argpack_unnamed =
+            BrandedValue::<'ctx, *mut Val>::build_as_alloca_array(self.ctx, args.len() as _);
         for (i, arg) in args.iter().enumerate() {
-            let ptr = unsafe { self.const_gep(argpack_unnamed, &[i as u64]) };
+            let ptr = unsafe { argpack_unnamed.array_gep(self.ctx, i as _) };
             self.conv_local_any_into(*arg, ptr);
         }
 
-        let argpack = self.build_alloca(self.ctx.get_type::<ProcPack>(), "argpack");
+        // SETNAME argpack
+        let argpack = BrandedValue::<*mut ProcPack>::build_as_alloca(self.ctx);
         unsafe {
-            self.const_gep_insertvalue(argpack, &[0, 0, 0], n_val.into());
-            self.const_gep_insertvalue(argpack, &[0, 0, 1], argpack_unnamed.into());
-            self.const_gep_insertvalue(
-                argpack,
-                &[0, 1, 0],
-                self.ctx.llvm_ctx.i64_type().const_zero().into(),
-            );
+            let unnamed_field =
+                argpack.gep_field(self.ctx, <ProcPack as PinionStruct>::Fields::unnamed());
+
+            unnamed_field
+                .gep_field(self.ctx, <FfiArray<Val> as PinionStruct>::Fields::len())
+                .build_store(
+                    self.ctx,
+                    BrandedValue::<u64>::literal(args.len() as _, self.ctx),
+                );
+            unnamed_field
+                .gep_field(self.ctx, <FfiArray<Val> as PinionStruct>::Fields::data())
+                .build_store(self.ctx, argpack_unnamed.cast_ptr());
+
+            let named_field =
+                argpack.gep_field(self.ctx, <ProcPack as PinionStruct>::Fields::named());
+
+            named_field
+                .gep_field(
+                    self.ctx,
+                    <FfiArray<(StringId, Val)> as PinionStruct>::Fields::len(),
+                )
+                .build_store(self.ctx, BrandedValue::<u64>::literal(0, self.ctx));
+
             if let Some(id) = src {
-                let ptr = self.const_gep(argpack, &[0, 2]);
-                self.conv_local_any_into(id, ptr);
+                let src_field =
+                    argpack.gep_field(self.ctx, <ProcPack as PinionStruct>::Fields::src());
+                self.conv_local_any_into(id, src_field);
             }
         }
 
@@ -1404,34 +1535,23 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
 
     /// Returns (vptr, ptr).
     fn build_extract_ref_ptrs(
-        &self, rval_ptr: PointerValue<'ctx>,
-    ) -> (PointerValue<'ctx>, PointerValue<'ctx>) {
+        &self, rval_ptr: BrandedValue<'ctx, *mut RttiRef>,
+    ) -> (
+        BrandedValue<'ctx, *mut Entry>,
+        BrandedValue<'ctx, *mut HeapHeader>,
+    ) {
         // TODO: tycheck we're a ref
         // TODO: use some constant instead of 1
-        // TODO: TYAPI
+        // TODO: Pinion struct helpers
         // TODO: cast val struct instead of int2ptr
         println!("{:?}", rval_ptr);
-        let val_vptr = unsafe {
-            self.ctx.builder.build_in_bounds_gep(
-                rval_ptr,
-                &[
-                    self.ctx.llvm_ctx.i32_type().const_zero(),
-                    self.ctx.llvm_ctx.i32_type().const_int(0, false),
-                ],
-                "val_vptr",
-            )
-        };
-        let val_ptr = unsafe {
-            self.ctx.builder.build_in_bounds_gep(
-                rval_ptr,
-                &[
-                    self.ctx.llvm_ctx.i32_type().const_zero(),
-                    self.ctx.llvm_ctx.i32_type().const_int(1, false),
-                ],
-                "val_ptr",
-            )
-        };
-        let ref_vptr_int = self
+        let val_vptr = rval_ptr
+            .gep_field(self.ctx, <RttiRef as PinionStruct>::Fields::vptr())
+            .build_load(self.ctx);
+        let val_ptr = rval_ptr
+            .gep_field(self.ctx, <RttiRef as PinionStruct>::Fields::ptr())
+            .build_load(self.ctx);
+        /*let ref_vptr_int = self
             .ctx
             .builder
             .build_load(val_vptr, "ref_vptr_int")
@@ -1440,19 +1560,20 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             .ctx
             .builder
             .build_load(val_ptr, "ref_ptr_int")
-            .into_int_value();
+            .into_int_value();*/
 
         (
-            self.ctx.builder.build_int_to_ptr(
-                ref_vptr_int,
-                self.ctx.get_type_ptr::<vtable::Entry>(),
-                "ref_vptr",
-            ),
-            self.ctx.builder.build_int_to_ptr(
-                ref_ptr_int,
-                self.ctx.get_type_ptr::<Datum>(),
-                "ref_ptr",
-            ),
+            val_vptr.cast_ptr(),
+            val_ptr.cast_ptr(), /*self.ctx.builder.build_int_to_ptr(
+                                    ref_vptr_int,
+                                    self.ctx.get_type_ptr::<vtable::Entry>(),
+                                    "ref_vptr",
+                                ),
+                                self.ctx.builder.build_int_to_ptr(
+                                    ref_ptr_int,
+                                    self.ctx.get_type_ptr::<Datum>(),
+                                    "ref_ptr",
+                                ),*/
         )
     }
 
@@ -1499,27 +1620,41 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
     }
 
     fn build_vtentry_extract(&self, vptr: PointerValue<'ctx>, offset: u64) -> BasicValueEnum<'ctx> {
-        let field_ptr = unsafe {
-            self.ctx.builder.build_in_bounds_gep(
-                vptr,
-                &[
-                    self.ctx.llvm_ctx.i32_type().const_zero(),
-                    self.ctx.llvm_ctx.i32_type().const_int(offset, false),
-                ],
-                &format!("vtable_field_{}_ptr", offset),
-            )
-        };
+        unsafe { self.const_gep_extractvalue(vptr, &[0, offset]) }
+        /*self.ctx.builder.build_in_bounds_gep(
+            vptr,
+            &[
+                self.ctx.llvm_ctx.i32_type().const_zero(),
+                self.ctx.llvm_ctx.i32_type().const_int(offset, false),
+            ],
+            &format!("vtable_field_{}_ptr", offset),
+        )*/
 
-        self.ctx
-            .builder
-            .build_load(field_ptr, &format!("vtable_field_{}", offset))
+        /*self.ctx
+        .builder
+        .build_load(field_ptr, &format!("vtable_field_{}", offset))*/
     }
 
     fn build_var_zeroinit(&self, var: VarId) {
         let var_ty = self.get_ty(self.ir_func.vars[var].ty);
-        let val = self.var_allocs[var].val;
+        let val = self.var_allocs[var];
 
-        match var_ty.get_layout() {
+        match val {
+            BrandedStackValue::Val(val) => {
+                let disc_ptr = val.gep_disc(self.ctx);
+                let null_disc = BrandedValue::literal(layout::VAL_DISCRIM_NULL, self.ctx);
+                self.build_store(disc_ptr, null_disc);
+            },
+            BrandedStackValue::Null => {},
+            BrandedStackValue::Float(val) => {
+                let zero_float = BrandedValue::literal(0f32, self.ctx);
+                self.build_store(val, zero_float);
+            },
+            BrandedStackValue::String(_) => todo!(),
+            BrandedStackValue::Ref(_) => todo!(),
+        }
+
+        /*match var_ty.get_layout() {
             Layout::Val => {
                 let null_disc = self
                     .ctx
@@ -1539,7 +1674,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     .builder
                     .build_store(val, self.build_literal(scalar_zero));
             },
-        }
+        }*/
     }
 
     /*fn build_vtable_lookup(

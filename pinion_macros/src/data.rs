@@ -59,25 +59,42 @@ impl DeriveCtx {
     pub fn derive_named(&self, fields: &[syn::Field]) -> TokenStream {
         let lctxq: syn::Ident = parse_quote! { lctx };
 
+        let ident = &self.ident;
+        let ident_str = ident.to_string();
+        let vis = &self.vis;
+
+        let (impl_generics, ty_generics, _) = self.generics.split_for_impl();
+        let static_params = make_ty_static(&ty_generics);
+        let where_clause = make_impl_bounds(&self.generics);
+        let phantom_generics = phantom_generics(&ty_generics);
+
         let field_names = fields
             .iter()
             .map(|f| ident_to_litstr(f.ident.as_ref().unwrap()));
         let field_layouts = fields
             .iter()
             .map(|f| -> syn::Expr { ty::populate_ty(&lctxq, &f.ty) });
+        let field_funcs = fields.iter().enumerate().map(|(i, f)| -> _ {
+            let field_ident = &f.ident;
+            let ty = &f.ty;
+            let i_u32 = i as u32;
+            quote! {
+                pub fn #field_ident() -> pinion::PinionField<#i_u32, #ident #ty_generics, #ty> #where_clause {
+                    pinion::PinionField::default()
+                }
+            }
+        });
 
         let field_validates = fields.iter().map(|f| {
-            let ident = f.ident.as_ref().unwrap();
-            let ptr = parse_quote! {(&(*sptr).#ident) as *const _ as *const u8};
+            let field_ident = f.ident.as_ref().unwrap();
+            let ptr = parse_quote! {(&(*sptr).#field_ident) as *const _ as *const u8};
             ty::build_validate(&ptr, &f.ty)
         });
 
-        let ident = &self.ident;
-        let ident_str = ident.to_string();
-
-        let (impl_generics, ty_generics, _) = self.generics.split_for_impl();
-        let static_params = make_ty_static(&ty_generics);
-        let where_clause = make_impl_bounds(&self.generics);
+        let field_ty_name = syn::Ident::new(
+            &format!("__PINION_FIELD_ENUM__{}", self.ident),
+            Span::call_site(),
+        );
 
         quote! {
             #[automatically_derived]
@@ -97,7 +114,22 @@ impl DeriveCtx {
                 }
             }
             #[automatically_derived]
-            impl #impl_generics pinion::PinionStruct for #ident #ty_generics #where_clause {}
+            impl #impl_generics pinion::PinionStruct for #ident #ty_generics #where_clause {
+                type Fields = #field_ty_name #ty_generics;
+            }
+
+            #[doc(hidden)]
+            #[allow(non_camel_case_type)]
+            #vis enum #field_ty_name #ty_generics {
+                _never(std::convert::Infallible, std::marker::PhantomData #phantom_generics)
+            }
+
+            #[automatically_derived]
+            impl #ty_generics pinion::PinionStructFields for #field_ty_name #ty_generics {}
+
+            impl #ty_generics #field_ty_name #ty_generics {
+                #(#field_funcs)*
+            }
         }
     }
 
@@ -130,8 +162,6 @@ impl DeriveCtx {
                     #validate_body
                 }
             }
-            #[automatically_derived]
-            impl #impl_generics pinion::PinionStruct for #ident #ty_generics #where_clause {}
         }
     }
 
@@ -240,6 +270,7 @@ impl DeriveCtx {
             }
             #[automatically_derived]
             impl #impl_generics pinion::PinionEnum for #ident #ty_generics #where_clause {
+                type Disc = #prim;
                 type Variant = #unit_enum_name;
             }
 
@@ -268,6 +299,25 @@ fn make_ty_static(ty_generics: &TypeGenerics) -> TokenStream {
 
     quote! {
         < #(#tss,)* >
+    }
+}
+
+fn phantom_generics(ty_generics: &TypeGenerics) -> TokenStream {
+    let ts = ty_generics.to_token_stream();
+    if ts.is_empty() {
+        return quote! { <()> };
+    }
+
+    let params = parse_spec.parse2(ts).expect("weewhooo");
+
+    let tss = params.iter().map(|param| match param {
+        GenericParam::Lifetime(lt) => parse_quote! { & #lt () },
+        GenericParam::Type(ty) => quote! { #ty },
+        GenericParam::Const(_) => panic!("can't handle const"),
+    });
+
+    quote! {
+        < ( #(#tss),* ) >
     }
 }
 

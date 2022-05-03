@@ -535,6 +535,10 @@ impl<'ty> InferRunner<'ty> {
         let mut start_block = 0;
         let mut start_op = 0;
         loop {
+            for param in &proc.params {
+                self.apply_rule(&infer::Rule::Const(self.var_ikey[*param], TYPE_ID_ANY))
+                    .unwrap();
+            }
             match self.run_types_from(proc, start_block, start_op) {
                 Ok(_) => break,
                 Err(err) => match self.checkpoints.pop() {

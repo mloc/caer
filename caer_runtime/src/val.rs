@@ -134,7 +134,7 @@ impl Val {
         match self {
             Val::Ref(rtti_ref) => {
                 // TODO: include src
-                let lookup_fn = rtti_ref.vptr.proc_lookup;
+                let lookup_fn = rtti_ref.vptr.proc_lookup.0;
                 let proc_fn = lookup_fn(proc_name, rt).0;
                 proc_fn(args, rt, out)
             },

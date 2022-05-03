@@ -18,13 +18,28 @@ pub trait PinionData: Sized {
     fn get_layout(lctx: &mut LayoutCtx) -> Layout;
 }
 
-pub trait PinionStruct: PinionData {}
+pub trait PinionPrim: PinionData + Copy {}
+
+pub trait PinionStruct: PinionData {
+    type Fields: PinionStructFields;
+}
+
+pub trait PinionStructFields: Sized {}
+
+pub trait PinionStructFieldActor {
+    type Out<T>;
+    fn process<S: PinionStruct, T>(field: S::Fields) -> Self::Out<T>;
+}
+
 pub trait PinionEnum: PinionData {
+    type Disc: PinionData;
     type Variant;
 }
 
 // marker trait. must be a nicheable type
-pub trait PinionPointerType: PinionData {}
+pub trait PinionPointerType: PinionData {
+    type Element: PinionData;
+}
 
 pub trait PinionFuncCarrier {
     fn get_all_funcs<C: Context>(ctx: &mut C) -> Vec<(&'static str, C::FunctionType)>;
@@ -41,6 +56,21 @@ pub trait PinionModule {
 
 pub trait PinionModuleFuncsEnum: Clone + Copy + Debug {
     fn get_name(self) -> &'static str;
+}
+
+pub trait StaticPinionData: PinionData + 'static {}
+impl<T: PinionData + 'static> StaticPinionData for T {}
+
+pub struct PinionField<const N: u32, S: PinionStruct, T: PinionData> {
+    phantom: PhantomData<(S, T)>,
+}
+
+impl<const N: u32, S: PinionStruct, T: PinionData> Default for PinionField<N, S, T> {
+    fn default() -> Self {
+        Self {
+            phantom: PhantomData,
+        }
+    }
 }
 
 // Everything below here should probably be moved...
@@ -64,6 +94,7 @@ macro_rules! prim_types {
                     layout::Layout::Primitive(Primitive::$var)
                 }
             }
+            impl PinionPrim for $prim {}
         )+)+
     };
 }
@@ -135,7 +166,9 @@ impl<'a, T: PinionData + 'a> PinionData for *const T {
         layout::Layout::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
     }
 }
-impl<'a, T: PinionData> PinionPointerType for *const T {}
+impl<'a, T: PinionData> PinionPointerType for *const T {
+    type Element = T;
+}
 
 impl<'a, T: PinionData + 'a> PinionData for *mut T {
     type Static = *mut T::Static;
@@ -149,7 +182,9 @@ impl<'a, T: PinionData + 'a> PinionData for *mut T {
         layout::Layout::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
     }
 }
-impl<'a, T: PinionData> PinionPointerType for *mut T {}
+impl<'a, T: PinionData> PinionPointerType for *mut T {
+    type Element = T;
+}
 
 impl<'a, T: PinionData + 'a> PinionData for NonNull<T> {
     type Static = NonNull<T::Static>;
@@ -163,7 +198,9 @@ impl<'a, T: PinionData + 'a> PinionData for NonNull<T> {
         layout::Layout::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
     }
 }
-impl<'a, T: PinionData> PinionPointerType for NonNull<T> {}
+impl<'a, T: PinionData> PinionPointerType for NonNull<T> {
+    type Element = T;
+}
 
 impl<'a, T: PinionData + 'a> PinionData for &'a T {
     type Static = &'static T::Static;
@@ -177,7 +214,9 @@ impl<'a, T: PinionData + 'a> PinionData for &'a T {
         layout::Layout::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
     }
 }
-impl<'a, T: PinionData> PinionPointerType for &'a T {}
+impl<'a, T: PinionData> PinionPointerType for &'a T {
+    type Element = T;
+}
 
 impl<'a, T: PinionData + 'a> PinionData for &'a mut T {
     type Static = &'static mut T::Static;
@@ -191,7 +230,9 @@ impl<'a, T: PinionData + 'a> PinionData for &'a mut T {
         layout::Layout::Pointer(layout::Pointer::new(lctx.populate::<T>(), false))
     }
 }
-impl<'a, T: PinionData> PinionPointerType for &'a mut T {}
+impl<'a, T: PinionData> PinionPointerType for &'a mut T {
+    type Element = T;
+}
 
 impl<T: PinionPointerType> PinionData for Option<T> {
     type Static = Option<T::Static>;

@@ -1,4 +1,5 @@
 use std::fs::{self, File};
+use std::ptr::NonNull;
 
 use caer_ir::cfg::*;
 use caer_ir::module::Module;
@@ -23,6 +24,7 @@ use inkwell::values::{AnyValueEnum, FunctionValue, PointerValue};
 use super::context::Context;
 use super::func::FuncEmit;
 use crate::context::{ExFunc, GC_ADDRESS_SPACE};
+use crate::value::BrandedValue;
 
 #[derive(Debug)]
 pub struct ProgEmit<'a, 'ctx> {
@@ -37,7 +39,7 @@ pub struct ProgEmit<'a, 'ctx> {
     //pub vt_lookup: Vec<FunctionValue<'ctx>>,
     pub datum_types: IndexVec<InstanceTypeId, inkwell::types::StructType<'ctx>>,
     pub sym: IndexVec<FuncId, FunctionValue<'ctx>>,
-    pub string_allocs: IndexVec<StringId, inkwell::values::PointerValue<'ctx>>,
+    pub string_allocs: IndexVec<StringId, BrandedValue<'ctx, *mut Option<NonNull<RtString>>>>,
 
     proc_type: FunctionType<'ctx>,
 }
@@ -174,11 +176,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             &[
                 dest.into(),
                 src.into(),
-                self.ctx
-                    .llvm_ctx
-                    .i64_type()
-                    .const_int(Type::Any.get_layout().store_size(), false)
-                    .into(),
+                self.ctx.llvm_ctx.i64_type().const_int(1, false).into(),
                 self.ctx.llvm_ctx.bool_type().const_zero().into(),
             ],
             "",
@@ -339,7 +337,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
                 );
                 asg.set_initializer(&alloc_string);
                 asg.set_constant(true);
-                asg.as_pointer_value()
+                unsafe { BrandedValue::materialize(asg.as_pointer_value().into()) }
             })
             .collect();
     }

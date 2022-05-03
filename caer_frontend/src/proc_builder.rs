@@ -50,6 +50,7 @@ impl<'a, 'ot> ProcBuilder<'a, 'ot> {
             // TODO: need to record name separately for keyword args?
             let name_id = self.ir.intern_string(&param.name);
             let var_id = func.add_var(func.global_scope, TYPE_ID_ANY, name_id);
+            func.vars[var_id].assoc_dty = self.objtree.type_by_path(&param.var_type.type_path);
             func.params.push(var_id);
 
             proc_spec.params.push(name_id);

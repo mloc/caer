@@ -36,4 +36,14 @@ impl<'a> ObjtreeWrapper<'a> {
     pub fn lookup_type(&self, ty: TypeRef) -> Option<PathTypeId> {
         self.mapping.get(&ty.index()).copied()
     }
+
+    pub fn type_by_path<I>(&self, path: I) -> Option<PathTypeId>
+    where
+        I: IntoIterator,
+        I::Item: AsRef<str>,
+    {
+        self.objtree
+            .type_by_path(path)
+            .map(|ty| self.mapping[&ty.index()])
+    }
 }

@@ -1,3 +1,6 @@
+// jinxing GAT stabilization
+#![feature(generic_associated_types)]
+
 mod context;
 mod func;
 mod prog;

@@ -72,10 +72,22 @@ impl FuncPtr {
 pub struct Entry {
     pub id: InstanceTypeId, // i32
     pub size: i64,
-    pub var_get: extern "C" fn(datum: *mut Datum, var: &RtString, out: *mut Val),
-    pub var_set: extern "C" fn(datum: *mut Datum, var: &RtString, val: *const Val),
-    pub proc_lookup: extern "C" fn(proc: &RtString, rt: &mut Runtime) -> ProcPtr,
+    pub var_get: VarGetPtr,
+    pub var_set: VarSetPtr,
+    pub proc_lookup: ProcLookupPtr,
 }
+
+#[derive(Clone, Copy, PinionData)]
+#[repr(transparent)]
+pub struct VarGetPtr(pub extern "C" fn(datum: *mut Datum, var: &RtString, out: *mut Val));
+
+#[derive(Clone, Copy, PinionData)]
+#[repr(transparent)]
+pub struct VarSetPtr(pub extern "C" fn(datum: *mut Datum, var: &RtString, val: *const Val));
+
+#[derive(Clone, Copy, PinionData)]
+#[repr(transparent)]
+pub struct ProcLookupPtr(pub extern "C" fn(proc: &RtString, rt: &mut Runtime) -> ProcPtr);
 
 impl Debug for Entry {
     fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

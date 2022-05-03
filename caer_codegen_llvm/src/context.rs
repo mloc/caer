@@ -7,7 +7,7 @@ use std::rc::Rc;
 use caer_runtime::runtime::Runtime;
 use caer_runtime::val::Val;
 use inkwell::types::{BasicType, BasicTypeEnum, PointerType};
-use inkwell::values::FunctionValue;
+use inkwell::values::{FunctionValue, PointerValue};
 use pinion::layout::Func;
 use pinion::{PinionData, PinionEnum, PinionModule, PinionStruct};
 
@@ -81,6 +81,15 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
     pub fn get_type_ptr<T: PinionData>(&self) -> PointerType<'ctx> {
         self.get_type::<T>()
             .ptr_type(inkwell::AddressSpace::Generic)
+    }
+
+    pub unsafe fn const_gep(&self, ptr: PointerValue<'ctx>, indexes: &[u64]) -> PointerValue<'ctx> {
+        let gep_indexes: Vec<_> = indexes
+            .iter()
+            .map(|i| self.llvm_ctx.i32_type().const_int(*i, false))
+            .collect();
+        self.builder
+            .build_in_bounds_gep(ptr, &gep_indexes, "gepiv_ptr")
     }
 
     // wrong spot for this

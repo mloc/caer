@@ -1,3 +1,6 @@
+// jinxing GAT stabilization
+#![feature(generic_associated_types)]
+
 pub mod interface;
 pub mod layout;
 pub mod layout_ctx;
