@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use caer_runtime::runtime::Runtime;
 use caer_runtime::val::Val;
+use inkwell::targets::TargetData;
 use inkwell::types::{BasicType, BasicTypeEnum, PointerType};
 use inkwell::values::{FunctionValue, PointerValue};
 use pinion::layout::Func;
@@ -24,6 +25,8 @@ pub struct Context<'a, 'ctx> {
     pub builder: &'a inkwell::builder::Builder<'ctx>,
     pub module: &'a inkwell::module::Module<'ctx>,
     pub rt: RtFuncs<'ctx>,
+
+    target_data: TargetData,
 
     repr_manager: RefCell<ReprManager<'ctx>>,
     funcs: HashMap<ExFunc, (Func, FunctionValue<'ctx>)>,
@@ -46,11 +49,16 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
 
         let rt = RtFuncs::new(llctx, llmod, &mut repr_manager);
 
+        // is this.. OK?
+        let data_layout = llmod.get_data_layout();
+        let target_data = TargetData::create(&data_layout.as_str().to_str().unwrap());
+
         Self {
             builder: llbuild,
             module: llmod,
             llvm_ctx: llctx,
             rt,
+            target_data,
             repr_manager: RefCell::new(repr_manager),
             funcs,
         }
@@ -81,6 +89,11 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
     pub fn get_type_ptr<T: PinionData>(&self) -> PointerType<'ctx> {
         self.get_type::<T>()
             .ptr_type(inkwell::AddressSpace::Generic)
+    }
+
+    pub fn get_store_size<T: PinionData>(&self) -> u64 {
+        let ty = self.get_type::<T>();
+        self.target_data.get_store_size(&ty)
     }
 
     pub unsafe fn const_gep(&self, ptr: PointerValue<'ctx>, indexes: &[u64]) -> PointerValue<'ctx> {

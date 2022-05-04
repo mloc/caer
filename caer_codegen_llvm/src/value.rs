@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -123,8 +124,16 @@ impl<'ctx, T: PinionData> BrandedValue<'ctx, T> {
     }
 
     // TODO: checks!!!
-    pub unsafe fn materialize(val: BasicValueEnum<'ctx>) -> Self {
+    pub unsafe fn materialize(ctx: &Context<'_, 'ctx>, val: BasicValueEnum<'ctx>) -> Self {
+        assert_eq!(val.get_type(), ctx.get_type::<T>());
         Self::new(val)
+    }
+
+    // TODO: copy/prim bound maybe
+    pub fn alloca_emplace(self, ctx: &Context<'_, 'ctx>) -> BrandedValue<'ctx, *mut T> {
+        let alloca = BrandedValue::<*mut T>::build_as_alloca(ctx);
+        alloca.build_store(ctx, self);
+        alloca
     }
 }
 
@@ -161,6 +170,8 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
     pub fn copy(ctx: &Context<'_, 'ctx>, src: Self, dest: Self) {
         assert_eq!(src.val.get_type(), dest.val.get_type());
 
+        let size = ctx.get_store_size::<T>();
+
         let memcpy_intrinsic = unsafe {
             ctx.module
                 .get_intrinsic(
@@ -179,7 +190,7 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
             &[
                 dest.val,
                 src.val,
-                ctx.llvm_ctx.i64_type().const_int(1, false).into(),
+                ctx.llvm_ctx.i64_type().const_int(size, false).into(),
                 ctx.llvm_ctx.bool_type().const_zero().into(),
             ],
             "",

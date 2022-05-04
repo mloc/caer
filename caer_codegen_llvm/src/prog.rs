@@ -39,7 +39,7 @@ pub struct ProgEmit<'a, 'ctx> {
     //pub vt_lookup: Vec<FunctionValue<'ctx>>,
     pub datum_types: IndexVec<InstanceTypeId, inkwell::types::StructType<'ctx>>,
     pub sym: IndexVec<FuncId, FunctionValue<'ctx>>,
-    pub string_allocs: IndexVec<StringId, BrandedValue<'ctx, *mut Option<NonNull<RtString>>>>,
+    pub string_allocs: IndexVec<StringId, BrandedValue<'ctx, Option<NonNull<RtString>>>>,
 
     proc_type: FunctionType<'ctx>,
 }
@@ -176,7 +176,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             &[
                 dest.into(),
                 src.into(),
-                self.ctx.llvm_ctx.i64_type().const_int(1, false).into(),
+                self.ctx.llvm_ctx.i64_type().const_int(24, false).into(),
                 self.ctx.llvm_ctx.bool_type().const_zero().into(),
             ],
             "",
@@ -337,7 +337,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
                 );
                 asg.set_initializer(&alloc_string);
                 asg.set_constant(true);
-                unsafe { BrandedValue::materialize(asg.as_pointer_value().into()) }
+                unsafe { BrandedValue::materialize(self.ctx, asg.as_pointer_value().into()) }
             })
             .collect();
     }

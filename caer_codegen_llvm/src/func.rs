@@ -238,7 +238,9 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 alloca.build_store(self.ctx, BrandedValue::<f32>::literal(x, self.ctx));
                 alloca.into()
             },
-            Literal::String(id) => self.prog_emit.string_allocs[id].into(),
+            Literal::String(id) => self.prog_emit.string_allocs[id]
+                .alloca_emplace(self.ctx)
+                .into(),
             Literal::Null => BrandedStackValue::Null,
             _ => unimplemented!("{:?}", lit),
         }
@@ -277,6 +279,8 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
 
             Layout::HardRef(RefType::String) => {
                 let dest_ptr = unsafe { dest_val.cast_value(self.ctx) };
+                println!("{:#?}", dest_ptr);
+                println!("{:#?}", src_local);
                 self.copy_branded_val(src_local.as_string().unwrap(), dest_ptr);
                 layout::VAL_DISCRIM_STRING
             },
@@ -796,12 +800,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             Op::HardBinary(id, op, lhs, rhs) => {
                 let lhs_val = self.get_local(*lhs);
                 let rhs_val = self.get_local(*rhs);
-                let res = self.emit_binary(
-                    block,
-                    *op,
-                    lhs_val.as_bve().unwrap(),
-                    rhs_val.as_bve().unwrap(),
-                );
+                let res = self.emit_binary(block, *op, lhs_val, rhs_val);
                 self.set_local(*id, res);
             },
 
@@ -845,8 +844,9 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     )
                     .unwrap();
                 let res = unsafe {
-                    BrandedValue::<*mut Option<NonNull<RtString>>>::materialize(res_llval)
-                };
+                    BrandedValue::<Option<NonNull<RtString>>>::materialize(self.ctx, res_llval)
+                }
+                .alloca_emplace(self.ctx);
                 self.set_local(*dst, res.into());
             },
 
@@ -863,7 +863,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                         &[self.ctx.llvm_ctx.i32_type().const_zero(), ty_id_val],
                         "vt_ptr",
                     );
-                    BrandedValue::<*mut Entry>::materialize(ptr.into())
+                    BrandedValue::<*mut Entry>::materialize(self.ctx, ptr.into())
                 };
 
                 // TODO: impl eq for prim<->complex
@@ -893,7 +893,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     )
                     .unwrap();
                 let hh_ptr = unsafe {
-                    let datum_ptr = BrandedValue::<*mut Datum>::materialize(datum_ptr);
+                    let datum_ptr = BrandedValue::<*mut Datum>::materialize(self.ctx, datum_ptr);
                     datum_ptr.cast_value::<*mut HeapHeader>(self.ctx)
                 };
 
@@ -917,12 +917,11 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     .get_layout()
                     .is_val());
 
-                let rval_ptr = self.get_local(*src).as_ref().unwrap();
+                let rval_ptr = self.soft_cast_val_ref(*src);
                 let (ref_vptr, ref_ptr) = self.build_extract_ref_ptrs(rval_ptr);
                 let var_get_ptr = ref_vptr
                     .gep_field(self.ctx, <Entry as PinionStruct>::Fields::var_get())
                     .build_load(self.ctx);
-                dbg!(rval_ptr, ref_ptr);
 
                 // TODO: drop/cloned
 
@@ -950,18 +949,21 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     self.get_ty(self.ir_func.locals[*dst].ty),
                     self.get_local(*dst)
                 );
-                let lval_ptr = self.get_local(*dst).as_ref().unwrap();
+                let lval_ptr = self.soft_cast_val_ref(*dst);
                 let (ref_vptr, ref_ptr) = self.build_extract_ref_ptrs(lval_ptr);
                 let var_set_ptr = ref_vptr
                     .gep_field(self.ctx, <Entry as PinionStruct>::Fields::var_set())
                     .build_load(self.ctx);
+
+                // TODO: hmmmm
+                let datum_ptr = unsafe { ref_ptr.cast_value::<*mut Datum>(self.ctx) };
 
                 let src_val = self.get_local_any_ro(*src);
                 self.build_call_catching(
                     block,
                     var_set_ptr.val.into_pointer_value(),
                     &[
-                        ref_ptr.val,
+                        datum_ptr.val,
                         self.ctx
                             .llvm_ctx
                             .i64_type()
@@ -1168,8 +1170,9 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             Terminator::Return => {
                 self.finalize_block(block);
                 // TODO: rewrite, kludge
-                let ret_out =
-                    unsafe { BrandedValue::<*mut Val>::materialize(self.ll_func.get_params()[2]) };
+                let ret_out = unsafe {
+                    BrandedValue::<*mut Val>::materialize(self.ctx, self.ll_func.get_params()[2])
+                };
                 let ret_ty = self.get_ty(self.ir_func.vars[0].ty);
                 if ret_ty.get_layout().is_val() {
                     self.copy_branded_val(self.var_allocs[0].as_val().unwrap(), ret_out);
@@ -1212,7 +1215,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                                 &[disc_val.val],
                             )
                             .unwrap();
-                        unsafe { BrandedValue::<i32>::materialize(ret) }
+                        unsafe { BrandedValue::<i32>::materialize(self.ctx, ret) }
                     },
                     _ => unimplemented!("{:?}", disc_local.ty),
                 };
@@ -1266,88 +1269,108 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
     }
 
     fn emit_binary(
-        &mut self, block: &Block, op: op::HardBinary, lhs: BasicValueEnum<'ctx>,
-        rhs: BasicValueEnum<'ctx>,
+        &mut self, block: &Block, op: op::HardBinary, lhs: BrandedStackValue<'ctx>,
+        rhs: BrandedStackValue<'ctx>,
     ) -> BrandedStackValue<'ctx> {
+        if let op::HardBinary::StringConcat = op {
+            let res = self
+                .build_call_catching(
+                    block,
+                    self.ctx.get_func(ExFunc::rt_runtime_concat_strings),
+                    &[
+                        self.prog_emit.rt_global.as_basic_value_enum(),
+                        lhs.as_string().unwrap().build_load(self.ctx).val,
+                        rhs.as_string().unwrap().build_load(self.ctx).val,
+                    ],
+                )
+                .unwrap();
+            return unsafe {
+                BrandedValue::<Option<NonNull<RtString>>>::materialize(self.ctx, res)
+            }
+            .alloca_emplace(self.ctx)
+            .into();
+        }
+
+        let lhs_bve = lhs.as_float().unwrap().build_load(self.ctx).val;
+        let rhs_bve = rhs.as_float().unwrap().build_load(self.ctx).val;
         match op {
-            op::HardBinary::StringConcat => {
-                let res = self
-                    .build_call_catching(
-                        block,
-                        self.ctx.get_func(ExFunc::rt_runtime_concat_strings),
-                        &[
-                            self.prog_emit.rt_global.as_basic_value_enum(),
-                            lhs.into(),
-                            rhs.into(),
-                        ],
-                    )
-                    .unwrap();
-                unsafe { BrandedValue::<*mut Option<NonNull<RtString>>>::materialize(res) }.into()
-            },
+            op::HardBinary::StringConcat => unreachable!(),
             op::HardBinary::FloatAdd => {
                 let res = self
                     .ctx
                     .builder
-                    .build_float_add(lhs.into_float_value(), rhs.into_float_value(), "")
+                    .build_float_add(lhs_bve.into_float_value(), rhs_bve.into_float_value(), "")
                     .into();
                 // ewwww TODO: cleanup cleanup
                 let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
-                alloca.build_store(self.ctx, unsafe { BrandedValue::<f32>::materialize(res) });
+                alloca.build_store(self.ctx, unsafe {
+                    BrandedValue::<f32>::materialize(self.ctx, res)
+                });
                 alloca.into()
             },
             op::HardBinary::FloatSub => {
                 let res = self
                     .ctx
                     .builder
-                    .build_float_sub(lhs.into_float_value(), rhs.into_float_value(), "")
+                    .build_float_sub(lhs_bve.into_float_value(), rhs_bve.into_float_value(), "")
                     .into();
                 let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
-                alloca.build_store(self.ctx, unsafe { BrandedValue::<f32>::materialize(res) });
+                alloca.build_store(self.ctx, unsafe {
+                    BrandedValue::<f32>::materialize(self.ctx, res)
+                });
                 alloca.into()
             },
             op::HardBinary::FloatMul => {
                 let res = self
                     .ctx
                     .builder
-                    .build_float_mul(lhs.into_float_value(), rhs.into_float_value(), "")
+                    .build_float_mul(lhs_bve.into_float_value(), rhs_bve.into_float_value(), "")
                     .into();
                 let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
-                alloca.build_store(self.ctx, unsafe { BrandedValue::<f32>::materialize(res) });
+                alloca.build_store(self.ctx, unsafe {
+                    BrandedValue::<f32>::materialize(self.ctx, res)
+                });
                 alloca.into()
             },
             op::HardBinary::FloatDiv => {
                 let res = self
                     .ctx
                     .builder
-                    .build_float_div(lhs.into_float_value(), rhs.into_float_value(), "")
+                    .build_float_div(lhs_bve.into_float_value(), rhs_bve.into_float_value(), "")
                     .into();
                 let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
-                alloca.build_store(self.ctx, unsafe { BrandedValue::<f32>::materialize(res) });
+                alloca.build_store(self.ctx, unsafe {
+                    BrandedValue::<f32>::materialize(self.ctx, res)
+                });
                 alloca.into()
             },
             op::HardBinary::FloatMod => {
                 let res = self
                     .ctx
                     .builder
-                    .build_float_rem(lhs.into_float_value(), rhs.into_float_value(), "")
+                    .build_float_rem(lhs_bve.into_float_value(), rhs_bve.into_float_value(), "")
                     .into();
                 let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
-                alloca.build_store(self.ctx, unsafe { BrandedValue::<f32>::materialize(res) });
+                alloca.build_store(self.ctx, unsafe {
+                    BrandedValue::<f32>::materialize(self.ctx, res)
+                });
                 alloca.into()
             },
             op::HardBinary::FloatPow => {
                 let res = self
-                    .build_call_intrinsic(Intrinsic::FPow, &[lhs.into(), rhs.into()])
+                    .build_call_intrinsic(Intrinsic::FPow, &[lhs_bve, rhs_bve])
                     .unwrap();
                 let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
-                alloca.build_store(self.ctx, unsafe { BrandedValue::<f32>::materialize(res) });
+                alloca.build_store(self.ctx, unsafe {
+                    BrandedValue::<f32>::materialize(self.ctx, res)
+                });
                 alloca.into()
             },
             op::HardBinary::FloatCmp(pred) => {
                 let bool_res = self.ctx.builder.build_float_compare(
                     Self::conv_pred(pred),
-                    lhs.into_float_value(),
-                    rhs.into_float_value(),
+                    lhs_bve.into_float_value(),
+                    rhs_bve.into_float_value(),
                     "",
                 );
                 let res = self
@@ -1356,12 +1379,14 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     .build_unsigned_int_to_float(bool_res, self.ctx.llvm_ctx.f32_type(), "")
                     .into();
                 let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
-                alloca.build_store(self.ctx, unsafe { BrandedValue::<f32>::materialize(res) });
+                alloca.build_store(self.ctx, unsafe {
+                    BrandedValue::<f32>::materialize(self.ctx, res)
+                });
                 alloca.into()
             },
             op::HardBinary::FloatBitOp(bitop) => {
-                let lhs_i24 = self.float_to_i24(lhs.into_float_value());
-                let rhs_i24 = self.float_to_i24(rhs.into_float_value());
+                let lhs_i24 = self.float_to_i24(lhs_bve.into_float_value());
+                let rhs_i24 = self.float_to_i24(rhs_bve.into_float_value());
                 let res_i24 = match bitop {
                     op::BitOp::And => self.ctx.builder.build_and(lhs_i24, rhs_i24, ""),
                     op::BitOp::Or => self.ctx.builder.build_or(lhs_i24, rhs_i24, ""),
@@ -1374,7 +1399,9 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 };
                 let res = self.i24_to_float(res_i24).into();
                 let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
-                alloca.build_store(self.ctx, unsafe { BrandedValue::<f32>::materialize(res) });
+                alloca.build_store(self.ctx, unsafe {
+                    BrandedValue::<f32>::materialize(self.ctx, res)
+                });
                 alloca.into()
             },
         }
@@ -1531,6 +1558,38 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         }
 
         argpack
+    }
+
+    fn soft_cast_val_ref(&self, local: LocalId) -> BrandedValue<'ctx, *mut RttiRef> {
+        match self.get_local(local) {
+            BrandedStackValue::Val(val_val) => {
+                // TODO: pinion enum helpers
+                let disc = val_val.gep_disc(self.ctx).build_load(self.ctx);
+
+                let trap_block = self.ctx.llvm_ctx.append_basic_block(self.ll_func, "");
+                let continuation = self.ctx.llvm_ctx.append_basic_block(self.ll_func, "");
+
+                let ref_disc = BrandedValue::<u8>::literal(layout::VAL_DISCRIM_REF, self.ctx);
+
+                self.ctx.builder.build_switch(
+                    disc.val.into_int_value(),
+                    trap_block,
+                    &[(ref_disc.val.into_int_value(), continuation)],
+                );
+
+                self.ctx.builder.position_at_end(trap_block);
+                let trap_fn = self.prog_emit.get_intrinsic(Intrinsic::Trap);
+                self.ctx.builder.build_call(trap_fn, &[], "");
+                self.ctx.builder.build_unreachable();
+
+                self.ctx.builder.position_at_end(continuation);
+                unsafe { val_val.gep_value(self.ctx).cast_value(self.ctx) }
+            },
+            BrandedStackValue::Ref(ref_val) => ref_val,
+            BrandedStackValue::Null
+            | BrandedStackValue::Float(_)
+            | BrandedStackValue::String(_) => panic!("can't extract"),
+        }
     }
 
     /// Returns (vptr, ptr).
