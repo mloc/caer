@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::ops::Index;
 use std::slice::from_raw_parts;
 
-use caer_types::id::{FuncId, InstanceTypeId};
+use caer_types::id::{FuncId, InstanceTypeId, StringId};
 use pinion::PinionData;
 
 use crate::arg_pack::ProcPack;
@@ -79,11 +79,11 @@ pub struct Entry {
 
 #[derive(Clone, Copy, PinionData)]
 #[repr(transparent)]
-pub struct VarGetPtr(pub extern "C" fn(datum: *mut Datum, var: &RtString, out: *mut Val));
+pub struct VarGetPtr(pub extern "C" fn(datum: *mut Datum, var: StringId, out: *mut Val));
 
 #[derive(Clone, Copy, PinionData)]
 #[repr(transparent)]
-pub struct VarSetPtr(pub extern "C" fn(datum: *mut Datum, var: &RtString, val: *const Val));
+pub struct VarSetPtr(pub extern "C" fn(datum: *mut Datum, var: StringId, val: *const Val));
 
 #[derive(Clone, Copy, PinionData)]
 #[repr(transparent)]

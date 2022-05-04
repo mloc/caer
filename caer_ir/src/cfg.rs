@@ -3,7 +3,7 @@ use std::fs::{self, File};
 use std::io::{Seek, SeekFrom, Write};
 
 use caer_types::func::{CallingSpec, ClosureSpec, FuncInfo};
-use caer_types::id::{FuncId, PathTypeId, StringId, TypeId, TYPE_ID_ANY};
+use caer_types::id::{FuncId, InstanceTypeId, PathTypeId, StringId, TypeId, TYPE_ID_ANY};
 use caer_types::ty::{self, RefType};
 use index_vec::IndexVec;
 use serde::Serialize;
@@ -687,7 +687,7 @@ pub enum Op {
     // TODO: move into an "RTOP" variant? or datum-op, idk
     // TODO: handle args to New()
     // TODO: handle prefabs: PathId? PrefabId?
-    AllocDatum(LocalId, PathTypeId),
+    AllocDatum(LocalId, InstanceTypeId),
     DatumLoadVar(LocalId, LocalId, StringId), // local1 = local2.var
     DatumStoreVar(LocalId, StringId, LocalId), // local1.var = local2
     DatumCallProc(LocalId, LocalId, StringId, Vec<LocalId>), // local1 = local2.proc(args)

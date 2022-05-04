@@ -690,9 +690,11 @@ impl<'f, 'ot> BlockBuilder {
                     _ => unimplemented!("new with newty {:?}", newty),
                 };
 
+                let ity = fb.ir.instances.lookup_pty(ty_id).unwrap();
+
                 let ref_local = fb.add_local(self.block.scope, RefType::Exact(ty_id).into());
 
-                self.block.push_op(cfg::Op::AllocDatum(ref_local, ty_id));
+                self.block.push_op(cfg::Op::AllocDatum(ref_local, ity));
 
                 ref_local
             },

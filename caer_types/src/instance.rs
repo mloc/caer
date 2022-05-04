@@ -7,11 +7,18 @@ use crate::type_tree::PathType;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstanceTypes {
     types: IndexVec<InstanceTypeId, InstanceType>,
+    canonical_ity: IndexVec<PathTypeId, InstanceTypeId>,
 }
 
 impl InstanceTypes {
-    pub fn new(types: IndexVec<InstanceTypeId, InstanceType>) -> Self {
-        Self { types }
+    pub fn new(
+        types: IndexVec<InstanceTypeId, InstanceType>,
+        canonical_ity: IndexVec<PathTypeId, InstanceTypeId>,
+    ) -> Self {
+        Self {
+            types,
+            canonical_ity,
+        }
     }
 
     // The return type here is.. not great, but it's an interface.
@@ -26,6 +33,10 @@ impl InstanceTypes {
 
     pub fn iter_enumerated(&self) -> impl Iterator<Item = (InstanceTypeId, &InstanceType)> {
         self.types.iter_enumerated()
+    }
+
+    pub fn lookup_pty(&self, pty_id: PathTypeId) -> Option<InstanceTypeId> {
+        self.canonical_ity.get(pty_id).copied()
     }
 }
 

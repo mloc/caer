@@ -924,13 +924,14 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     .build_load(self.ctx);
 
                 // TODO: drop/cloned
+                let datum_ptr = unsafe { ref_ptr.cast_value::<*mut Datum>(self.ctx) };
 
                 let loaded_alloca = BrandedValue::<*mut Val>::build_as_alloca(self.ctx);
                 self.build_call_catching(
                     block,
                     var_get_ptr.val.into_pointer_value(),
                     &[
-                        ref_ptr.val,
+                        datum_ptr.val,
                         self.ctx
                             .llvm_ctx
                             .i64_type()

@@ -370,7 +370,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             let field_tys = vt_entry_ty.get_field_types();
             let entries = match self.env.get_type_spec(instance.id) {
                 Specialization::Datum => {
-                    let var_index_fn = self.make_var_index_func(&ity.pty);
+                    let var_index_fn = self.make_var_index_func(ity);
                     [
                         self.ctx
                             .llvm_ctx
@@ -378,9 +378,9 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
                             .const_int(ity.id.raw() as _, false)
                             .into(),
                         size_val.into(),
-                        self.make_get_var_func(&ity, var_index_fn).into(),
-                        self.make_set_var_func(&ity, var_index_fn).into(),
-                        self.make_proc_lookup_func(&ity).into(),
+                        self.make_get_var_func(ity, var_index_fn).into(),
+                        self.make_set_var_func(ity, var_index_fn).into(),
+                        self.make_proc_lookup_func(ity).into(),
                     ]
                 },
                 Specialization::List => [
@@ -469,7 +469,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         func
     }
 
-    fn make_var_index_func(&mut self, ty: &PathType) -> FunctionValue<'ctx> {
+    fn make_var_index_func(&mut self, ty: &InstanceType) -> FunctionValue<'ctx> {
         let func_ty = self
             .ctx
             .llvm_ctx
@@ -509,7 +509,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 
         let mut cases = Vec::new();
         let mut phi_incoming = Vec::new();
-        for (i, var_name) in ty.vars.iter().enumerate() {
+        for (i, var_name) in ty.pty.vars.iter().enumerate() {
             let case_block = self
                 .ctx
                 .llvm_ctx

@@ -303,17 +303,17 @@ impl<'a, 's> TreeBuilder<'a, 's> {
 struct InstanceBuilder<'a> {
     tree: &'a TypeTree,
     strings: &'a StringTable,
-    populated: IndexVec<PathTypeId, bool>,
+    canonical_ity: IndexVec<PathTypeId, Option<InstanceTypeId>>,
 }
 
 impl<'a> InstanceBuilder<'a> {
     fn new(tree: &'a TypeTree, strings: &'a StringTable) -> Self {
         let mut populated = IndexVec::new();
-        populated.resize(tree.len(), false);
+        populated.resize(tree.len(), None);
         Self {
             tree,
             strings,
-            populated,
+            canonical_ity: populated,
         }
     }
 
@@ -340,17 +340,23 @@ impl<'a> InstanceBuilder<'a> {
         assert_eq!(types.last_idx(), INSTANCE_TYPE_ID_LIST);
 
         for pty in self.tree.iter() {
-            if self.populated[pty.id] {
+            if self.canonical_ity[pty.id].is_some() {
                 continue;
             }
             types.push(self.build_instance(types.next_idx(), pty));
         }
 
-        InstanceTypes::new(types)
+        let canonical_ity = self
+            .canonical_ity
+            .into_iter()
+            .map(|ity| ity.expect("did not generate instance"))
+            .collect();
+
+        InstanceTypes::new(types, canonical_ity)
     }
 
     fn build_instance(&mut self, id: InstanceTypeId, pty: &PathType) -> InstanceType {
-        self.populated[pty.id] = true;
+        self.canonical_ity[pty.id] = Some(id);
         InstanceType {
             id,
             path_type: pty.id,
