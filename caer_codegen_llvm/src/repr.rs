@@ -1,3 +1,4 @@
+use std::any::TypeId;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -56,12 +57,12 @@ impl<'ctx> ReprManager<'ctx> {
 
     pub fn get_all_funcs<T: PinionModule>(
         &mut self, ctx: &'ctx inkwell::context::Context,
-    ) -> Vec<(T::Funcs, (Func, FunctionType<'ctx>))> {
+    ) -> Vec<(TypeId, (Func, FunctionType<'ctx>), T::Funcs)> {
         T::get_funcs(&mut self.layout_ctx)
             .into_iter()
-            .map(|(id, layout)| {
+            .map(|(id, typeid, layout)| {
                 let func = self.build_func(&layout, ctx);
-                (id, (layout, func))
+                (typeid, (layout, func), id)
             })
             .collect()
     }

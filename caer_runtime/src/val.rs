@@ -23,32 +23,35 @@ pub enum Val {
 }
 
 #[pinion_export]
-pub fn rt_val_binary_op(rt: &mut Runtime, op: op::BinaryOp, lhs: &Val, rhs: &Val, out: &mut Val) {
+pub unsafe fn rt_val_binary_op(
+    rt: *mut Runtime, op: op::BinaryOp, lhs: *const Val, rhs: *const Val, out: *mut Val,
+) {
     match op {
         op::BinaryOp::Eq | op::BinaryOp::Ne | op::BinaryOp::Equiv | op::BinaryOp::NotEquiv => {
-            *out = Val::handle_equality(rt, op, lhs, rhs);
+            *out = Val::handle_equality(&mut *rt, op, &*lhs, &*rhs);
         },
         _ => {},
     }
 
     let mut lhs = *lhs;
     if let Val::Null = lhs {
-        lhs = rhs.zero_value();
+        lhs = (*rhs).zero_value();
     }
 
     *out = match lhs {
         Val::Null => Val::Null,
         Val::Float(lval) => {
-            Val::Float(Val::binary_arithm(op, lval.into(), rhs.cast_float().into()).into())
+            Val::Float(Val::binary_arithm(op, lval.into(), (*rhs).cast_float().into()).into())
         },
         Val::String(lval) => {
             if op != op::BinaryOp::Add {
                 unimplemented!("RTE badop")
             }
             // TODO reconsider this, DM doesn't allow "e" + 2
-            let rval = rhs.cast_string(rt);
+            let rval = (*rhs).cast_string(&mut *rt);
             Val::String(Some(
-                RtString::from_str(format!("{}{}", resolve_string(lval), rval)).heapify(&rt.alloc),
+                RtString::from_str(format!("{}{}", resolve_string(lval), rval))
+                    .heapify(&(*rt).alloc),
             ))
         },
         Val::Ref(_) => unimplemented!("overloads"),
@@ -57,13 +60,13 @@ pub fn rt_val_binary_op(rt: &mut Runtime, op: op::BinaryOp, lhs: &Val, rhs: &Val
 
 // bad, needed for now
 #[pinion_export]
-pub fn rt_val_cast_string_val(val: &Val, rt: &mut Runtime) -> NonNull<RtString> {
-    RtString::from_str(val.cast_string(rt)).heapify(&rt.alloc)
+pub unsafe fn rt_val_cast_string_val(val: *const Val, rt: *mut Runtime) -> NonNull<RtString> {
+    RtString::from_str((*val).cast_string(&mut *rt)).heapify(&(*rt).alloc)
 }
 
 #[pinion_export]
-pub fn rt_val_to_switch_disc(val: &Val) -> u32 {
-    match val {
+pub unsafe fn rt_val_to_switch_disc(val: *const Val) -> u32 {
+    match *val {
         Val::Float(val) => (val.into_inner() != 0.0) as u32,
         Val::Null => 0,
         Val::String(None) => 0,
@@ -73,23 +76,24 @@ pub fn rt_val_to_switch_disc(val: &Val) -> u32 {
 }
 
 #[pinion_export]
-pub fn rt_val_print(val: &Val, rt: &mut Runtime) {
-    let s = match val {
+pub unsafe fn rt_val_print(val: *const Val, rt: *mut Runtime) {
+    let s = match *val {
         Val::Null => "null".into(),
         Val::Float(n) => format!("{}", n),
         Val::String(None) => "".into(),
         Val::String(Some(s)) => unsafe { s.as_ref() }.as_str().into(),
-        _ => val.cast_string(rt),
+        _ => (*val).cast_string(&mut *rt),
     };
     println!("{}", s);
-    rt.send_message(&messages::Server::Message(s));
+    (*rt).send_message(&messages::Server::Message(s));
 }
 
 #[pinion_export]
-pub fn rt_val_call_proc(
-    val: &Val, proc_name: &RtString, args: &ProcPack, rt: &mut Runtime, out: &mut Val,
+pub unsafe fn rt_val_call_proc(
+    val: *const Val, proc_name: *const RtString, args: *const ProcPack, rt: *mut Runtime,
+    out: *mut Val,
 ) {
-    val.call_proc(proc_name, args, rt, out)
+    (*val).call_proc(&*proc_name, &*args, &mut *rt, &mut *out)
 }
 
 //this whole block is an awful mess, TODO: fix at some point

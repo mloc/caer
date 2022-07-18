@@ -27,9 +27,9 @@ impl<'rt> Sweep<'rt> {
             let object_ref: &mut HeapHeader = unsafe { object_ptr.as_mut() };
             println!("marker is {:?}", object_ref.gc_marker);
             match object_ref.gc_marker {
-                GcMarker::Black => object_ref.gc_marker = GcMarker::White,
                 GcMarker::Grey => panic!("should have no grey left during sweep?"),
                 GcMarker::White => to_free.push((object_ptr, ty_id)),
+                GcMarker::Black => object_ref.gc_marker = GcMarker::White,
             }
         });
 

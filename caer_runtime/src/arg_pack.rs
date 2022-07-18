@@ -43,13 +43,11 @@ impl ProcArgs {}
 
 #[repr(C)]
 #[derive(Debug, PinionData)]
-pub struct ProcPack<'a> {
+pub struct ProcPack {
     pub unnamed: FfiArray<Val>,
     pub named: FfiArray<(StringId, Val)>,
 
     pub src: Val,
-
-    phantom: PhantomData<&'a ()>,
 }
 
 impl ProcArgs {
@@ -61,19 +59,18 @@ impl ProcArgs {
         }
     }
 
-    pub fn as_pack(&self) -> ProcPack<'_> {
+    pub fn as_pack(&self) -> ProcPack {
         unsafe {
             ProcPack {
                 unnamed: FfiArray::from_vec(&self.unnamed),
                 named: FfiArray::from_vec(&self.named),
                 src: self.src,
-                phantom: PhantomData,
             }
         }
     }
 }
 
-impl ProcPack<'_> {
+impl ProcPack {
     // this is p. inefficient.
     // unpacking probably shouldn't be done in libcode, probably shouldn't be copying vals
     // TODO: rework unpacking
@@ -121,10 +118,10 @@ impl ProcPack<'_> {
 }
 
 #[pinion_export]
-pub fn rt_arg_pack_unpack_into(
-    argpack: &ProcPack, target_ptrs: NonNull<*mut Val>, proc_id: FuncId, rt: &mut Runtime,
+pub unsafe fn rt_arg_pack_unpack_into(
+    argpack: *const ProcPack, target_ptrs: NonNull<*mut Val>, proc_id: FuncId, rt: *mut Runtime,
 ) {
-    argpack.unpack_into(target_ptrs, proc_id, rt)
+    (&*argpack).unpack_into(target_ptrs, proc_id, &mut *rt)
 }
 
 #[repr(C)]

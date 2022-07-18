@@ -120,6 +120,10 @@ impl Executor {
 
         ended
     }
+
+    pub fn queue_len(&self) -> usize {
+        self.run_queue.len()
+    }
 }
 
 #[derive(Debug)]
@@ -253,5 +257,9 @@ impl Queue {
 
     pub fn is_empty(&self) -> bool {
         self.queue.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.queue.len()
     }
 }

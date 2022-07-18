@@ -32,6 +32,7 @@ pub struct ProgEmit<'a, 'ctx> {
     pub env: &'a Module,
     pub funcs: Vec<(&'a Function, FunctionValue<'ctx>)>,
     pub rt_global: inkwell::values::GlobalValue<'ctx>,
+    pub rt_global_val: BrandedValue<'ctx, *mut Runtime>,
     // vtable global
     pub vt_global: inkwell::values::GlobalValue<'ctx>,
     // Func table global
@@ -82,6 +83,9 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             env,
             funcs: Vec::new(),
             rt_global,
+            rt_global_val: unsafe {
+                BrandedValue::<*mut Runtime>::materialize(ctx, rt_global.as_pointer_value().into())
+            },
             vt_global,
             ft_global,
             //vt_lookup: ctx.make_vtable_lookup(vt_global),
@@ -262,8 +266,11 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     fn populate_datum_types(&mut self) {
-        for ty in self.env.type_tree.iter() {
-            let vars_field_ty = self.ctx.get_type::<Val>().array_type(ty.vars.len() as u32);
+        for ty in self.env.instances.iter() {
+            let vars_field_ty = self
+                .ctx
+                .get_type::<Val>()
+                .array_type(ty.pty.vars.len() as u32);
             let datum_ty = self.ctx.llvm_ctx.named_struct_type(
                 &[self.ctx.get_type::<Datum>(), vars_field_ty.into()],
                 false,

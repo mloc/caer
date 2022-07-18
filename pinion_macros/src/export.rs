@@ -1,4 +1,6 @@
-use proc_macro2::TokenStream as TokenStream2;
+use std::borrow::Cow;
+
+use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;
 use syn::parse_quote;
 
@@ -18,6 +20,22 @@ pub fn build_export_func(mut fn_item: syn::ItemFn) -> TokenStream2 {
     let vis = &fn_item.vis;
     let ident_str = fn_item.sig.ident.to_string();
 
+    let param_bind_idents: Vec<_> = (0..fn_item.sig.inputs.len())
+        .map(|i| syn::Ident::new(&format!("a{}", i), Span::call_site()))
+        .collect();
+    let param_bind_params = fn_item.sig.inputs.iter().enumerate().map(|(i, arg)| {
+        let pat_ty = if let syn::FnArg::Typed(pat_ty) = arg {
+            pat_ty
+        } else {
+            panic!("no self");
+        };
+
+        let ty = &pat_ty.ty;
+        let ident = &param_bind_idents[i];
+        quote! {
+            #ident: impl pinion::PinionValueHolder<#ty, Reified = V>
+        }
+    });
     let param_lids = fn_item.sig.inputs.iter().map(|arg| {
         let param_ty = match arg {
             syn::FnArg::Receiver(_) => panic!("no self in export"),
@@ -28,7 +46,12 @@ pub fn build_export_func(mut fn_item: syn::ItemFn) -> TokenStream2 {
             lctx.populate::<#param_ty>()
         }
     });
+    let params_n = fn_item.sig.inputs.len();
 
+    let return_ty = match fn_item.sig.output {
+        syn::ReturnType::Default => parse_quote! {()},
+        syn::ReturnType::Type(_, ref ty) => ty.clone(),
+    };
     let return_lid = match fn_item.sig.output {
         syn::ReturnType::Default => quote! {None},
         syn::ReturnType::Type(_, ref ty) => {
@@ -43,6 +66,17 @@ pub fn build_export_func(mut fn_item: syn::ItemFn) -> TokenStream2 {
         #[doc(hidden)]
         #[allow(non_camel_case_types)]
         #vis struct #fnmeta_ident;
+
+        impl pinion::PinionFuncInstance for #fnmeta_ident {
+        }
+
+        impl #fnmeta_ident {
+            pub fn bind<V>(self, #(#param_bind_params),*) -> pinion::PinionCallBundle<#params_n, #fnmeta_ident, #return_ty, V> {
+                pinion::PinionCallBundle::new([
+                    #(#param_bind_idents.reify(),)*
+                ])
+            }
+        }
 
         impl pinion::PinionFunc for #fnmeta_ident {
             fn get_func_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Func {
@@ -140,17 +174,30 @@ fn get_last_id(path: &syn::Path) -> &syn::Ident {
 pub fn build_module_export(def: ModuleDef) -> TokenStream2 {
     //panic!("{:#?}", def);
     let mod_id = &def.ident;
-    let funcs = def.func_idents.iter().map(|path| {
+    let efuncs = def.func_idents.iter().map(|path| {
         let func_id = get_last_id(path);
         let fnmeta_ident = make_fnmeta_ident(func_id);
         let mut fnmeta_path = path.clone();
         fnmeta_path.segments.last_mut().unwrap().ident = fnmeta_ident;
         quote! {
-            (Self::Funcs::#func_id, <#fnmeta_path as pinion::PinionFunc>::get_func_layout(lctx))
+            (Self::Funcs::#func_id, std::any::TypeId::of::<#fnmeta_path>(), <#fnmeta_path as pinion::PinionFunc>::get_func_layout(lctx))
         }
     });
-    let mod_funcs_enum =
-        syn::Ident::new(&format!("__PINION_EXPORT_FUNCS__{}", mod_id), mod_id.span());
+    let func_methods = def.func_idents.iter().map(|path| {
+        let func_id = get_last_id(path);
+        let fnmeta_ident = make_fnmeta_ident(func_id);
+        let mut fnmeta_path = path.clone();
+        fnmeta_path.segments.last_mut().unwrap().ident = fnmeta_ident;
+        quote! {
+            pub fn #func_id() -> #fnmeta_path {
+                #fnmeta_path
+            }
+        }
+    });
+    let mod_funcs_enum = syn::Ident::new(
+        &format!("__PINION_EXPORT_FUNCS_ENUM__{}", mod_id),
+        mod_id.span(),
+    );
     let variants = def.func_idents.iter().map(get_last_id);
     let variants_names = def.func_idents.iter().map(|path| {
         let id = get_last_id(path);
@@ -160,21 +207,34 @@ pub fn build_module_export(def: ModuleDef) -> TokenStream2 {
         }
     });
 
+    let mod_tfuncs = syn::Ident::new(&format!("__PINION_EXPORT_FUNCS__{}", mod_id), mod_id.span());
+
     quote! {
         pub struct #mod_id;
 
         impl pinion::PinionModule for #mod_id {
             type Funcs = #mod_funcs_enum;
-            fn get_funcs(lctx: &mut pinion::layout_ctx::LayoutCtx) -> Vec<(Self::Funcs, pinion::layout::Func)> {
-                vec![ #(#funcs,)* ]
+            type TFuncs = #mod_tfuncs;
+            fn get_funcs(lctx: &mut pinion::layout_ctx::LayoutCtx) -> Vec<(Self::Funcs, std::any::TypeId, pinion::layout::Func)> {
+                vec![ #(#efuncs,)* ]
             }
+        }
+
+        #[doc(hidden)]
+        #[derive(Clone, Copy)]
+        pub struct #mod_tfuncs;
+
+        impl pinion::PinionModuleFuncs for #mod_tfuncs {}
+
+        impl #mod_tfuncs {
+            #(#func_methods)*
         }
 
         #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
         #[doc(hidden)]
         #[allow(non_camel_case_types)]
         pub enum #mod_funcs_enum {
-            #(#[allow(non_camel_case_types)] #variants,)*
+            #(#variants,)*
         }
 
         impl pinion::PinionModuleFuncsEnum for #mod_funcs_enum {

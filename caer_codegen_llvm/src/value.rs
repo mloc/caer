@@ -11,7 +11,10 @@ use inkwell::types::{AnyTypeEnum, BasicTypeEnum, FunctionType};
 use inkwell::values::{
     BasicValue, BasicValueEnum, GlobalValue, InstructionOpcode, IntValue, PointerValue,
 };
-use pinion::{PinionData, PinionEnum, PinionField, PinionPointerType, PinionPrim, PinionStruct};
+use pinion::{
+    PinionData, PinionEnum, PinionField, PinionPointerType, PinionPrim, PinionStruct,
+    PinionValueHolder,
+};
 
 use crate::context::Context;
 
@@ -102,6 +105,14 @@ pub struct BrandedValue<'ctx, T> {
     phantom: PhantomData<T>,
 }
 
+impl<'ctx, T: PinionData> PinionValueHolder<T> for BrandedValue<'ctx, T> {
+    type Reified = BasicValueEnum<'ctx>;
+
+    fn reify(&self) -> Self::Reified {
+        self.val
+    }
+}
+
 // We manually impl Clone and Copy because we don't want to require T:Clone+Copy
 impl<'ctx, T> Clone for BrandedValue<'ctx, T> {
     fn clone(&self) -> Self {
@@ -141,6 +152,14 @@ impl<'ctx, T: PrimLiteral> BrandedValue<'ctx, T> {
     pub fn literal(lit: T, ctx: &Context<'_, 'ctx>) -> BrandedValue<'ctx, T> {
         let val = lit.make_llval(ctx);
         BrandedValue::new(val)
+    }
+
+    // very nasty
+    pub unsafe fn bitcast_self<O: PinionData>(
+        self, ctx: &Context<'_, 'ctx>,
+    ) -> BrandedValue<'ctx, O> {
+        let cast = ctx.builder.build_bitcast(self.val, ctx.get_type::<O>(), "");
+        BrandedValue::new(cast)
     }
 }
 
@@ -432,4 +451,24 @@ primlit_ints! {
 primlit_floats! {
     f32 => f32_type,
     f64 => f64_type,
+}
+
+pub struct MaybeRet<'ctx, V> {
+    maybe_val: Option<BasicValueEnum<'ctx>>,
+    phantom: PhantomData<V>,
+}
+
+impl<'ctx, V> MaybeRet<'ctx, V> {
+    pub fn create(maybe_val: Option<BasicValueEnum<'ctx>>) -> Self {
+        Self {
+            maybe_val,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<'ctx, V: PinionData> MaybeRet<'ctx, V> {
+    pub fn result(self) -> BrandedValue<'ctx, V> {
+        BrandedValue::new(self.maybe_val.unwrap())
+    }
 }

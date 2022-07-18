@@ -1,3 +1,4 @@
+use std::any::TypeId;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::c_void;
@@ -8,13 +9,17 @@ use caer_runtime::runtime::Runtime;
 use caer_runtime::val::Val;
 use inkwell::targets::TargetData;
 use inkwell::types::{BasicType, BasicTypeEnum, PointerType};
-use inkwell::values::{FunctionValue, PointerValue};
+use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
 use pinion::layout::Func;
-use pinion::{PinionData, PinionEnum, PinionModule, PinionStruct};
+use pinion::{
+    PinionCallBundle, PinionData, PinionEnum, PinionFuncInstance, PinionModule, PinionStruct,
+};
 
 use crate::repr::{EnumRepr, ReprManager, StructRepr};
+use crate::value::MaybeRet;
 
 pub type ExFunc = <caer_runtime::export::Runtime as PinionModule>::Funcs;
+pub type ExMod = <caer_runtime::export::Runtime as PinionModule>::TFuncs;
 
 /// Not really needed currently while using explicit forms- set to same as normal
 pub const GC_ADDRESS_SPACE: inkwell::AddressSpace = inkwell::AddressSpace::Generic;
@@ -30,6 +35,7 @@ pub struct Context<'a, 'ctx> {
 
     repr_manager: RefCell<ReprManager<'ctx>>,
     funcs: HashMap<ExFunc, (Func, FunctionValue<'ctx>)>,
+    newfuncs: HashMap<TypeId, (Func, FunctionValue<'ctx>)>,
 }
 
 impl<'a, 'ctx> Context<'a, 'ctx> {
@@ -39,19 +45,30 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
     ) -> Self {
         let mut repr_manager = ReprManager::new();
         let funcs_vec = repr_manager.get_all_funcs::<caer_runtime::export::Runtime>(llctx);
-        let funcs = funcs_vec
+        let inter_funcs: Vec<_> = funcs_vec
             .into_iter()
-            .map(|(id, (layout, ty))| {
+            .map(|(typeid, (layout, ty), id)| {
                 let val = llmod.add_function(layout.name, ty, None);
-                (id, (layout, val))
+                (typeid, (layout, val), id)
             })
+            .collect();
+
+        let funcs = inter_funcs
+            .iter()
+            .cloned()
+            .map(|(_, v, k)| (k, v))
+            .collect();
+        let newfuncs = inter_funcs
+            .iter()
+            .cloned()
+            .map(|(k, v, _)| (k, v))
             .collect();
 
         let rt = RtFuncs::new(llctx, llmod, &mut repr_manager);
 
         // is this.. OK?
         let data_layout = llmod.get_data_layout();
-        let target_data = TargetData::create(&data_layout.as_str().to_str().unwrap());
+        let target_data = TargetData::create(data_layout.as_str().to_str().unwrap());
 
         Self {
             builder: llbuild,
@@ -61,6 +78,7 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
             target_data,
             repr_manager: RefCell::new(repr_manager),
             funcs,
+            newfuncs,
         }
     }
 
@@ -103,6 +121,20 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
             .collect();
         self.builder
             .build_in_bounds_gep(ptr, &gep_indexes, "gepiv_ptr")
+    }
+
+    // TODO: most callers of this should be using catch machinery
+    pub fn build_call<const N: usize, F: PinionFuncInstance, R>(
+        &self, cb: PinionCallBundle<N, F, R, BasicValueEnum<'ctx>>,
+    ) -> MaybeRet<'ctx, R> {
+        let func_typeid = TypeId::of::<F>();
+        let func_val = self.newfuncs[&func_typeid].1;
+        let ret = self
+            .builder
+            .build_call(func_val, &cb.args, "")
+            .try_as_basic_value()
+            .left();
+        MaybeRet::create(ret)
     }
 
     // wrong spot for this

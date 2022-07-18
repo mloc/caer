@@ -66,7 +66,7 @@ impl PinionData for Runtime {
 /// memory.
 #[pinion_export]
 pub unsafe fn rt_runtime_init(
-    global_rt: &'static mut Runtime, stackmap_start: *const u8, stackmap_end: *const u8,
+    global_rt: *mut Runtime, stackmap_start: *const u8, stackmap_end: *const u8,
     vtable_ptr: *const vtable::Entry, funcs_ptr: *const vtable::FuncPtr, entry_proc: FuncId,
 ) {
     // TODO: improve. Can be removed if we use rust-init
@@ -107,10 +107,12 @@ pub unsafe fn rt_runtime_init(
     };
 
     // update the global runtime seen by user code
-    mem::forget(mem::replace(global_rt, new));
+    mem::forget(mem::replace(&mut *global_rt, new));
 
-    let mut meta = MetaRuntime::new(global_rt, sync_server);
+    let mut meta = MetaRuntime::new(&mut *global_rt, sync_server);
     meta.start(entry_proc);
+
+    std::ptr::drop_in_place(global_rt)
 }
 
 impl Runtime {
@@ -151,45 +153,47 @@ impl Runtime {
 }
 
 #[pinion_export]
-pub fn rt_runtime_concat_strings(
-    rt: &mut Runtime, lhs: Option<NonNull<RtString>>, rhs: Option<NonNull<RtString>>,
+pub unsafe fn rt_runtime_concat_strings(
+    rt: *mut Runtime, lhs: Option<NonNull<RtString>>, rhs: Option<NonNull<RtString>>,
 ) -> NonNull<RtString> {
-    RtString::from_str(format!("{}{}", resolve_string(lhs), resolve_string(rhs))).heapify(&rt.alloc)
+    RtString::from_str(format!("{}{}", resolve_string(lhs), resolve_string(rhs)))
+        .heapify(&(*rt).alloc)
 }
 
 #[pinion_export]
-pub fn rt_runtime_string_to_id(rt: &mut Runtime, string: NonNull<RtString>) -> StringId {
-    rt.env
+pub unsafe fn rt_runtime_string_to_id(rt: *mut Runtime, string: NonNull<RtString>) -> StringId {
+    (*rt)
+        .env
         .string_table
         .lookup(resolve_string(Some(string)))
         .unwrap_or_else(|| StringId::from_raw(!0u64))
 }
 
 #[pinion_export]
-pub fn rt_runtime_suspend(rt: &mut Runtime, sleep_duration: &Val) {
+pub unsafe fn rt_runtime_suspend(rt: *mut Runtime, sleep_duration: *const Val) {
     println!("SLEEP({:?})", sleep_duration);
-    rt.sleep_duration = match sleep_duration {
-        Val::Float(f) => *f,
+    (*rt).sleep_duration = match *sleep_duration {
+        Val::Float(f) => f,
         _ => panic!("invalid val for sleep(): {:?}", sleep_duration),
     };
 
-    rt.yield_to_meta();
+    (&mut *rt).yield_to_meta();
 }
 
 #[pinion_export]
-pub fn rt_runtime_alloc_datum(rt: &mut Runtime, ty: u32) -> NonNull<Datum> {
+pub unsafe fn rt_runtime_alloc_datum(rt: *mut Runtime, ty: u32) -> NonNull<Datum> {
     let ty = InstanceTypeId::new(ty as usize);
-    let ventry = &rt.vtable[ty];
+    let ventry = (&*rt).vtable[ty];
     // TODO: put spec in ventry?
-    let ity = rt.env.instances.lookup_instance(ty).unwrap();
+    let ity = (&*rt).env.instances.lookup_instance(ty).unwrap();
 
     match ity.pty.specialization {
         Specialization::Datum => {
             unsafe {
-                let mut ptr: NonNull<Datum> = rt.alloc.alloc(ventry.size as usize, ty).cast();
+                let mut ptr: NonNull<Datum> = (*rt).alloc.alloc(ventry.size as usize, ty).cast();
 
                 // TODO: init vars instead of nulling
-                for val in Datum::get_vars(ptr.as_mut(), ty, rt) {
+                for val in Datum::get_vars(ptr.as_mut(), ty, &mut *rt) {
                     *val = crate::val::Val::Null;
                 }
 
@@ -197,7 +201,7 @@ pub fn rt_runtime_alloc_datum(rt: &mut Runtime, ty: u32) -> NonNull<Datum> {
             }
         },
         Specialization::List => {
-            let mut ptr = rt.alloc_list();
+            let mut ptr = (*rt).alloc_list();
             unsafe {
                 *ptr.as_mut() = List::new();
             }
@@ -208,8 +212,8 @@ pub fn rt_runtime_alloc_datum(rt: &mut Runtime, ty: u32) -> NonNull<Datum> {
 }
 
 #[pinion_export]
-pub fn rt_runtime_spawn_closure(
-    rt: &mut Runtime, closure_func: FuncId, num_args: u64, args: NonNull<Val>,
+pub unsafe fn rt_runtime_spawn_closure(
+    rt: *mut Runtime, closure_func: FuncId, num_args: u64, args: NonNull<Val>,
 ) {
     // TODO: handle delayed spawns
     println!(
@@ -224,10 +228,10 @@ pub fn rt_runtime_spawn_closure(
 
     // DM fibres can't directly interact with the executor, so we queue spawns in the runtime
     // to be picked up at next sleep
-    rt.queued_funcs.push((bundle, 0));
+    (*rt).queued_funcs.push((bundle, 0));
 }
 
 #[pinion_export]
-pub fn rt_runtime_get_time(rt: &mut Runtime) -> u64 {
-    rt.world_time
+pub unsafe fn rt_runtime_get_time(rt: *mut Runtime) -> u64 {
+    (*rt).world_time
 }

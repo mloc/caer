@@ -13,8 +13,10 @@ use caer_runtime::string::RtString;
 use caer_runtime::val::Val;
 use caer_runtime::vtable::Entry;
 use caer_types::id::{FuncId, StringId, TypeId};
+use caer_types::op::BinaryOp;
 use caer_types::ty::{self, Layout, RefType, ScalarLayout};
 use caer_types::{layout, op};
+use either::Either;
 use index_vec::IndexVec;
 use inkwell::basic_block::BasicBlock;
 use inkwell::types::BasicType;
@@ -22,7 +24,7 @@ use inkwell::values::*;
 use pinion::{PinionData, PinionPointerType, PinionStruct};
 use ty::Type;
 
-use crate::context::{Context, ExFunc, GC_ADDRESS_SPACE};
+use crate::context::{Context, ExFunc, ExMod, GC_ADDRESS_SPACE};
 use crate::prog::{Intrinsic, ProgEmit};
 use crate::value::{BrandedStackValue, BrandedValue, BveWrapper, StackValue};
 
@@ -203,6 +205,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             }
 
             let argpack_local = self.ll_func.get_params()[0];
+
             self.build_call(
                 self.ctx.get_func(ExFunc::rt_arg_pack_unpack_into),
                 &[
@@ -469,7 +472,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         &self, func: F, args: &[BasicValueEnum<'ctx>],
     ) -> Option<BasicValueEnum<'ctx>>
     where
-        F: Into<either::Either<FunctionValue<'ctx>, PointerValue<'ctx>>>,
+        F: Into<Either<FunctionValue<'ctx>, PointerValue<'ctx>>>,
     {
         self.ctx
             .builder
@@ -480,11 +483,11 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
 
     fn build_call<F>(&self, func: F, args: &[BasicValueEnum<'ctx>]) -> Option<BasicValueEnum<'ctx>>
     where
-        F: Into<either::Either<FunctionValue<'ctx>, PointerValue<'ctx>>>,
+        F: Into<Either<FunctionValue<'ctx>, PointerValue<'ctx>>>,
     {
         let fptr = match func.into() {
-            either::Either::Left(func_val) => func_val.as_global_value().as_pointer_value(),
-            either::Either::Right(pointer_val) => pointer_val,
+            Either::Left(func_val) => func_val.as_global_value().as_pointer_value(),
+            Either::Right(pointer_val) => pointer_val,
         };
 
         //self.build_call_statepoint(fptr, args)
@@ -623,7 +626,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         &self, block: &Block, func: F, args: &[BasicValueEnum<'ctx>],
     ) -> Option<BasicValueEnum<'ctx>>
     where
-        F: Into<either::Either<FunctionValue<'ctx>, PointerValue<'ctx>>>,
+        F: Into<Either<FunctionValue<'ctx>, PointerValue<'ctx>>>,
     {
         if let Some(pad) = self.ir_func.scopes[block.scope].landingpad {
             let continuation = self.ctx.llvm_ctx.append_basic_block(self.ll_func, "");
@@ -770,30 +773,27 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             Op::Put(id) => {
                 let norm = self.get_local_any_ro(*id);
 
-                self.build_call_catching(
-                    block,
-                    self.ctx.get_func(ExFunc::rt_val_print),
-                    &[norm.val, self.prog_emit.rt_global.as_basic_value_enum()],
-                );
+                let cb = ExMod::rt_val_print().bind(norm.cast_ptr(), self.prog_emit.rt_global_val);
+                self.ctx.build_call(cb);
             },
 
             Op::Binary(id, op, lhs, rhs) => {
+                let op_var: BrandedValue<BinaryOp> = unsafe {
+                    BrandedValue::<u32>::literal(*op as u32, self.ctx).bitcast_self(self.ctx)
+                };
                 let lhs_ref = self.get_local_any_ro(*lhs);
                 let rhs_ref = self.get_local_any_ro(*rhs);
-                let op_var = self.ctx.llvm_ctx.i32_type().const_int(*op as u64, false);
-
                 let res = BrandedValue::<*mut Val>::build_as_alloca(self.ctx);
-                self.build_call_catching(
-                    block,
-                    self.ctx.get_func(ExFunc::rt_val_binary_op),
-                    &[
-                        self.prog_emit.rt_global.as_basic_value_enum(),
-                        op_var.into(),
-                        lhs_ref.val,
-                        rhs_ref.val,
-                        res.val,
-                    ],
+
+                let cb = ExMod::rt_val_binary_op().bind(
+                    self.prog_emit.rt_global_val,
+                    op_var,
+                    lhs_ref.cast_ptr(),
+                    rhs_ref.cast_ptr(),
+                    res,
                 );
+                self.ctx.build_call(cb);
+
                 self.set_local(*id, res.into());
             },
 
@@ -832,22 +832,15 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     unimplemented!("can only cast to string, not {:?}", ty);
                 }
 
-                let src_llval = self.get_local_any_ro(*src);
-                let res_llval = self
-                    .build_call_catching(
-                        block,
-                        self.ctx.get_func(ExFunc::rt_val_cast_string_val),
-                        &[
-                            src_llval.val,
-                            self.prog_emit.rt_global.as_basic_value_enum(),
-                        ],
-                    )
-                    .unwrap();
-                let res = unsafe {
-                    BrandedValue::<Option<NonNull<RtString>>>::materialize(self.ctx, res_llval)
-                }
-                .alloca_emplace(self.ctx);
-                self.set_local(*dst, res.into());
+                let src = self.get_local_any_ro(*src);
+
+                let cb = ExMod::rt_val_cast_string_val()
+                    .bind(src.cast_ptr(), self.prog_emit.rt_global_val);
+                let res: BrandedValue<Option<NonNull<RtString>>> =
+                    self.ctx.build_call(cb).result().cast_ptr();
+
+                let res_alloca = res.alloca_emplace(self.ctx);
+                self.set_local(*dst, res_alloca.into());
             },
 
             Op::AllocDatum(dst, ity_id) => {

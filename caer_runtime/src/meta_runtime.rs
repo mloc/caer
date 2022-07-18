@@ -72,6 +72,10 @@ impl MetaRuntime {
             }
 
             self.dmrt.world_time += 1;
+
+            if self.executor.queue_len() == 0 {
+                break;
+            }
         }
     }
 

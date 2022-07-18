@@ -5,6 +5,7 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::slice;
 
+use caer_types::id::StringId;
 use caer_types::type_tree::Specialization;
 use pinion::pinion_export;
 
@@ -340,25 +341,28 @@ impl Drop for List {
 }
 
 #[pinion_export]
-pub fn rt_list_var_get(list_ptr: NonNull<c_void>, var: &RtString, out: &mut Val) {
-    let list: &mut List = unsafe { list_ptr.cast().as_mut() };
-    *out = list.var_get(var)
+pub unsafe fn rt_list_var_get(list_ptr: NonNull<c_void>, var: StringId, out: *mut Val) {
+    todo!();
+    /*let list: &mut List = list_ptr.cast().as_mut();
+     *out = list.var_get(var)*/
 }
 
 #[pinion_export]
-pub fn rt_list_var_set(list_ptr: NonNull<c_void>, var: &RtString, val: &Val) {
-    let list: &mut List = unsafe { list_ptr.cast().as_mut() };
-    list.var_set(var, *val)
+pub unsafe fn rt_list_var_set(list_ptr: NonNull<c_void>, var: StringId, val: *const Val) {
+    todo!();
+    /*let list: &mut List = list_ptr.cast().as_mut();
+    list.var_set(var, *val)*/
 }
 
 #[pinion_export]
-pub fn rt_list_proc_lookup(proc: &RtString, _rt: &mut Runtime) -> ProcPtr {
-    match proc.as_str() {
+pub unsafe fn rt_list_proc_lookup(proc: StringId, _rt: *mut Runtime) -> ProcPtr {
+    todo!();
+    /*match proc.as_str() {
         "Add" => ProcPtr(List::proc_add),
         "Copy" => ProcPtr(List::proc_copy),
         "Cut" => ProcPtr(List::proc_cut),
         s => panic!("RTE bad proc for list: {:?}", s),
-    }
+    }*/
 }
 
 // TODO: move into val? could be ensure_datum_spec if that opts ok

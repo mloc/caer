@@ -1,3 +1,4 @@
+use std::any::TypeId;
 use std::ffi::c_void;
 use std::fmt::Debug;
 use std::marker::{PhantomData, Sized};
@@ -9,6 +10,8 @@ use crate::interface::Context;
 use crate::layout::{self, Func, Layout, StructLayout};
 use crate::layout_ctx::LayoutCtx;
 use crate::types::Primitive;
+
+// TODO: clean + organize this all up
 
 pub trait PinionData: Sized {
     type Static: 'static;
@@ -25,11 +28,6 @@ pub trait PinionStruct: PinionData {
 }
 
 pub trait PinionStructFields: Sized {}
-
-pub trait PinionStructFieldActor {
-    type Out<T>;
-    fn process<S: PinionStruct, T>(field: S::Fields) -> Self::Out<T>;
-}
 
 pub trait PinionEnum: PinionData {
     type Disc: PinionData;
@@ -51,11 +49,41 @@ pub trait PinionFunc {
 
 pub trait PinionModule {
     type Funcs: PinionModuleFuncsEnum;
-    fn get_funcs(lctx: &mut LayoutCtx) -> Vec<(Self::Funcs, Func)>;
+    type TFuncs: PinionModuleFuncs;
+    fn get_funcs(lctx: &mut LayoutCtx) -> Vec<(Self::Funcs, TypeId, Func)>;
 }
 
 pub trait PinionModuleFuncsEnum: Clone + Copy + Debug {
     fn get_name(self) -> &'static str;
+}
+
+pub trait PinionModuleFuncs {}
+
+// Should always have `bind(arg1, arg2, ...) -> PCB<Self, ret>`
+pub trait PinionFuncInstance: PinionFunc + 'static {}
+
+pub struct PinionCallBundle<const N: usize, F: PinionFuncInstance, R, V> {
+    pub args: [V; N],
+    phantom: PhantomData<(F, R)>,
+}
+
+impl<const N: usize, F: PinionFuncInstance, R, V> PinionCallBundle<N, F, R, V> {
+    pub fn new(args: [V; N]) -> Self {
+        Self {
+            args,
+            phantom: PhantomData,
+        }
+    }
+}
+
+pub trait PinionValueHolder<T: PinionData> {
+    type Reified;
+
+    fn reify(&self) -> Self::Reified;
+}
+
+pub trait PinionContext {
+    type Value<T: PinionData>: PinionValueHolder<T>;
 }
 
 pub trait StaticPinionData: PinionData + 'static {}
@@ -248,6 +276,9 @@ impl<T: PinionPointerType> PinionData for Option<T> {
     fn get_layout(lctx: &mut LayoutCtx) -> Layout {
         T::get_layout(lctx)
     }
+}
+impl<T: PinionPointerType> PinionPointerType for Option<T> {
+    type Element = T::Element;
 }
 
 /*pub struct PinionFuncPtr {
