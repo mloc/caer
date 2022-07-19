@@ -1,4 +1,3 @@
-use std::ffi::c_void;
 use std::ptr::NonNull;
 
 use caer_ir::cfg::*;
@@ -16,7 +15,6 @@ use caer_types::id::{FuncId, StringId, TypeId};
 use caer_types::op::BinaryOp;
 use caer_types::ty::{self, Layout, RefType, ScalarLayout};
 use caer_types::{layout, op};
-use either::Either;
 use index_vec::IndexVec;
 use inkwell::basic_block::BasicBlock;
 use inkwell::types::BasicType;
@@ -26,7 +24,7 @@ use ty::Type;
 
 use crate::context::{Context, ExFunc, ExMod, GC_ADDRESS_SPACE};
 use crate::prog::{Intrinsic, ProgEmit};
-use crate::value::{BrandedStackValue, BrandedValue, BveWrapper, StackValue};
+use crate::value::{BrandedStackValue, BrandedValue};
 
 #[derive(Debug)]
 pub struct FuncEmit<'a, 'p, 'ctx> {
@@ -557,7 +555,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             ]
             .iter(),
         );
-        sp_args.extend(args.into_iter());
+        sp_args.extend(args);
         sp_args.extend(
             [
                 self.ctx.llvm_ctx.i32_type().const_zero().into(), // # transition args
