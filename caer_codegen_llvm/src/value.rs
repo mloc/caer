@@ -92,7 +92,7 @@ fn any_to_basic<'ctx>(any: AnyTypeEnum<'ctx>) -> BasicTypeEnum<'ctx> {
         AnyTypeEnum::PointerType(ty) => ty.into(),
         AnyTypeEnum::StructType(ty) => ty.into(),
         AnyTypeEnum::VectorType(ty) => ty.into(),
-        AnyTypeEnum::VoidType(_) | AnyTypeEnum::TokenType(_) | AnyTypeEnum::FunctionType(_) => {
+        AnyTypeEnum::VoidType(_) | AnyTypeEnum::FunctionType(_) | AnyTypeEnum::TokenType(_) => {
             panic!("{:?} is not basic", any)
         },
     }
@@ -192,23 +192,22 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
         let size = ctx.get_store_size::<T>();
 
         let memcpy_intrinsic = unsafe {
-            ctx.module
-                .get_intrinsic(
-                    "llvm.memcpy",
-                    &[
-                        src.val.get_type(),
-                        dest.val.get_type(),
-                        ctx.llvm_ctx.i64_type().into(),
-                    ],
-                )
-                .unwrap()
+            ctx.get_intrinsic(
+                "llvm.memcpy",
+                &[
+                    src.val.get_type(),
+                    dest.val.get_type(),
+                    ctx.llvm_ctx.i64_type().into(),
+                ],
+            )
+            .unwrap()
         };
 
         ctx.builder.build_call(
             memcpy_intrinsic,
             &[
-                dest.val,
-                src.val,
+                dest.val.into(),
+                src.val.into(),
                 ctx.llvm_ctx.i64_type().const_int(size, false).into(),
                 ctx.llvm_ctx.bool_type().const_zero().into(),
             ],

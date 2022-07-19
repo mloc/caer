@@ -216,7 +216,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                         .i64_type()
                         .const_int(self.ir_func.id.index() as u64, false)
                         .into(),
-                    self.prog_emit.rt_global.as_basic_value_enum(),
+                    self.prog_emit.rt_global.as_basic_value_enum().into(),
                 ],
             );
         }
@@ -469,10 +469,10 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
     }
 
     fn build_call_internal<F>(
-        &self, func: F, args: &[BasicValueEnum<'ctx>],
+        &self, func: F, args: &[BasicMetadataValueEnum<'ctx>],
     ) -> Option<BasicValueEnum<'ctx>>
     where
-        F: Into<Either<FunctionValue<'ctx>, PointerValue<'ctx>>>,
+        F: Into<CallableValue<'ctx>>,
     {
         self.ctx
             .builder
@@ -481,17 +481,19 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             .left()
     }
 
-    fn build_call<F>(&self, func: F, args: &[BasicValueEnum<'ctx>]) -> Option<BasicValueEnum<'ctx>>
+    fn build_call<F>(
+        &self, func: F, args: &[BasicMetadataValueEnum<'ctx>],
+    ) -> Option<BasicValueEnum<'ctx>>
     where
-        F: Into<Either<FunctionValue<'ctx>, PointerValue<'ctx>>>,
+        F: Into<CallableValue<'ctx>>,
     {
-        let fptr = match func.into() {
+        /*let fptr = match func.into() {
             Either::Left(func_val) => func_val.as_global_value().as_pointer_value(),
             Either::Right(pointer_val) => pointer_val,
-        };
+        };*/
 
         //self.build_call_statepoint(fptr, args)
-        self.build_call_internal(fptr, &args)
+        self.build_call_internal(func, &args)
     }
 
     fn build_call_statepoint(
@@ -502,7 +504,6 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
 
         let sp_intrinsic = unsafe {
             self.ctx
-                .module
                 .get_intrinsic("llvm.experimental.gc.statepoint", &[func.get_type().into()])
                 .unwrap()
         };
@@ -583,10 +584,14 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 .unwrap();
             self.ctx.builder.position_at_end(continuation);
         } else {
+            // annoying that we need to go to BMVE here but not for invoke
+            let sp_args_bmve: Vec<BasicMetadataValueEnum> =
+                sp_args.into_iter().map(Into::into).collect();
+
             statepoint_token = self
                 .ctx
                 .builder
-                .build_call(sp_intrinsic, &sp_args, "")
+                .build_call(sp_intrinsic, &sp_args_bmve, "")
                 .try_as_basic_value()
                 .left()
                 .unwrap();
@@ -600,13 +605,12 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         if let Some(return_type) = return_type {
             let result_intrinsic = unsafe {
                 self.ctx
-                    .module
                     .get_intrinsic("llvm.experimental.gc.result", &[return_type])
                     .unwrap()
             };
             self.ctx
                 .builder
-                .build_call(result_intrinsic, &[statepoint_token], "")
+                .build_call(result_intrinsic, &[statepoint_token.into()], "")
                 .try_as_basic_value()
                 .left()
         } else {
@@ -615,7 +619,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
     }
 
     fn build_call_intrinsic(
-        &mut self, intrinsic: Intrinsic, args: &[BasicValueEnum<'ctx>],
+        &mut self, intrinsic: Intrinsic, args: &[BasicMetadataValueEnum<'ctx>],
     ) -> Option<BasicValueEnum<'ctx>> {
         let func = self.prog_emit.get_intrinsic(intrinsic);
         self.build_call_internal(func, args)
@@ -626,7 +630,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         &self, block: &Block, func: F, args: &[BasicValueEnum<'ctx>],
     ) -> Option<BasicValueEnum<'ctx>>
     where
-        F: Into<Either<FunctionValue<'ctx>, PointerValue<'ctx>>>,
+        F: Into<CallableValue<'ctx>>,
     {
         if let Some(pad) = self.ir_func.scopes[block.scope].landingpad {
             let continuation = self.ctx.llvm_ctx.append_basic_block(self.ll_func, "");
@@ -639,7 +643,8 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             self.ctx.builder.position_at_end(continuation);
             res
         } else {
-            self.build_call_internal(func, args)
+            let args_bmve: Vec<_> = args.iter().copied().map(Into::into).collect();
+            self.build_call_internal(func, &args_bmve)
         }
     }
 
@@ -920,9 +925,9 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 let datum_ptr = unsafe { ref_ptr.cast_value::<*mut Datum>(self.ctx) };
 
                 let loaded_alloca = BrandedValue::<*mut Val>::build_as_alloca(self.ctx);
-                self.build_call_catching(
+                self.build_call_catching::<CallableValue>(
                     block,
-                    var_get_ptr.val.into_pointer_value(),
+                    var_get_ptr.val.into_pointer_value().try_into().unwrap(),
                     &[
                         datum_ptr.val,
                         self.ctx
@@ -953,9 +958,10 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 let datum_ptr = unsafe { ref_ptr.cast_value::<*mut Datum>(self.ctx) };
 
                 let src_val = self.get_local_any_ro(*src);
-                self.build_call_catching(
+                // TODO: blech, probably change generics
+                self.build_call_catching::<CallableValue>(
                     block,
-                    var_set_ptr.val.into_pointer_value(),
+                    var_set_ptr.val.into_pointer_value().try_into().unwrap(),
                     &[
                         datum_ptr.val,
                         self.ctx
@@ -1051,17 +1057,19 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                     panic!("CatchException op not at start of block");
                 }
 
-                let landingpad = self
-                    .ctx
-                    .builder
-                    .build_landingpad(self.ctx.rt.ty.landingpad_type, "lp");
-                landingpad.set_cleanup(true);
+                let landingpad = self.ctx.builder.build_landing_pad(
+                    self.ctx.rt.ty.landingpad_type,
+                    self.ctx.rt.dm_eh_personality,
+                    &[],
+                    true,
+                    "lp",
+                );
 
                 if let Some(except_var) = maybe_except_var {
                     let exception_container = self
                         .ctx
                         .builder
-                        .build_extract_value(landingpad.as_basic_value().into_struct_value(), 0, "")
+                        .build_extract_value(landingpad.into_struct_value(), 0, "")
                         .unwrap();
                     assert!(self
                         .get_ty(self.ir_func.vars[*except_var].ty)
@@ -1144,13 +1152,10 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 let local = self.get_local(*delay);
                 println!("{:?}", walker.get_cur_lifetimes());
                 self.build_call(
-                    self.ctx
-                        .get_func(ExFunc::rt_runtime_suspend)
-                        .as_global_value()
-                        .as_pointer_value(),
+                    self.ctx.get_func(ExFunc::rt_runtime_suspend),
                     &[
                         self.prog_emit.rt_global.as_pointer_value().into(),
-                        local.as_val().unwrap().val,
+                        local.as_val().unwrap().val.into(),
                     ],
                 );
             },
@@ -1352,7 +1357,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             },
             op::HardBinary::FloatPow => {
                 let res = self
-                    .build_call_intrinsic(Intrinsic::FPow, &[lhs_bve, rhs_bve])
+                    .build_call_intrinsic(Intrinsic::FPow, &[lhs_bve.into(), rhs_bve.into()])
                     .unwrap();
                 let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
                 alloca.build_store(self.ctx, unsafe {

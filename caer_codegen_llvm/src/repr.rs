@@ -75,6 +75,7 @@ impl<'ctx> ReprManager<'ctx> {
             .param_tys
             .iter()
             .map(|id| self.build_layout(*id, ctx).1.expect("param must be sized"))
+            .map(Into::into)
             .collect();
 
         match func.return_ty {
@@ -181,18 +182,11 @@ impl<'ctx> ReprManager<'ctx> {
             },
             Layout::OpaqueStruct(opaque_layout) => {
                 let name = opaque_layout.name.unwrap_or_default();
+                let ty = ctx.opaque_struct_type(name);
                 if let Some(size) = opaque_layout.size {
-                    Some(
-                        ctx.named_struct_type(
-                            &[ctx.i8_type().array_type(size).into()],
-                            false,
-                            name,
-                        )
-                        .into(),
-                    )
-                } else {
-                    Some(ctx.opaque_struct_type(name).into())
+                    ty.set_body(&[ctx.i8_type().array_type(size).into()], false);
                 }
+                Some(ty.into())
             },
             Layout::Unsized => None,
         }

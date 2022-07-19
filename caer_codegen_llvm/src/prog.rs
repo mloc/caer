@@ -54,9 +54,14 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             let argpack_ptr_type = ctx.get_type::<*const ProcPack>();
             let val_ptr_type = ctx.get_type::<*mut Val>();
             let rt_ptr_type = ctx.get_type::<*mut Runtime>();
-            ctx.llvm_ctx
-                .void_type()
-                .fn_type(&[argpack_ptr_type, rt_ptr_type, val_ptr_type], false)
+            ctx.llvm_ctx.void_type().fn_type(
+                &[
+                    argpack_ptr_type.into(),
+                    rt_ptr_type.into(),
+                    val_ptr_type.into(),
+                ],
+                false,
+            )
         };
 
         let rt_global =
@@ -163,7 +168,6 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 
         let memcpy_intrinsic = unsafe {
             self.ctx
-                .module
                 .get_intrinsic(
                     "llvm.memcpy",
                     &[
@@ -271,11 +275,11 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
                 .ctx
                 .get_type::<Val>()
                 .array_type(ty.pty.vars.len() as u32);
-            let datum_ty = self.ctx.llvm_ctx.named_struct_type(
-                &[self.ctx.get_type::<Datum>(), vars_field_ty.into()],
-                false,
-                &format!("datum_{}", ty.id.index()),
-            );
+            let datum_ty = self
+                .ctx
+                .llvm_ctx
+                .opaque_struct_type(&format!("datum_{}", ty.id.index()));
+            datum_ty.set_body(&[self.ctx.get_type::<Datum>(), vars_field_ty.into()], false);
             assert_eq!(ty.id.index(), self.datum_types.len());
             self.datum_types.push(datum_ty);
         }
@@ -807,7 +811,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             //Intrinsic::InvariantStart => ("llvm.invariant.start", vec![]),
         };
 
-        unsafe { self.ctx.module.get_intrinsic(name, &tys).unwrap() }
+        unsafe { self.ctx.get_intrinsic(name, &tys).unwrap() }
     }
 }
 

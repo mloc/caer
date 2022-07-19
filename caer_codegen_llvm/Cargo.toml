@@ -2,7 +2,7 @@
 name = "caer_codegen_llvm"
 version = "0.1.0"
 authors = ["Colm Ó hIcí <git@ohici.ie>"]
-edition = "2018"
+edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
@@ -15,7 +15,4 @@ either = "1.6.0"
 index_vec = { version = "0.1.2", features = ["serde"] }
 pinion = { path = "../pinion" }
 serde_json = "1.0.57"
-
-[dependencies.inkwell]
-git = "https://github.com/mloc/inkwell"
-branch = "exceptions"
+inkwell = { git = "https://github.com/mloc/inkwell", branch = "caer", features = ["llvm11-0"] }

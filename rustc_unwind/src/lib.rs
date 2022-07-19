@@ -1,7 +1,4 @@
 #![feature(link_cfg)]
-#![feature(native_link_modifiers)]
-#![feature(native_link_modifiers_bundle)]
-#![feature(static_nobundle)]
 #![feature(c_unwind)]
 #![cfg_attr(not(target_env = "msvc"), feature(libc))]
 

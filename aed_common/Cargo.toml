@@ -2,7 +2,7 @@
 authors = ["Colm Ó hIcí <colmohici@gmail.com>"]
 name = "aed_common"
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 serde = "1.0.37"

@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 use caer_runtime::runtime::Runtime;
 use caer_runtime::val::Val;
+use inkwell::intrinsics::Intrinsic;
 use inkwell::targets::TargetData;
 use inkwell::types::{BasicType, BasicTypeEnum, PointerType};
 use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
@@ -129,12 +130,21 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
     ) -> MaybeRet<'ctx, R> {
         let func_typeid = TypeId::of::<F>();
         let func_val = self.newfuncs[&func_typeid].1;
+        // TODO: use BMVE in call bundles
+        let args_bmve: Vec<_> = cb.args.iter().copied().map(Into::into).collect();
         let ret = self
             .builder
-            .build_call(func_val, &cb.args, "")
+            .build_call(func_val, &args_bmve, "")
             .try_as_basic_value()
             .left();
         MaybeRet::create(ret)
+    }
+
+    pub fn get_intrinsic(
+        &self, name: &str, param_types: &[BasicTypeEnum],
+    ) -> Option<FunctionValue<'ctx>> {
+        let intrinsic = Intrinsic::find(name)?;
+        intrinsic.get_declaration(self.module, param_types)
     }
 
     // wrong spot for this
@@ -227,13 +237,13 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
             false,
         );
 
-        let landingpad_type = ctx.named_struct_type(
+        let landingpad_type = ctx.opaque_struct_type("landingpad");
+        landingpad_type.set_body(
             &[
                 opaque_type.ptr_type(inkwell::AddressSpace::Generic).into(),
                 ctx.i32_type().into(),
             ],
             false,
-            "landingpad",
         );
 
         RtFuncTyBundle {
