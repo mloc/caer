@@ -1,6 +1,0 @@
-var x;
-x = 3 + 7;
-var y;
-y = x + 20;
-x = (y + 1) + y;
-put x;

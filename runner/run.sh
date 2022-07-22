@@ -2,7 +2,7 @@
 
 set -ex
 
-RUST_BACKTRACE=1 cargo run -- $1
+RUST_BACKTRACE=1 cargo run --bin caer_compiler -- $1
 
 llvm-as-11 -o /dev/null out/unopt.ll
 llc-11 -o out/unopt.s out/unopt.bc
