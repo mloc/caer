@@ -20,7 +20,7 @@ pub struct Datum {
 impl Datum {
     pub fn new(_ty: InstanceTypeId) -> Self {
         Self {
-            heap_header: HeapHeader::new(),
+            heap_header: HeapHeader::datum(),
         }
     }
 

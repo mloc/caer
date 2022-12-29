@@ -17,7 +17,7 @@ use crate::string::RtString;
 use crate::val::Val;
 use crate::vtable::{Entry, ProcPtr};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 pub struct List {
     heap_header: HeapHeader,
@@ -70,7 +70,11 @@ impl AssocValue {
 
 impl List {
     pub fn new() -> Self {
-        Default::default()
+        Self {
+            heap_header: HeapHeader::list(),
+            vec: Default::default(),
+            map: Default::default(),
+        }
     }
 
     pub fn on_gc_heap(rt: &mut Runtime, list: List) -> &mut Self {

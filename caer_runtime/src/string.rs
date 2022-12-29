@@ -28,7 +28,7 @@ impl RtString {
         let size = s.len() as u64;
         let ptr = unsafe { NonNull::new_unchecked(Box::into_raw(s)) };
         Self {
-            heap_header: HeapHeader::new(),
+            heap_header: HeapHeader::string(),
             size,
             ptr: ptr.cast(),
         }

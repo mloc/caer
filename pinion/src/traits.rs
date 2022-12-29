@@ -23,6 +23,7 @@ pub trait PinionData: Sized {
 
 pub trait PinionPrim: PinionData + Copy {}
 
+// When derived, has an fn pinion_bind(fields...) -> PSB
 pub trait PinionStruct: PinionData {
     type Fields: PinionStructFields;
 }
@@ -65,6 +66,11 @@ pub trait PinionFuncInstance: PinionFunc + 'static {}
 pub struct PinionCallBundle<const N: usize, F: PinionFuncInstance, R, V> {
     pub args: [V; N],
     phantom: PhantomData<(F, R)>,
+}
+
+pub struct PinionStructBundle<const N: usize, S: PinionStruct, V> {
+    pub fields: [V; N],
+    phantom: PhantomData<S>,
 }
 
 impl<const N: usize, F: PinionFuncInstance, R, V> PinionCallBundle<N, F, R, V> {

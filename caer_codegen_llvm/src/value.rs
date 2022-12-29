@@ -11,6 +11,7 @@ use inkwell::types::{AnyTypeEnum, BasicTypeEnum, FunctionType};
 use inkwell::values::{
     BasicValue, BasicValueEnum, GlobalValue, InstructionOpcode, IntValue, PointerValue,
 };
+use pinion::layout_ctx::LayoutId;
 use pinion::{
     PinionData, PinionEnum, PinionField, PinionPointerType, PinionPrim, PinionStruct,
     PinionValueHolder,
@@ -18,7 +19,7 @@ use pinion::{
 
 use crate::context::Context;
 
-fn any_to_basic<'ctx>(any: AnyTypeEnum<'ctx>) -> BasicTypeEnum<'ctx> {
+fn any_to_basic(any: AnyTypeEnum) -> BasicTypeEnum {
     match any {
         AnyTypeEnum::ArrayType(ty) => ty.into(),
         AnyTypeEnum::FloatType(ty) => ty.into(),
@@ -30,6 +31,12 @@ fn any_to_basic<'ctx>(any: AnyTypeEnum<'ctx>) -> BasicTypeEnum<'ctx> {
             panic!("{:?} is not basic", any)
         },
     }
+}
+
+#[derive(Debug)]
+pub struct ReifiedValue<'ctx> {
+    pub inkwell_value: BasicValueEnum<'ctx>,
+    pub layout_id: LayoutId,
 }
 
 #[derive(Debug)]
