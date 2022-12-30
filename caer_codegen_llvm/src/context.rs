@@ -35,8 +35,8 @@ pub struct Context<'a, 'ctx> {
     target_data: TargetData,
 
     repr_manager: RefCell<ReprManager<'ctx>>,
-    funcs: HashMap<ExFunc, (Func, FunctionValue<'ctx>)>,
-    newfuncs: HashMap<TypeId, (Func, FunctionValue<'ctx>)>,
+    funcs: HashMap<ExFunc, (Func<'ctx>, FunctionValue<'ctx>)>,
+    newfuncs: HashMap<TypeId, (Func<'ctx>, FunctionValue<'ctx>)>,
 }
 
 impl<'a, 'ctx> Context<'a, 'ctx> {

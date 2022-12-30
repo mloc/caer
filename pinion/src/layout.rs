@@ -5,26 +5,26 @@ use crate::layout_ctx::LayoutId;
 use crate::types::Primitive;
 
 #[derive(Debug, Clone)]
-pub enum Layout {
-    Struct(StructLayout),
+pub enum Layout<'ctx> {
+    Struct(StructLayout<'ctx>),
     Primitive(Primitive),
-    Pointer(Pointer),
-    Enum(Enum),
-    FuncPtr(Func),
+    Pointer(Pointer<'ctx>),
+    Enum(Enum<'ctx>),
+    FuncPtr(Func<'ctx>),
     OpaqueStruct(OpaqueLayout),
     Unsized,
 }
 
 #[derive(Debug, Clone)]
-pub struct StructLayout {
+pub struct StructLayout<'ctx> {
     pub name: Option<&'static str>,
-    pub fields: Vec<LayoutId>,
+    pub fields: Vec<LayoutId<'ctx>>,
     // hashmap here is not the best! but it's fiiiine. it's all compile-time
     pub name_lookup: HashMap<&'static str, usize>,
 }
 
-impl StructLayout {
-    pub fn new(name: Option<&'static str>, fields: &[(&'static str, LayoutId)]) -> Self {
+impl<'ctx> StructLayout<'ctx> {
+    pub fn new(name: Option<&'static str>, fields: &[(&'static str, LayoutId<'ctx>)]) -> Self {
         Self {
             name,
             fields: fields.iter().map(|(_, ty)| *ty).collect(),
@@ -36,7 +36,7 @@ impl StructLayout {
         }
     }
 
-    pub fn lookup_field(&self, field: &'static str) -> Option<(usize, LayoutId)> {
+    pub fn lookup_field(&self, field: &'static str) -> Option<(usize, LayoutId<'ctx>)> {
         self.name_lookup
             .get(field)
             .map(|idx| (*idx, self.fields[*idx]))
@@ -44,23 +44,23 @@ impl StructLayout {
 }
 
 #[derive(Debug, Clone)]
-pub struct Pointer {
-    pub element: LayoutId,
+pub struct Pointer<'ctx> {
+    pub element: LayoutId<'ctx>,
     pub gc: bool,
 }
 
-impl Pointer {
-    pub fn new(element: LayoutId, gc: bool) -> Self {
+impl<'ctx> Pointer<'ctx> {
+    pub fn new(element: LayoutId<'ctx>, gc: bool) -> Self {
         Self { element, gc }
     }
 
-    pub fn get(&self) -> LayoutId {
+    pub fn get(&self) -> LayoutId<'ctx> {
         self.element
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Enum {
+pub struct Enum<'ctx> {
     pub name: Option<&'static str>,
 
     pub size: i32,
@@ -69,7 +69,7 @@ pub struct Enum {
     pub disc_width: i32,
     pub discs: Vec<u64>,
     // Maps disc value to layout. No entry if unit field
-    pub field_layouts: HashMap<u64, LayoutId>,
+    pub field_layouts: HashMap<u64, LayoutId<'ctx>>,
 }
 
 #[derive(Debug, Clone)]
@@ -79,8 +79,8 @@ pub struct OpaqueLayout {
 }
 
 #[derive(Debug, Clone)]
-pub struct Func {
+pub struct Func<'ctx> {
     pub name: &'static str,
-    pub param_tys: Vec<LayoutId>,
-    pub return_ty: Option<LayoutId>,
+    pub param_tys: Vec<LayoutId<'ctx>>,
+    pub return_ty: Option<LayoutId<'ctx>>,
 }

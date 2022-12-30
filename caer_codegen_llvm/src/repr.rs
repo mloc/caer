@@ -11,24 +11,24 @@ use pinion::{PinionData, PinionEnum, PinionModule, PinionStruct};
 
 #[derive(Debug)]
 pub struct StructRepr<'ctx> {
-    pub layout: StructLayout,
+    pub layout: StructLayout<'ctx>,
     pub ty: StructType<'ctx>,
 }
 
 impl<'ctx> StructRepr<'ctx> {
-    pub fn new(layout: StructLayout, ty: StructType<'ctx>) -> Self {
+    pub fn new(layout: StructLayout<'ctx>, ty: StructType<'ctx>) -> Self {
         Self { layout, ty }
     }
 }
 
 #[derive(Debug)]
 pub struct EnumRepr<'ctx> {
-    pub layout: Enum,
+    pub layout: Enum<'ctx>,
     pub ty: StructType<'ctx>,
 }
 
 impl<'ctx> EnumRepr<'ctx> {
-    pub fn new(layout: Enum, ty: StructType<'ctx>) -> Self {
+    pub fn new(layout: Enum<'ctx>, ty: StructType<'ctx>) -> Self {
         Self { layout, ty }
     }
 }
@@ -36,10 +36,10 @@ impl<'ctx> EnumRepr<'ctx> {
 // TODO: reconsider name/loc, rethink structure
 #[derive(Debug, Default)]
 pub struct ReprManager<'ctx> {
-    layout_ctx: LayoutCtx,
-    basic_types: HashMap<LayoutId, Option<BasicTypeEnum<'ctx>>>,
+    layout_ctx: LayoutCtx<'ctx>,
+    basic_types: HashMap<LayoutId<'ctx>, Option<BasicTypeEnum<'ctx>>>,
 
-    structs: HashMap<LayoutId, Rc<StructRepr<'ctx>>>,
+    structs: HashMap<LayoutId<'ctx>, Rc<StructRepr<'ctx>>>,
 }
 
 impl<'ctx> ReprManager<'ctx> {
@@ -57,7 +57,7 @@ impl<'ctx> ReprManager<'ctx> {
 
     pub fn get_all_funcs<T: PinionModule>(
         &mut self, ctx: &'ctx inkwell::context::Context,
-    ) -> Vec<(TypeId, (Func, FunctionType<'ctx>), T::Funcs)> {
+    ) -> Vec<(TypeId, (Func<'ctx>, FunctionType<'ctx>), T::Funcs)> {
         T::get_funcs(&mut self.layout_ctx)
             .into_iter()
             .map(|(id, typeid, layout)| {
@@ -68,9 +68,9 @@ impl<'ctx> ReprManager<'ctx> {
     }
 
     fn build_func(
-        &mut self, func: &Func, ctx: &'ctx inkwell::context::Context,
+        &mut self, func: &Func<'ctx>, ctx: &'ctx inkwell::context::Context,
     ) -> FunctionType<'ctx> {
-        println!("building func {:#?}", func);
+        println!("building func {func:#?}");
         let params: Vec<_> = func
             .param_tys
             .iter()
@@ -97,7 +97,7 @@ impl<'ctx> ReprManager<'ctx> {
     }
 
     fn get_struct_from_id(
-        &mut self, id: LayoutId, ctx: &'ctx inkwell::context::Context,
+        &mut self, id: LayoutId<'ctx>, ctx: &'ctx inkwell::context::Context,
     ) -> Rc<StructRepr<'ctx>> {
         let (layout, bty) = self.build_layout(id, ctx);
 
@@ -106,7 +106,7 @@ impl<'ctx> ReprManager<'ctx> {
             _ => panic!("id didn't produce a struct layout"),
         };
 
-        Rc::new(StructRepr::new(
+        Rc::new(StructRepr::<'ctx>::new(
             struct_layout,
             bty.unwrap().into_struct_type(),
         ))
@@ -120,7 +120,7 @@ impl<'ctx> ReprManager<'ctx> {
     }
 
     fn get_enum_from_id(
-        &mut self, id: LayoutId, ctx: &'ctx inkwell::context::Context,
+        &mut self, id: LayoutId<'ctx>, ctx: &'ctx inkwell::context::Context,
     ) -> Rc<EnumRepr<'ctx>> {
         let (layout, bty) = self.build_layout(id, ctx);
 
@@ -133,8 +133,8 @@ impl<'ctx> ReprManager<'ctx> {
     }
 
     fn build_layout(
-        &mut self, id: LayoutId, ctx: &'ctx inkwell::context::Context,
-    ) -> (Rc<Layout>, Option<BasicTypeEnum<'ctx>>) {
+        &mut self, id: LayoutId<'ctx>, ctx: &'ctx inkwell::context::Context,
+    ) -> (Rc<Layout<'ctx>>, Option<BasicTypeEnum<'ctx>>) {
         let layout = self.layout_ctx.get(id).unwrap();
         if let Some(bty) = self.basic_types.get(&id) {
             (layout, *bty)
@@ -149,7 +149,7 @@ impl<'ctx> ReprManager<'ctx> {
     }
 
     fn build_bty_stage1(
-        &mut self, layout: &Layout, ctx: &'ctx inkwell::context::Context,
+        &mut self, layout: &Layout<'ctx>, ctx: &'ctx inkwell::context::Context,
     ) -> Option<BasicTypeEnum<'ctx>> {
         match layout {
             Layout::Struct(sl) => Some(ctx.opaque_struct_type(sl.name.unwrap_or_default()).into()),
@@ -193,7 +193,7 @@ impl<'ctx> ReprManager<'ctx> {
     }
 
     fn build_bty_stage2(
-        &mut self, layout: &Layout, to_fill: BasicTypeEnum<'ctx>,
+        &mut self, layout: &Layout<'ctx>, to_fill: BasicTypeEnum<'ctx>,
         ctx: &'ctx inkwell::context::Context,
     ) {
         match layout {
@@ -212,7 +212,7 @@ impl<'ctx> ReprManager<'ctx> {
     }
 
     fn build_struct(
-        &mut self, layout: &StructLayout, to_fill: StructType<'ctx>,
+        &mut self, layout: &StructLayout<'ctx>, to_fill: StructType<'ctx>,
         ctx: &'ctx inkwell::context::Context,
     ) {
         let fields: Vec<_> = layout
@@ -236,7 +236,7 @@ impl<'ctx> ReprManager<'ctx> {
             2 => ctx.i16_type().into(),
             4 => ctx.i32_type().into(),
             8 => ctx.i64_type().into(),
-            w => panic!("impossible disc_width: {}", w),
+            w => panic!("impossible disc_width: {w}"),
         };
 
         if layout.field_layouts.is_empty() {
@@ -254,7 +254,7 @@ impl<'ctx> ReprManager<'ctx> {
                 2 => ctx.i16_type(),
                 4 => ctx.i32_type(),
                 8 => ctx.i64_type(),
-                w => panic!("unsupported alignment: {}", w),
+                w => panic!("unsupported alignment: {w}"),
             };
             let val_part = align_part
                 .array_type((val_length / layout.alignment) as _)

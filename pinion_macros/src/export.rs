@@ -79,7 +79,7 @@ pub fn build_export_func(mut fn_item: syn::ItemFn) -> TokenStream2 {
         }
 
         impl pinion::PinionFunc for #fnmeta_ident {
-            fn get_func_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Func {
+            fn get_func_layout<'ctx>(lctx: &mut pinion::layout_ctx::LayoutCtx<'ctx>) -> pinion::layout::Func<'ctx> {
                 pinion::layout::Func {
                     name: #ident_str,
                     param_tys: vec![#(#param_lids,)*],
@@ -215,7 +215,7 @@ pub fn build_module_export(def: ModuleDef) -> TokenStream2 {
         impl pinion::PinionModule for #mod_id {
             type Funcs = #mod_funcs_enum;
             type TFuncs = #mod_tfuncs;
-            fn get_funcs(lctx: &mut pinion::layout_ctx::LayoutCtx) -> Vec<(Self::Funcs, std::any::TypeId, pinion::layout::Func)> {
+            fn get_funcs<'ctx>(lctx: &mut pinion::layout_ctx::LayoutCtx<'ctx>) -> Vec<(Self::Funcs, std::any::TypeId, pinion::layout::Func<'ctx>)> {
                 vec![ #(#efuncs,)* ]
             }
         }

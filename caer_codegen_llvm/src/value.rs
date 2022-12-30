@@ -36,7 +36,7 @@ fn any_to_basic(any: AnyTypeEnum) -> BasicTypeEnum {
 #[derive(Debug)]
 pub struct ReifiedValue<'ctx> {
     pub inkwell_value: BasicValueEnum<'ctx>,
-    pub layout_id: LayoutId,
+    pub layout_id: LayoutId<'ctx>,
 }
 
 #[derive(Debug)]

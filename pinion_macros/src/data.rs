@@ -101,7 +101,7 @@ impl DeriveCtx {
             impl #impl_generics pinion::PinionData for #ident #ty_generics #where_clause {
                 type Static = #ident #static_params;
 
-                fn get_layout(#lctxq: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Layout {
+                fn get_layout<'ctx>(#lctxq: &mut pinion::layout_ctx::LayoutCtx<'ctx>) -> pinion::layout::Layout<'ctx> {
                     let fields = [#((#field_names,#field_layouts),)*];
                     let struct_layout = pinion::layout::StructLayout::new(Some(#ident_str), &fields);
                     pinion::layout::Layout::Struct(struct_layout)
@@ -153,7 +153,7 @@ impl DeriveCtx {
             impl #impl_generics pinion::PinionData for #ident #ty_generics #where_clause {
                 type Static = #ident #static_params;
 
-                fn get_layout(#lctxq: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Layout {
+                fn get_layout<'ctx>(#lctxq: &mut pinion::layout_ctx::LayoutCtx<'ctx>) -> pinion::layout::Layout<'ctx> {
                     let id = #inner_data;
                     (*#lctxq.get(id).unwrap()).clone()
                 }
@@ -246,7 +246,7 @@ impl DeriveCtx {
             impl #impl_generics pinion::PinionData for #ident #ty_generics #where_clause {
                 type Static = #ident #static_params;
 
-                fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Layout {
+                fn get_layout<'ctx>(lctx: &mut pinion::layout_ctx::LayoutCtx<'ctx>) -> pinion::layout::Layout<'ctx> {
                     let enum_layout = pinion::layout::Enum {
                         name: Some(#ident_str),
                         size: std::mem::size_of::<Self>() as _,

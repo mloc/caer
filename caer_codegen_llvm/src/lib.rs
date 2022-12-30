@@ -1,9 +1,3 @@
-// jinxing GAT stabilization
-#![feature(generic_associated_types)]
-
-use caer_runtime::val::Val;
-use inkwell::targets::TargetData;
-
 mod context;
 mod func;
 mod prog;

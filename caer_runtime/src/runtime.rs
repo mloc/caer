@@ -51,7 +51,9 @@ impl PinionData for Runtime {
         // TODO: validate against some rust-side global?
     }
 
-    fn get_layout(_lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Layout {
+    fn get_layout<'ctx>(
+        _lctx: &mut pinion::layout_ctx::LayoutCtx<'ctx>,
+    ) -> pinion::layout::Layout<'ctx> {
         pinion::layout::Layout::OpaqueStruct(pinion::layout::OpaqueLayout {
             name: Some("Runtime"),
             size: Some(size_of::<Runtime>() as _),
