@@ -42,6 +42,7 @@ pub struct ReifiedValue<'ctx> {
 #[derive(Debug)]
 pub struct BrandedValue<'ctx, T> {
     pub val: BasicValueEnum<'ctx>,
+    pub layout_id: LayoutId,
     //ty: TypeId,
     phantom: PhantomData<T>,
 }
@@ -59,6 +60,7 @@ impl<'ctx, T> Clone for BrandedValue<'ctx, T> {
     fn clone(&self) -> Self {
         Self {
             val: self.val,
+            layout_id: self.layout_id,
             phantom: PhantomData,
         }
     }
@@ -67,9 +69,10 @@ impl<'ctx, T> Copy for BrandedValue<'ctx, T> {}
 
 impl<'ctx, T: PinionData> BrandedValue<'ctx, T> {
     // TODO: checks
-    fn new(val: BasicValueEnum<'ctx> /*, ty: TypeId*/) -> Self {
+    unsafe fn new(val: BasicValueEnum<'ctx>, layout_id: LayoutId /*, ty: TypeId*/) -> Self {
         Self {
             val,
+            layout_id,
             //ty,
             phantom: PhantomData,
         }
@@ -77,8 +80,9 @@ impl<'ctx, T: PinionData> BrandedValue<'ctx, T> {
 
     // TODO: checks!!!
     pub unsafe fn materialize(ctx: &Context<'_, 'ctx>, val: BasicValueEnum<'ctx>) -> Self {
-        assert_eq!(val.get_type(), ctx.get_type::<T>());
-        Self::new(val)
+        let ty = ctx.get_type::<T>();
+        assert_eq!(Some(val.get_type()), ty.get_ty());
+        Self::new(val, ty.get_id())
     }
 
     // TODO: copy/prim bound maybe
@@ -92,39 +96,47 @@ impl<'ctx, T: PinionData> BrandedValue<'ctx, T> {
 impl<'ctx, T: PrimLiteral> BrandedValue<'ctx, T> {
     pub fn literal(lit: T, ctx: &Context<'_, 'ctx>) -> BrandedValue<'ctx, T> {
         let val = lit.make_llval(ctx);
-        BrandedValue::new(val)
+        unsafe { Self::materialize(ctx, val) }
     }
 
     // very nasty
     pub unsafe fn bitcast_self<O: PinionData>(
         self, ctx: &Context<'_, 'ctx>,
     ) -> BrandedValue<'ctx, O> {
-        let cast = ctx.builder.build_bitcast(self.val, ctx.get_type::<O>(), "");
-        BrandedValue::new(cast)
+        let cast = ctx
+            .builder
+            .build_bitcast(self.val, ctx.get_llvm_type::<O>(), "");
+        unsafe { BrandedValue::<O>::materialize(ctx, cast) }
     }
 }
 
 impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
     pub fn build_as_alloca(ctx: &Context<'_, 'ctx>) -> Self {
-        let ty = ctx.get_type::<T>().into_pointer_type();
-        Self::new(
-            ctx.builder
-                .build_alloca(any_to_basic(ty.get_element_type()), "")
-                .into(),
-        )
+        let ty = ctx.get_llvm_type::<T>().into_pointer_type();
+        unsafe {
+            Self::materialize(
+                ctx,
+                ctx.builder
+                    .build_alloca(any_to_basic(ty.get_element_type()), "")
+                    .into(),
+            )
+        }
     }
 
     pub fn build_as_alloca_array(ctx: &Context<'_, 'ctx>, n: u64) -> Self {
-        let ty = ctx.get_type::<T>().into_pointer_type();
-        Self::new(
-            ctx.builder
-                .build_array_alloca(
-                    any_to_basic(ty.get_element_type()),
-                    ctx.llvm_ctx.i64_type().const_int(n, false),
-                    "",
-                )
-                .into(),
-        )
+        let ty = ctx.get_llvm_type::<T>().into_pointer_type();
+        unsafe {
+            Self::materialize(
+                ctx,
+                ctx.builder
+                    .build_array_alloca(
+                        any_to_basic(ty.get_element_type()),
+                        ctx.llvm_ctx.i64_type().const_int(n, false),
+                        "",
+                    )
+                    .into(),
+            )
+        }
     }
 
     pub fn copy(ctx: &Context<'_, 'ctx>, src: Self, dest: Self) {
@@ -164,12 +176,12 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
 
     pub unsafe fn array_gep(self, ctx: &Context<'_, 'ctx>, n: u64) -> BrandedValue<'ctx, T> {
         let ptr = unsafe { ctx.const_gep(self.ptr_val(), &[n]) };
-        BrandedValue::new(ptr.into())
+        unsafe { BrandedValue::materialize(ctx, ptr.into()) }
     }
 
     pub fn build_load(self, ctx: &Context<'_, 'ctx>) -> BrandedValue<'ctx, T::Element> {
         let val = ctx.builder.build_load(self.ptr_val(), "");
-        BrandedValue::new(val)
+        unsafe { BrandedValue::materialize(ctx, val) }
     }
 
     pub fn build_store(self, ctx: &Context<'_, 'ctx>, val: BrandedValue<'ctx, T::Element>) {
@@ -184,16 +196,20 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
     // e.g. *mut u8 -> &mut u8
     // TODO: disallow const->mut? idk, mutability is kinda moot anyway
     // TODO: worry about gc-marking
-    pub fn cast_ptr<O: PinionPointerType<Element = T::Element>>(self) -> BrandedValue<'ctx, O> {
-        BrandedValue::new(self.val)
+    pub fn cast_ptr<O: PinionPointerType<Element = T::Element>>(
+        self, ctx: &Context<'_, 'ctx>,
+    ) -> BrandedValue<'ctx, O> {
+        unsafe { BrandedValue::materialize(ctx, self.val) }
     }
 
     // TODO: with opaque pointers, remove ctx
     pub unsafe fn cast_value<O: PinionPointerType>(
         self, ctx: &Context<'_, 'ctx>,
     ) -> BrandedValue<'ctx, O> {
-        let cast = ctx.builder.build_bitcast(self.val, ctx.get_type::<O>(), "");
-        BrandedValue::new(cast)
+        let cast = ctx
+            .builder
+            .build_bitcast(self.val, ctx.get_llvm_type::<O>(), "");
+        BrandedValue::materialize(ctx, cast)
     }
 
     pub unsafe fn cast_void(self, ctx: &Context<'_, 'ctx>) -> BrandedValue<'ctx, *mut c_void> {
@@ -210,15 +226,15 @@ where
         self, ctx: &Context<'_, 'ctx>,
     ) -> BrandedValue<'ctx, *mut <T::Element as PinionEnum>::Disc> {
         let ptr = unsafe { ctx.const_gep(self.ptr_val(), &[0, 0]) };
-        BrandedValue::new(ptr.into())
+        unsafe { BrandedValue::materialize(ctx, ptr.into()) }
     }
 
     pub fn gep_value(self, ctx: &Context<'_, 'ctx>) -> BrandedValue<'ctx, *mut c_void> {
         let aptr = unsafe { ctx.const_gep(self.ptr_val(), &[0, 2]) };
         let optr = ctx
             .builder
-            .build_bitcast(aptr, ctx.get_type_ptr::<c_void>(), "");
-        BrandedValue::new(optr)
+            .build_bitcast(aptr, ctx.get_llvm_type_ptr::<c_void>(), "");
+        unsafe { BrandedValue::materialize(ctx, optr) }
     }
 }
 
@@ -231,7 +247,7 @@ where
         self, ctx: &Context<'_, 'ctx>, field: PinionField<N, S, F>,
     ) -> BrandedValue<'ctx, *mut F> {
         let ptr = unsafe { ctx.const_gep(self.ptr_val(), &[0, N as _]) };
-        BrandedValue::new(ptr.into())
+        unsafe { BrandedValue::materialize(ctx, ptr.into()) }
     }
 }
 
@@ -244,7 +260,7 @@ impl<'ctx> BrandedValue<'ctx, f32> {
             "",
         );
         // TODO: freeze, or handle poison values in some other way
-        BrandedValue::new(cast_maybe)
+        unsafe { BrandedValue::materialize(ctx, cast_maybe) }
     }
 }
 
@@ -408,7 +424,7 @@ impl<'ctx, V> MaybeRet<'ctx, V> {
 }
 
 impl<'ctx, V: PinionData> MaybeRet<'ctx, V> {
-    pub fn result(self) -> BrandedValue<'ctx, V> {
-        BrandedValue::new(self.maybe_val.unwrap())
+    pub fn result(self, ctx: &Context<'_, 'ctx>) -> BrandedValue<'ctx, V> {
+        unsafe { BrandedValue::materialize(ctx, self.maybe_val.unwrap()) }
     }
 }

@@ -1,14 +1,8 @@
-// jinxing GAT stabilization
-#![feature(generic_associated_types)]
-
-use caer_runtime::val::Val;
-use inkwell::targets::TargetData;
-
 mod context;
+mod emit_type;
 mod func;
 mod prog;
 mod repr;
-mod rt_type;
 mod value;
 
 pub fn emit(ir: &caer_ir::module::Module) {

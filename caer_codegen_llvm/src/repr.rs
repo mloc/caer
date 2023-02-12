@@ -9,6 +9,8 @@ use pinion::layout_ctx::{LayoutCtx, LayoutId};
 use pinion::types::Primitive;
 use pinion::{PinionData, PinionEnum, PinionModule, PinionStruct};
 
+use crate::emit_type::EmitType;
+
 #[derive(Debug)]
 pub struct StructRepr<'ctx> {
     pub layout: StructLayout,
@@ -49,10 +51,10 @@ impl<'ctx> ReprManager<'ctx> {
 
     pub fn get_type<T: PinionData>(
         &mut self, ctx: &'ctx inkwell::context::Context,
-    ) -> Option<BasicTypeEnum<'ctx>> {
+    ) -> EmitType<'ctx> {
         let id = self.layout_ctx.populate::<T>();
         let (_, ty) = self.build_layout(id, ctx);
-        ty
+        EmitType::new(id, ty)
     }
 
     pub fn get_all_funcs<T: PinionModule>(

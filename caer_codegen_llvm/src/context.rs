@@ -16,6 +16,7 @@ use pinion::{
     PinionCallBundle, PinionData, PinionEnum, PinionFuncInstance, PinionModule, PinionStruct,
 };
 
+use crate::emit_type::EmitType;
 use crate::repr::{EnumRepr, ReprManager, StructRepr};
 use crate::value::MaybeRet;
 
@@ -98,20 +99,21 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
         self.funcs.get(&func).unwrap().1
     }
 
-    pub fn get_type<T: PinionData>(&self) -> BasicTypeEnum<'ctx> {
-        self.repr_manager
-            .borrow_mut()
-            .get_type::<T>(self.llvm_ctx)
-            .expect("ty must be sized")
+    pub fn get_type<T: PinionData>(&self) -> EmitType<'ctx> {
+        self.repr_manager.borrow_mut().get_type::<T>(self.llvm_ctx)
     }
 
-    pub fn get_type_ptr<T: PinionData>(&self) -> PointerType<'ctx> {
-        self.get_type::<T>()
+    pub fn get_llvm_type<T: PinionData>(&self) -> BasicTypeEnum<'ctx> {
+        self.get_type::<T>().get_ty().unwrap()
+    }
+
+    pub fn get_llvm_type_ptr<T: PinionData>(&self) -> PointerType<'ctx> {
+        self.get_llvm_type::<T>()
             .ptr_type(inkwell::AddressSpace::Generic)
     }
 
     pub fn get_store_size<T: PinionData>(&self) -> u64 {
-        let ty = self.get_type::<T>();
+        let ty = self.get_llvm_type::<T>();
         self.target_data.get_store_size(&ty)
     }
 
@@ -222,12 +224,16 @@ pub struct RtFuncTyBundle<'ctx> {
 
 impl<'ctx> RtFuncTyBundle<'ctx> {
     fn new(ctx: &'ctx inkwell::context::Context, rm: &mut ReprManager<'ctx>) -> Self {
-        let val_type = rm.get_type::<Val>(ctx).unwrap().into_struct_type();
+        let val_type = rm.get_type::<Val>(ctx).get_ty().unwrap().into_struct_type();
         let val_type_ptr = val_type.ptr_type(GC_ADDRESS_SPACE);
 
-        let opaque_type = rm.get_type::<c_void>(ctx).unwrap().into_struct_type();
+        let opaque_type = rm
+            .get_type::<c_void>(ctx)
+            .get_ty()
+            .unwrap()
+            .into_struct_type();
 
-        let rt_type = rm.get_type::<Runtime>(ctx).unwrap();
+        let rt_type = rm.get_type::<Runtime>(ctx).get_ty().unwrap();
         let closure_type = ctx.void_type().fn_type(
             &[
                 val_type_ptr.into(),

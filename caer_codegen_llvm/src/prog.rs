@@ -47,13 +47,13 @@ pub struct ProgEmit<'a, 'ctx> {
 
 impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     pub fn new(ctx: &'a Context<'a, 'ctx>, env: &'a Module) -> Self {
-        let rt_type = ctx.get_type::<Runtime>();
-        let funcptr_ty = ctx.get_type::<FuncPtr>();
+        let rt_type = ctx.get_llvm_type::<Runtime>();
+        let funcptr_ty = ctx.get_llvm_type::<FuncPtr>();
 
         let proc_type = {
-            let argpack_ptr_type = ctx.get_type::<*const ProcPack>();
-            let val_ptr_type = ctx.get_type::<*mut Val>();
-            let rt_ptr_type = ctx.get_type::<*mut Runtime>();
+            let argpack_ptr_type = ctx.get_llvm_type::<*const ProcPack>();
+            let val_ptr_type = ctx.get_llvm_type::<*mut Val>();
+            let rt_ptr_type = ctx.get_llvm_type::<*mut Runtime>();
             ctx.llvm_ctx.void_type().fn_type(
                 &[
                     argpack_ptr_type.into(),
@@ -71,7 +71,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
 
         // TODO: don't dig so deep into env?
         let vt_global_ty = ctx
-            .get_type::<vtable::Entry>()
+            .get_llvm_type::<vtable::Entry>()
             .array_type(env.type_tree.len() as u32);
         let vt_global =
             ctx.module
@@ -273,13 +273,16 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         for ty in self.env.instances.iter() {
             let vars_field_ty = self
                 .ctx
-                .get_type::<Val>()
+                .get_llvm_type::<Val>()
                 .array_type(ty.pty.vars.len() as u32);
             let datum_ty = self
                 .ctx
                 .llvm_ctx
                 .opaque_struct_type(&format!("datum_{}", ty.id.index()));
-            datum_ty.set_body(&[self.ctx.get_type::<Datum>(), vars_field_ty.into()], false);
+            datum_ty.set_body(
+                &[self.ctx.get_llvm_type::<Datum>(), vars_field_ty.into()],
+                false,
+            );
             assert_eq!(ty.id.index(), self.datum_types.len());
             self.datum_types.push(datum_ty);
         }
@@ -354,7 +357,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     }
 
     fn emit_ftable(&mut self) {
-        let funcptr_ty = self.ctx.get_type::<FuncPtr>().into_pointer_type();
+        let funcptr_ty = self.ctx.get_llvm_type::<FuncPtr>().into_pointer_type();
 
         let ft_entries: Vec<_> = self
             .sym
@@ -574,7 +577,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             &[
                 datum_type_ptr.into(),
                 self.ctx.llvm_ctx.i64_type().into(),
-                self.ctx.get_type_ptr::<Val>().into(),
+                self.ctx.get_llvm_type_ptr::<Val>().into(),
             ],
             false,
         );
@@ -628,7 +631,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             &[
                 datum_type_ptr.into(),
                 self.ctx.llvm_ctx.i64_type().into(),
-                self.ctx.get_type_ptr::<Val>().into(),
+                self.ctx.get_llvm_type_ptr::<Val>().into(),
             ],
             false,
         );

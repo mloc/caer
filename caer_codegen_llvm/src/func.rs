@@ -441,7 +441,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
     fn bitcast_ptr<T: PinionData>(&self, ptr: PointerValue<'ctx>) -> PointerValue<'ctx> {
         let dest_ty = self
             .ctx
-            .get_type::<T>()
+            .get_llvm_type::<T>()
             .ptr_type(inkwell::AddressSpace::Generic);
         self.ctx
             .builder
@@ -776,7 +776,8 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             Op::Put(id) => {
                 let norm = self.get_local_any_ro(*id);
 
-                let cb = ExMod::rt_val_print().bind(norm.cast_ptr(), self.prog_emit.rt_global_val);
+                let cb = ExMod::rt_val_print()
+                    .bind(norm.cast_ptr(self.ctx), self.prog_emit.rt_global_val);
                 self.ctx.build_call(cb);
             },
 
@@ -791,8 +792,8 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 let cb = ExMod::rt_val_binary_op().bind(
                     self.prog_emit.rt_global_val,
                     op_var,
-                    lhs_ref.cast_ptr(),
-                    rhs_ref.cast_ptr(),
+                    lhs_ref.cast_ptr(self.ctx),
+                    rhs_ref.cast_ptr(self.ctx),
                     res,
                 );
                 self.ctx.build_call(cb);
@@ -838,9 +839,9 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 let src = self.get_local_any_ro(*src);
 
                 let cb = ExMod::rt_val_cast_string_val()
-                    .bind(src.cast_ptr(), self.prog_emit.rt_global_val);
+                    .bind(src.cast_ptr(self.ctx), self.prog_emit.rt_global_val);
                 let res: BrandedValue<Option<NonNull<RtString>>> =
-                    self.ctx.build_call(cb).result().cast_ptr();
+                    self.ctx.build_call(cb).result(self.ctx).cast_ptr(self.ctx);
 
                 let res_alloca = res.alloca_emplace(self.ctx);
                 self.set_local(*dst, res_alloca.into());
@@ -898,10 +899,10 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
 
                 ref_ptr
                     .gep_field(self.ctx, <RttiRef as PinionStruct>::Fields::vptr())
-                    .build_store(self.ctx, vt_ptr.cast_ptr());
+                    .build_store(self.ctx, vt_ptr.cast_ptr(self.ctx));
                 ref_ptr
                     .gep_field(self.ctx, <RttiRef as PinionStruct>::Fields::ptr())
-                    .build_store(self.ctx, hh_ptr.cast_ptr());
+                    .build_store(self.ctx, hh_ptr.cast_ptr(self.ctx));
 
                 // TODO: embed datum ty info
                 self.set_local(*dst, ref_ptr.into());
@@ -1535,7 +1536,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 );
             unnamed_field
                 .gep_field(self.ctx, <FfiArray<Val> as PinionStruct>::Fields::data())
-                .build_store(self.ctx, argpack_unnamed.cast_ptr());
+                .build_store(self.ctx, argpack_unnamed.cast_ptr(self.ctx));
 
             let named_field =
                 argpack.gep_field(self.ctx, <ProcPack as PinionStruct>::Fields::named());
@@ -1619,17 +1620,17 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             .into_int_value();*/
 
         (
-            val_vptr.cast_ptr(),
-            val_ptr.cast_ptr(), /*self.ctx.builder.build_int_to_ptr(
-                                    ref_vptr_int,
-                                    self.ctx.get_type_ptr::<vtable::Entry>(),
-                                    "ref_vptr",
-                                ),
-                                self.ctx.builder.build_int_to_ptr(
-                                    ref_ptr_int,
-                                    self.ctx.get_type_ptr::<Datum>(),
-                                    "ref_ptr",
-                                ),*/
+            val_vptr.cast_ptr(self.ctx),
+            val_ptr.cast_ptr(self.ctx), /*self.ctx.builder.build_int_to_ptr(
+                                            ref_vptr_int,
+                                            self.ctx.get_type_ptr::<vtable::Entry>(),
+                                            "ref_vptr",
+                                        ),
+                                        self.ctx.builder.build_int_to_ptr(
+                                            ref_ptr_int,
+                                            self.ctx.get_type_ptr::<Datum>(),
+                                            "ref_ptr",
+                                        ),*/
         )
     }
 
