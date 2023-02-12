@@ -36,6 +36,7 @@ pub trait PinionEnum: PinionData {
 }
 
 // marker trait. must be a nicheable type
+// All pointer types must have the same data layout: a single raw pointer
 pub trait PinionPointerType: PinionData {
     type Element: PinionData;
 }

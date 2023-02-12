@@ -96,6 +96,7 @@ impl<'ctx, T: PinionData> BrandedValue<'ctx, T> {
 impl<'ctx, T: PrimLiteral> BrandedValue<'ctx, T> {
     pub fn literal(lit: T, ctx: &Context<'_, 'ctx>) -> BrandedValue<'ctx, T> {
         let val = lit.make_llval(ctx);
+        // Safety: val from make_llval should match T
         unsafe { Self::materialize(ctx, val) }
     }
 
@@ -106,37 +107,27 @@ impl<'ctx, T: PrimLiteral> BrandedValue<'ctx, T> {
         let cast = ctx
             .builder
             .build_bitcast(self.val, ctx.get_llvm_type::<O>(), "");
-        unsafe { BrandedValue::<O>::materialize(ctx, cast) }
+        // Safety: inherently unsafe, so this fn is unsafe
+        BrandedValue::<O>::materialize(ctx, cast)
     }
 }
 
 impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
+    // Create an instance of a pointer type by stack-allocating
+    // Data is uninitialized
     pub fn build_as_alloca(ctx: &Context<'_, 'ctx>) -> Self {
-        let ty = ctx.get_llvm_type::<T>().into_pointer_type();
-        unsafe {
-            Self::materialize(
-                ctx,
-                ctx.builder
-                    .build_alloca(any_to_basic(ty.get_element_type()), "")
-                    .into(),
-            )
-        }
+        let elem_ty = ctx.get_llvm_type::<T::Element>();
+        let alloca = ctx.builder.build_alloca(elem_ty, "");
+        // Safety: alloca creates a raw pointer to appropriate memory
+        unsafe { Self::materialize(ctx, alloca.into()) }
     }
 
     pub fn build_as_alloca_array(ctx: &Context<'_, 'ctx>, n: u64) -> Self {
-        let ty = ctx.get_llvm_type::<T>().into_pointer_type();
-        unsafe {
-            Self::materialize(
-                ctx,
-                ctx.builder
-                    .build_array_alloca(
-                        any_to_basic(ty.get_element_type()),
-                        ctx.llvm_ctx.i64_type().const_int(n, false),
-                        "",
-                    )
-                    .into(),
-            )
-        }
+        let elem_ty = ctx.get_llvm_type::<T::Element>();
+        let n_val = ctx.llvm_ctx.i64_type().const_int(n, false);
+        let alloca = ctx.builder.build_array_alloca(elem_ty, n_val, "");
+        // Safety: array alloca creates a raw pointer to appropriate memory
+        unsafe { Self::materialize(ctx, alloca.into()) }
     }
 
     pub fn copy(ctx: &Context<'_, 'ctx>, src: Self, dest: Self) {
@@ -144,8 +135,8 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
 
         let size = ctx.get_store_size::<T>();
 
-        let memcpy_intrinsic = unsafe {
-            ctx.get_intrinsic(
+        let memcpy_intrinsic = ctx
+            .get_intrinsic(
                 "llvm.memcpy",
                 &[
                     src.val.get_type(),
@@ -153,8 +144,7 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
                     ctx.llvm_ctx.i64_type().into(),
                 ],
             )
-            .unwrap()
-        };
+            .unwrap();
 
         ctx.builder.build_call(
             memcpy_intrinsic,
@@ -176,16 +166,21 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
 
     pub unsafe fn array_gep(self, ctx: &Context<'_, 'ctx>, n: u64) -> BrandedValue<'ctx, T> {
         let ptr = unsafe { ctx.const_gep(self.ptr_val(), &[n]) };
-        unsafe { BrandedValue::materialize(ctx, ptr.into()) }
+        // Safety: inherently unsafe, we don't know that n is in bounds
+        // TODO: a future array wrapper type could help solve this
+        BrandedValue::materialize(ctx, ptr.into())
     }
 
     pub fn build_load(self, ctx: &Context<'_, 'ctx>) -> BrandedValue<'ctx, T::Element> {
+        // TODO: maybe a check to find uses of FCAs?
         let val = ctx.builder.build_load(self.ptr_val(), "");
+        // Safety: value loaded from a pointer to type E should be of type E
         unsafe { BrandedValue::materialize(ctx, val) }
     }
 
     pub fn build_store(self, ctx: &Context<'_, 'ctx>, val: BrandedValue<'ctx, T::Element>) {
-        let val = ctx.builder.build_store(self.ptr_val(), val.val);
+        // TODO: maybe a check to find uses of FCAs?
+        ctx.builder.build_store(self.ptr_val(), val.val);
     }
 
     pub fn ptr_val(self) -> PointerValue<'ctx> {
@@ -199,6 +194,7 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
     pub fn cast_ptr<O: PinionPointerType<Element = T::Element>>(
         self, ctx: &Context<'_, 'ctx>,
     ) -> BrandedValue<'ctx, O> {
+        // Safety: all PinionPointerType instances have the same data layout
         unsafe { BrandedValue::materialize(ctx, self.val) }
     }
 
@@ -209,10 +205,12 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
         let cast = ctx
             .builder
             .build_bitcast(self.val, ctx.get_llvm_type::<O>(), "");
+        // Safety: inherently unsafe, so fn is unsafe
         BrandedValue::materialize(ctx, cast)
     }
 
     pub unsafe fn cast_void(self, ctx: &Context<'_, 'ctx>) -> BrandedValue<'ctx, *mut c_void> {
+        // Safety: not inherently unsafe, but can lead to unsafe situations
         self.cast_value(ctx)
     }
 }
