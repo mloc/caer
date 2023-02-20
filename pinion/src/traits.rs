@@ -30,9 +30,18 @@ pub trait PinionStruct: PinionData {
 
 pub trait PinionStructFields: Sized {}
 
+// A simple (valueless) enum, presumably just wrapping a primitive type.
 pub trait PinionEnum: PinionData {
-    type Disc: PinionData;
-    type Variant;
+    type Disc: PinionPrim;
+
+    fn to_disc(self) -> Self::Disc;
+}
+
+pub trait PinionUnion: PinionData {}
+
+pub trait PinionTaggedUnion: PinionData {
+    type Tag: PinionEnum;
+    type Union: PinionUnion;
 }
 
 // marker trait. must be a nicheable type
@@ -115,6 +124,18 @@ macro_rules! gep_path {
     ($($part:ident).+) => {
         &[$(stringify!($part)),+]
     };
+}
+
+impl PinionData for () {
+    type Static = ();
+
+    unsafe fn validate(_ptr: *const u8) {
+        panic!();
+    }
+
+    fn get_layout(_lctx: &mut LayoutCtx) -> Layout {
+        Layout::Unit
+    }
 }
 
 macro_rules! prim_types {

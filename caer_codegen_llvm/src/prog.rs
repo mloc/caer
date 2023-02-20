@@ -311,6 +311,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             .collect();
 
         // This is split into two passes to make the resulting IR look a bit nicer
+        // TODO: build with nicer pinion types
         self.string_allocs = string_globals
             .into_iter_enumerated()
             .map(|(id, (string_global, len))| {
@@ -319,12 +320,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
                         .ty
                         .const_named_struct(&[gcm_repr
                             .ty
-                            .const_named_struct(&[self
-                                .ctx
-                                .llvm_ctx
-                                .i8_type()
-                                .const_int(GcMarker::White as _, false)
-                                .into()])
+                            .const_int(GcMarker::White as _, false)
                             .into()])
                         .into(),
                     self.ctx

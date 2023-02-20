@@ -12,6 +12,11 @@ pub enum Layout {
     Enum(Enum),
     FuncPtr(Func),
     OpaqueStruct(OpaqueLayout),
+    Union(Union),
+    TaggedUnion(TaggedUnion),
+    // Size 0
+    Unit,
+    // No size
     Unsized,
 }
 
@@ -62,14 +67,29 @@ impl Pointer {
 #[derive(Debug, Clone)]
 pub struct Enum {
     pub name: Option<&'static str>,
+    pub disc_layout: LayoutId,
+    pub disc_values: Vec<u64>,
+    pub disc_values_reverse: HashMap<u64, usize>,
+}
 
-    pub size: i32,
-    pub alignment: i32,
+#[derive(Debug, Clone)]
+pub struct Union {
+    pub name: Option<&'static str>,
+    pub layouts: Vec<LayoutId>,
 
-    pub disc_width: i32,
-    pub discs: Vec<u64>,
-    // Maps disc value to layout. No entry if unit field
-    pub field_layouts: HashMap<u64, LayoutId>,
+    // Used for validation, filled in by rust
+    pub size: usize,
+    pub alignment: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaggedUnion {
+    pub name: Option<&'static str>,
+
+    // Must be an Enum layout
+    pub tag_layout: LayoutId,
+    // Must be a Union layout
+    pub union_layout: LayoutId,
 }
 
 #[derive(Debug, Clone)]

@@ -19,7 +19,7 @@ use index_vec::IndexVec;
 use inkwell::basic_block::BasicBlock;
 use inkwell::types::BasicType;
 use inkwell::values::*;
-use pinion::{PinionData, PinionPointerType, PinionStruct};
+use pinion::{PinionData, PinionPointerType, PinionStruct, PinionTaggedUnion};
 use ty::Type;
 
 use crate::context::{Context, ExFunc, ExMod, GC_ADDRESS_SPACE};
@@ -180,7 +180,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         } else {
             let param_locals_arr = self.ctx.builder.build_array_alloca(
                 self.ctx
-                    .get_enum::<Val>()
+                    .get_tagged_union::<Val>()
                     .ty
                     .ptr_type(inkwell::AddressSpace::Generic),
                 self.ctx
@@ -266,6 +266,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         println!("{:#?}", dest);
         let dest_val = dest.gep_value(self.ctx);
 
+        type ValTag = <Val as PinionTaggedUnion>::Tag;
         let disc = match src_ty.get_layout() {
             Layout::Val => {
                 // Special case: can just memcpy directly
@@ -275,7 +276,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             Layout::SoftRef => {
                 let dest_ptr = unsafe { dest_val.cast_value(self.ctx) };
                 self.copy_branded_val(src_local.as_ref().unwrap(), dest_ptr);
-                layout::VAL_DISCRIM_REF
+                ValTag::Ref
             },
 
             Layout::HardRef(RefType::String) => {
@@ -283,25 +284,27 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
                 println!("{:#?}", dest_ptr);
                 println!("{:#?}", src_local);
                 self.copy_branded_val(src_local.as_string().unwrap(), dest_ptr);
-                layout::VAL_DISCRIM_STRING
+                ValTag::String
             },
             Layout::HardRef(rt) => {
                 assert!(rt.get_layout().is_val());
                 let dest_ptr = unsafe { dest_val.cast_value(self.ctx) };
                 self.copy_branded_val(src_local.as_ref().unwrap(), dest_ptr);
-                layout::VAL_DISCRIM_REF
+                ValTag::Ref
             },
-            Layout::Scalar(ScalarLayout::Null) => layout::VAL_DISCRIM_NULL,
+            Layout::Scalar(ScalarLayout::Null) => ValTag::Null,
             Layout::Scalar(ScalarLayout::Float) => {
                 // TODO: is this valid?
                 let dest_ptr = unsafe { dest_val.cast_value(self.ctx) };
                 self.copy_branded_val(src_local.as_float().unwrap(), dest_ptr);
-                layout::VAL_DISCRIM_FLOAT
+                ValTag::Float
             },
         };
 
-        dest.gep_disc(self.ctx)
-            .build_store(self.ctx, BrandedValue::<'ctx, u8>::literal(disc, self.ctx));
+        dest.gep_disc(self.ctx).build_store(
+            self.ctx,
+            BrandedValue::<'ctx, ValTag>::literal_enum(disc, self.ctx),
+        );
     }
 
     fn conv_local_any_into(&self, local_id: LocalId, into: BrandedValue<'ctx, *mut Val>) {
@@ -1699,7 +1702,8 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
         match val {
             BrandedStackValue::Val(val) => {
                 let disc_ptr = val.gep_disc(self.ctx);
-                let null_disc = BrandedValue::literal(layout::VAL_DISCRIM_NULL, self.ctx);
+                let null_disc =
+                    BrandedValue::literal_enum(<Val as PinionTaggedUnion>::Tag::Null, self.ctx);
                 self.build_store(disc_ptr, null_disc);
             },
             BrandedStackValue::Null => {},

@@ -14,7 +14,7 @@ use inkwell::values::{
 use pinion::layout_ctx::LayoutId;
 use pinion::{
     PinionData, PinionEnum, PinionField, PinionPointerType, PinionPrim, PinionStruct,
-    PinionValueHolder,
+    PinionTaggedUnion, PinionValueHolder,
 };
 
 use crate::context::Context;
@@ -90,6 +90,16 @@ impl<'ctx, T: PinionData> BrandedValue<'ctx, T> {
         let alloca = BrandedValue::<*mut T>::build_as_alloca(ctx);
         alloca.build_store(ctx, self);
         alloca
+    }
+}
+
+impl<'ctx, T> BrandedValue<'ctx, T>
+where
+    T: PinionEnum,
+    T::Disc: PrimLiteral,
+{
+    pub fn literal_enum(lit: T, ctx: &Context<'_, 'ctx>) -> BrandedValue<'ctx, T> {
+        unsafe { BrandedValue::<T::Disc>::literal(lit.to_disc(), ctx).bitcast_self(ctx) }
     }
 }
 
@@ -210,29 +220,24 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
     }
 
     pub unsafe fn cast_void(self, ctx: &Context<'_, 'ctx>) -> BrandedValue<'ctx, *mut c_void> {
-        // Safety: not inherently unsafe, but can lead to unsafe situations
+        // Safety: not inherently unsafe, but can lead to unsafe situations, so fn is unsafe
         self.cast_value(ctx)
     }
 }
 
-impl<'ctx, T> BrandedValue<'ctx, T>
+impl<'ctx, T, TU> BrandedValue<'ctx, T>
 where
-    T: PinionPointerType,
-    T::Element: PinionEnum,
+    T: PinionPointerType<Element = TU>,
+    TU: PinionTaggedUnion,
 {
-    pub fn gep_disc(
-        self, ctx: &Context<'_, 'ctx>,
-    ) -> BrandedValue<'ctx, *mut <T::Element as PinionEnum>::Disc> {
+    pub fn gep_disc(self, ctx: &Context<'_, 'ctx>) -> BrandedValue<'ctx, *mut TU::Tag> {
         let ptr = unsafe { ctx.const_gep(self.ptr_val(), &[0, 0]) };
         unsafe { BrandedValue::materialize(ctx, ptr.into()) }
     }
 
-    pub fn gep_value(self, ctx: &Context<'_, 'ctx>) -> BrandedValue<'ctx, *mut c_void> {
-        let aptr = unsafe { ctx.const_gep(self.ptr_val(), &[0, 2]) };
-        let optr = ctx
-            .builder
-            .build_bitcast(aptr, ctx.get_llvm_type_ptr::<c_void>(), "");
-        unsafe { BrandedValue::materialize(ctx, optr) }
+    pub fn gep_value(self, ctx: &Context<'_, 'ctx>) -> BrandedValue<'ctx, *mut TU::Union> {
+        let ptr = unsafe { ctx.const_gep(self.ptr_val(), &[0, 1]) };
+        unsafe { BrandedValue::materialize(ctx, ptr.into()) }
     }
 }
 

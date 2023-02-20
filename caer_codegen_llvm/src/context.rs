@@ -14,10 +14,11 @@ use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
 use pinion::layout::Func;
 use pinion::{
     PinionCallBundle, PinionData, PinionEnum, PinionFuncInstance, PinionModule, PinionStruct,
+    PinionTaggedUnion,
 };
 
 use crate::emit_type::EmitType;
-use crate::repr::{EnumRepr, ReprManager, StructRepr};
+use crate::repr::{EnumRepr, ReprManager, StructRepr, TaggedUnionRepr};
 use crate::value::MaybeRet;
 
 pub type ExFunc = <caer_runtime::export::Runtime as PinionModule>::Funcs;
@@ -93,6 +94,12 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
 
     pub fn get_enum<T: PinionEnum>(&self) -> Rc<EnumRepr<'ctx>> {
         self.repr_manager.borrow_mut().get_enum::<T>(self.llvm_ctx)
+    }
+
+    pub fn get_tagged_union<T: PinionTaggedUnion>(&self) -> Rc<TaggedUnionRepr<'ctx>> {
+        self.repr_manager
+            .borrow_mut()
+            .get_tagged_union::<T>(self.llvm_ctx)
     }
 
     pub fn get_func(&self, func: ExFunc) -> FunctionValue<'ctx> {

@@ -39,10 +39,12 @@ impl LayoutCtx {
         unsafe { self.unchecked_populate_fn::<T::Static, _>(|lctx| T::get_layout(lctx)) }
     }
 
+    // Returns None if type has not been populated
     pub fn get(&self, id: LayoutId) -> Option<Rc<Layout>> {
         self.layouts.get(&id).cloned()
     }
 
+    // Returns None if type has not been populated
     pub fn get_ty<T: PinionData>(&self) -> Option<Rc<Layout>> {
         self.layouts.get(&LayoutId::of::<T>()).cloned()
     }

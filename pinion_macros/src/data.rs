@@ -165,8 +165,146 @@ impl DeriveCtx {
         }
     }
 
+    // Create a unit (fieldless) enum from this enum, and derive the right bits for it.
+    fn materialize_enum(
+        &self, enum_data: &syn::DataEnum, name: &syn::Ident, prim: &syn::Type,
+    ) -> TokenStream {
+        let variants = enum_data.variants.iter().map(|v| syn::Variant {
+            attrs: vec![],
+            ident: v.ident.clone(),
+            fields: syn::Fields::Unit,
+            discriminant: v.discriminant.clone(),
+        });
+        let vis = &self.vis;
+
+        let derives = self.derive_unit_enum(enum_data, name, prim);
+
+        quote! {
+            #[repr(#prim)]
+            #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+            #vis enum #name {
+                #(#variants,)*
+            }
+
+            #derives
+        }
+    }
+
+    fn derive_unit_enum(
+        &self, enum_data: &syn::DataEnum, name: &syn::Ident, prim: &syn::Type,
+    ) -> TokenStream {
+        let disc_const_names: Vec<syn::Ident> = (0..enum_data.variants.len())
+            .map(|i| syn::Ident::new(&format!("DISC_{}", i), Span::call_site()))
+            .collect();
+
+        let mut disc_values: Vec<syn::Expr> = vec![];
+        let mut disc_values_reverse: Vec<syn::Expr> = vec![];
+        for (i, v) in enum_data.variants.iter().enumerate() {
+            let v_ident = &v.ident;
+            let i_expr: syn::Expr = parse_quote! { #i };
+            disc_values.push(parse_quote! { #name::#v_ident as #prim });
+            disc_values_reverse.push(parse_quote! { (#name::#v_ident as u64, #i_expr) });
+        }
+
+        let ident_str = name.to_string();
+
+        // dude your unit enum shouldn't have generics ok? ok
+        quote! {
+            #[automatically_derived]
+            impl pinion::PinionData for #name {
+                type Static = Self;
+
+                fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Layout {
+                    let enum_layout = pinion::layout::Enum {
+                        name: Some(#ident_str),
+                        disc_layout: lctx.populate::<#prim>(),
+                        disc_values: vec![#(#disc_values as u64,)*],
+                        disc_values_reverse: [#(#disc_values_reverse,)*].into(),
+                    };
+                    pinion::layout::Layout::Enum(enum_layout)
+                }
+
+                unsafe fn validate(ptr: *const u8) {
+                    #(const #disc_const_names: #prim = #disc_values;)*
+
+                    let disc: #prim = *(ptr as *const #prim);
+                    match disc {
+                        #(#disc_const_names)|* => {},
+                        _ => panic!(),
+                    }
+                }
+            }
+            #[automatically_derived]
+            impl pinion::PinionEnum for #name {
+                type Disc = #prim;
+
+                fn to_disc(self) -> Self::Disc {
+                    self as #prim
+                }
+            }
+        }
+    }
+
+    // wow so many verbs, is this a thesaurus?
+    // organise!!!
+    fn build_union(&self, enum_data: &syn::DataEnum, name: &syn::Ident) -> TokenStream {
+        let vis = &self.vis;
+        let name_str = name.to_string();
+
+        let mut variant_names: Vec<&syn::Ident> = vec![];
+        let mut variant_tys: Vec<&syn::Type> = vec![];
+
+        let unit_ty: syn::Type = parse_quote! { () };
+        for v in enum_data.variants.iter() {
+            variant_names.push(&v.ident);
+            match &v.fields {
+                syn::Fields::Named(_) => todo!(),
+                syn::Fields::Unnamed(u) => {
+                    assert_eq!(u.unnamed.len(), 1);
+                    let ty = &u.unnamed[0].ty;
+                    variant_tys.push(ty);
+                },
+                syn::Fields::Unit => {
+                    variant_tys.push(&unit_ty);
+                },
+            }
+        }
+
+        assert!(!variant_tys.is_empty());
+
+        let generics = &self.generics;
+
+        quote! {
+            #[repr(C)]
+            #vis union #name #generics {
+                #(#variant_names: std::mem::ManuallyDrop<#variant_tys>,)*
+            }
+
+            #[automatically_derived]
+            impl pinion::PinionData for #name {
+                type Static = Self;
+
+                fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Layout {
+                    let unit_layout_id = lctx.populate::<()>();
+                    let union_layout = pinion::layout::Union {
+                        name: Some(#name_str),
+                        layouts: vec![#(lctx.populate::<#variant_tys>(),)*],
+                        size: std::mem::size_of::<Self>(),
+                        alignment: std::mem::align_of::<Self>(),
+                    };
+                    pinion::layout::Layout::Union(union_layout)
+                }
+                unsafe fn validate(ptr: *const u8) {
+                    // There's no validation we can do for unions.
+                }
+            }
+
+            #[automatically_derived]
+            impl pinion::PinionUnion for #name {}
+        }
+    }
+
     fn derive_enum(&self, enum_data: &syn::DataEnum) -> TokenStream {
-        let lctxq: syn::Ident = parse_quote! { lctx };
         let (disc_width, has_c) = self.attrs.repr().as_enum().unwrap();
         let prim: syn::Type = match disc_width {
             1 => parse_quote! {u8},
@@ -183,27 +321,25 @@ impl DeriveCtx {
 
         assert_eq!(has_fields, has_c);
 
+        if !has_fields {
+            return self.derive_unit_enum(enum_data, &self.ident, &prim);
+        }
+
+        // We create a unit enum to act as the tag, and a union marker type for the fields.
+        // TODO: names from attr
+        let tag_enum_name = syn::Ident::new(&format!("{}Tag", self.ident), self.ident.span());
+        let field_union_name = syn::Ident::new(&format!("{}Union", self.ident), self.ident.span());
+
+        let tag_enum_decl = self.materialize_enum(enum_data, &tag_enum_name, &prim);
+        let field_union_decl = self.build_union(enum_data, &field_union_name);
+
+        // Sanity check: currently we only handle unnamed fields with a single type
         // TODO(ERRH)
         enum_data.variants.iter().for_each(|v| match &v.fields {
-            syn::Fields::Named(_) => panic!(),
+            syn::Fields::Named(_) => todo!(),
             syn::Fields::Unnamed(u) => assert_eq!(u.unnamed.len(), 1),
             syn::Fields::Unit => {},
         });
-
-        // TODO: name from attr
-        let unit_enum_name = syn::Ident::new(&format!("{}Variant", self.ident), self.ident.span());
-
-        let disc_const_names: Vec<syn::Ident> = (0..enum_data.variants.len())
-            .map(|i| syn::Ident::new(&format!("DISC_{}", i), Span::call_site()))
-            .collect();
-        let disc_exprs: Vec<_> = enum_data
-            .variants
-            .iter()
-            .map(|v| -> syn::Expr {
-                let v_ident = &v.ident;
-                parse_quote! { #unit_enum_name::#v_ident as #prim }
-            })
-            .collect();
 
         let ident = &self.ident;
         let ident_str = ident.to_string();
@@ -211,70 +347,34 @@ impl DeriveCtx {
         let static_params = make_ty_static(&ty_generics);
         let where_clause = make_impl_bounds(&self.generics);
 
-        let unit_enum = {
-            let variants = enum_data.variants.iter().map(|v| syn::Variant {
-                attrs: vec![],
-                ident: v.ident.clone(),
-                fields: syn::Fields::Unit,
-                discriminant: v.discriminant.clone(),
-            });
-            let vis = &self.vis;
-
-            quote! {
-                #[repr(#prim)]
-                #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-                #vis enum #unit_enum_name {
-                    #(#variants,)*
-                }
-            }
-        };
-
-        let field_layouts = enum_data.variants.iter().filter_map(|v| match &v.fields {
-            syn::Fields::Named(_) => panic!(),
-            syn::Fields::Unnamed(u) => {
-                assert_eq!(u.unnamed.len(), 1);
-                let field_ty = ty::populate_ty(&lctxq, &u.unnamed[0].ty);
-                let v_ident = &v.ident;
-                let disc_expr = quote! { #unit_enum_name::#v_ident as u64 };
-                Some(quote! {(#disc_expr, #field_ty)})
-            },
-            syn::Fields::Unit => None,
-        });
-
         quote! {
             #[automatically_derived]
             impl #impl_generics pinion::PinionData for #ident #ty_generics #where_clause {
                 type Static = #ident #static_params;
 
                 fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Layout {
-                    let enum_layout = pinion::layout::Enum {
+                    let layout = pinion::layout::TaggedUnion {
                         name: Some(#ident_str),
-                        size: std::mem::size_of::<Self>() as _,
-                        alignment: std::mem::align_of::<Self>() as _,
-                        disc_width: #disc_width,
-                        discs: vec![#(#disc_exprs as u64,)*],
-                        field_layouts: [#(#field_layouts,)*].into(),
+                        tag_layout: lctx.populate::<#tag_enum_name>(),
+                        union_layout: lctx.populate::<#field_union_name>(),
                     };
-                    pinion::layout::Layout::Enum(enum_layout)
+                    pinion::layout::Layout::TaggedUnion(layout)
                 }
 
                 unsafe fn validate(ptr: *const u8) {
-                    #(const #disc_const_names: #prim = #disc_exprs;)*
-
-                    let disc: #prim = *(ptr as *const #prim);
-                    match disc {
-                        #(#disc_const_names)|* => {},
-                        _ => panic!(),
-                    }
+                    // TODO: more safety justification here
+                    <#tag_enum_name as pinion::PinionData>::validate(ptr);
                 }
             }
             #[automatically_derived]
-            impl #impl_generics pinion::PinionEnum for #ident #ty_generics #where_clause {
-                type Disc = #prim;
-                type Variant = #unit_enum_name;
+            impl #impl_generics pinion::PinionTaggedUnion for #ident #ty_generics #where_clause {
+                type Tag = #tag_enum_name;
+                type Union = #field_union_name;
             }
 
-            #unit_enum
+            #tag_enum_decl
+
+            #field_union_decl
         }
     }
 }

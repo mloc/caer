@@ -3,11 +3,12 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, StructType};
-use pinion::layout::{Enum, Func, Layout, StructLayout};
+use inkwell::context::Context;
+use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, IntType, StructType};
+use pinion::layout::{Enum, Func, Layout, StructLayout, TaggedUnion, Union};
 use pinion::layout_ctx::{LayoutCtx, LayoutId};
 use pinion::types::Primitive;
-use pinion::{PinionData, PinionEnum, PinionModule, PinionStruct};
+use pinion::{PinionData, PinionEnum, PinionModule, PinionStruct, PinionTaggedUnion};
 
 use crate::emit_type::EmitType;
 
@@ -26,22 +27,41 @@ impl<'ctx> StructRepr<'ctx> {
 #[derive(Debug)]
 pub struct EnumRepr<'ctx> {
     pub layout: Enum,
-    pub ty: StructType<'ctx>,
+    pub ty: IntType<'ctx>,
 }
 
 impl<'ctx> EnumRepr<'ctx> {
-    pub fn new(layout: Enum, ty: StructType<'ctx>) -> Self {
+    pub fn new(layout: Enum, ty: IntType<'ctx>) -> Self {
         Self { layout, ty }
     }
 }
 
-// TODO: reconsider name/loc, rethink structure
+#[derive(Debug)]
+pub struct TaggedUnionRepr<'ctx> {
+    pub layout: TaggedUnion,
+    pub tag_repr: Rc<EnumRepr<'ctx>>,
+    pub ty: StructType<'ctx>,
+}
+
+impl<'ctx> TaggedUnionRepr<'ctx> {
+    pub fn new(layout: TaggedUnion, tag_repr: Rc<EnumRepr<'ctx>>, ty: StructType<'ctx>) -> Self {
+        Self {
+            layout,
+            tag_repr,
+            ty,
+        }
+    }
+}
+
+// TODO: reconsider name/loc, rethink structure. there's a bunch of icky repetition
 #[derive(Debug, Default)]
 pub struct ReprManager<'ctx> {
     layout_ctx: LayoutCtx,
     basic_types: HashMap<LayoutId, Option<BasicTypeEnum<'ctx>>>,
 
     structs: HashMap<LayoutId, Rc<StructRepr<'ctx>>>,
+    enums: HashMap<LayoutId, Rc<EnumRepr<'ctx>>>,
+    tagged_unions: HashMap<LayoutId, Rc<TaggedUnionRepr<'ctx>>>,
 }
 
 impl<'ctx> ReprManager<'ctx> {
@@ -49,16 +69,14 @@ impl<'ctx> ReprManager<'ctx> {
         Self::default()
     }
 
-    pub fn get_type<T: PinionData>(
-        &mut self, ctx: &'ctx inkwell::context::Context,
-    ) -> EmitType<'ctx> {
+    pub fn get_type<T: PinionData>(&mut self, ctx: &'ctx Context) -> EmitType<'ctx> {
         let id = self.layout_ctx.populate::<T>();
         let (_, ty) = self.build_layout(id, ctx);
         EmitType::new(id, ty)
     }
 
     pub fn get_all_funcs<T: PinionModule>(
-        &mut self, ctx: &'ctx inkwell::context::Context,
+        &mut self, ctx: &'ctx Context,
     ) -> Vec<(TypeId, (Func, FunctionType<'ctx>), T::Funcs)> {
         T::get_funcs(&mut self.layout_ctx)
             .into_iter()
@@ -69,9 +87,7 @@ impl<'ctx> ReprManager<'ctx> {
             .collect()
     }
 
-    fn build_func(
-        &mut self, func: &Func, ctx: &'ctx inkwell::context::Context,
-    ) -> FunctionType<'ctx> {
+    fn build_func(&mut self, func: &Func, ctx: &'ctx Context) -> FunctionType<'ctx> {
         println!("building func {:#?}", func);
         let params: Vec<_> = func
             .param_tys
@@ -91,16 +107,15 @@ impl<'ctx> ReprManager<'ctx> {
         }
     }
 
-    pub fn get_struct<T: PinionStruct>(
-        &mut self, ctx: &'ctx inkwell::context::Context,
-    ) -> Rc<StructRepr<'ctx>> {
+    pub fn get_struct<T: PinionStruct>(&mut self, ctx: &'ctx Context) -> Rc<StructRepr<'ctx>> {
         let id = self.layout_ctx.populate::<T>();
         self.get_struct_from_id(id, ctx)
     }
 
-    fn get_struct_from_id(
-        &mut self, id: LayoutId, ctx: &'ctx inkwell::context::Context,
-    ) -> Rc<StructRepr<'ctx>> {
+    fn get_struct_from_id(&mut self, id: LayoutId, ctx: &'ctx Context) -> Rc<StructRepr<'ctx>> {
+        if let Some(repr) = self.structs.get(&id) {
+            return repr.clone();
+        }
         let (layout, bty) = self.build_layout(id, ctx);
 
         let struct_layout = match layout.borrow() {
@@ -108,34 +123,65 @@ impl<'ctx> ReprManager<'ctx> {
             _ => panic!("id didn't produce a struct layout"),
         };
 
-        Rc::new(StructRepr::new(
+        let repr = Rc::new(StructRepr::new(
             struct_layout,
             bty.unwrap().into_struct_type(),
-        ))
+        ));
+        self.structs.insert(id, repr.clone());
+        repr
     }
 
-    pub fn get_enum<T: PinionEnum>(
-        &mut self, ctx: &'ctx inkwell::context::Context,
-    ) -> Rc<EnumRepr<'ctx>> {
+    pub fn get_enum<T: PinionEnum>(&mut self, ctx: &'ctx Context) -> Rc<EnumRepr<'ctx>> {
         let id = self.layout_ctx.populate::<T>();
         self.get_enum_from_id(id, ctx)
     }
 
-    fn get_enum_from_id(
-        &mut self, id: LayoutId, ctx: &'ctx inkwell::context::Context,
-    ) -> Rc<EnumRepr<'ctx>> {
+    fn get_enum_from_id(&mut self, id: LayoutId, ctx: &'ctx Context) -> Rc<EnumRepr<'ctx>> {
+        if let Some(repr) = self.enums.get(&id) {
+            return repr.clone();
+        }
         let (layout, bty) = self.build_layout(id, ctx);
-
         let enum_layout = match layout.borrow() {
             Layout::Enum(el) => el.clone(),
             _ => panic!("id didn't produce an enum layout"),
         };
 
-        Rc::new(EnumRepr::new(enum_layout, bty.unwrap().into_struct_type()))
+        let repr = Rc::new(EnumRepr::new(enum_layout, bty.unwrap().into_int_type()));
+        self.enums.insert(id, repr.clone());
+        repr
+    }
+
+    pub fn get_tagged_union<T: PinionTaggedUnion>(
+        &mut self, ctx: &'ctx Context,
+    ) -> Rc<TaggedUnionRepr<'ctx>> {
+        let id = self.layout_ctx.populate::<T>();
+        self.get_tagged_union_from_id(id, ctx)
+    }
+
+    fn get_tagged_union_from_id(
+        &mut self, id: LayoutId, ctx: &'ctx Context,
+    ) -> Rc<TaggedUnionRepr<'ctx>> {
+        if let Some(repr) = self.tagged_unions.get(&id) {
+            return repr.clone();
+        }
+        let (layout, bty) = self.build_layout(id, ctx);
+        let tagged_union_layout = match layout.borrow() {
+            Layout::TaggedUnion(tul) => tul.clone(),
+            _ => panic!("id didn't produce a tagged union layout"),
+        };
+
+        let tag_repr = self.get_enum_from_id(tagged_union_layout.tag_layout, ctx);
+        let repr = Rc::new(TaggedUnionRepr::new(
+            tagged_union_layout,
+            tag_repr,
+            bty.unwrap().into_struct_type(),
+        ));
+        self.tagged_unions.insert(id, repr.clone());
+        repr
     }
 
     fn build_layout(
-        &mut self, id: LayoutId, ctx: &'ctx inkwell::context::Context,
+        &mut self, id: LayoutId, ctx: &'ctx Context,
     ) -> (Rc<Layout>, Option<BasicTypeEnum<'ctx>>) {
         let layout = self.layout_ctx.get(id).unwrap();
         if let Some(bty) = self.basic_types.get(&id) {
@@ -151,7 +197,7 @@ impl<'ctx> ReprManager<'ctx> {
     }
 
     fn build_bty_stage1(
-        &mut self, layout: &Layout, ctx: &'ctx inkwell::context::Context,
+        &mut self, layout: &Layout, ctx: &'ctx Context,
     ) -> Option<BasicTypeEnum<'ctx>> {
         match layout {
             Layout::Struct(sl) => Some(ctx.opaque_struct_type(sl.name.unwrap_or_default()).into()),
@@ -174,10 +220,11 @@ impl<'ctx> ReprManager<'ctx> {
                         .into(),
                 )
             },
-            Layout::Enum(enum_layout) => Some(
-                ctx.opaque_struct_type(enum_layout.name.unwrap_or_default())
-                    .into(),
-            ),
+            Layout::Union(ul) => Some(ctx.opaque_struct_type(ul.name.unwrap_or_default()).into()),
+            Layout::Enum(el) => Some(self.build_layout(el.disc_layout, ctx).1.unwrap()),
+            Layout::TaggedUnion(tul) => {
+                Some(ctx.opaque_struct_type(tul.name.unwrap_or_default()).into())
+            },
             Layout::FuncPtr(func) => {
                 let func_ty = self.build_func(func, ctx);
                 Some(func_ty.ptr_type(inkwell::AddressSpace::Generic).into())
@@ -190,32 +237,36 @@ impl<'ctx> ReprManager<'ctx> {
                 }
                 Some(ty.into())
             },
+            Layout::Unit => None,
             Layout::Unsized => None,
         }
     }
 
     fn build_bty_stage2(
-        &mut self, layout: &Layout, to_fill: BasicTypeEnum<'ctx>,
-        ctx: &'ctx inkwell::context::Context,
+        &mut self, layout: &Layout, to_fill: BasicTypeEnum<'ctx>, ctx: &'ctx Context,
     ) {
         match layout {
             Layout::Struct(struct_layout) => {
                 self.build_struct(struct_layout, to_fill.into_struct_type(), ctx);
             },
-            Layout::Enum(enum_layout) => {
-                self.build_enum(enum_layout, to_fill.into_struct_type(), ctx);
+            Layout::Union(union_layout) => {
+                self.build_union(union_layout, to_fill.into_struct_type(), ctx);
+            },
+            Layout::TaggedUnion(tagged_union_layout) => {
+                self.build_tagged_union(tagged_union_layout, to_fill.into_struct_type(), ctx);
             },
             Layout::Primitive(_)
             | Layout::Pointer(_)
             | Layout::FuncPtr(_)
             | Layout::OpaqueStruct(_)
+            | Layout::Enum(_)
+            | Layout::Unit
             | Layout::Unsized => {},
         }
     }
 
     fn build_struct(
-        &mut self, layout: &StructLayout, to_fill: StructType<'ctx>,
-        ctx: &'ctx inkwell::context::Context,
+        &mut self, layout: &StructLayout, to_fill: StructType<'ctx>, ctx: &'ctx Context,
     ) {
         let fields: Vec<_> = layout
             .fields
@@ -225,44 +276,18 @@ impl<'ctx> ReprManager<'ctx> {
         to_fill.set_body(&fields, false);
     }
 
-    fn build_enum(
-        &mut self, layout: &Enum, to_fill: StructType<'ctx>, ctx: &'ctx inkwell::context::Context,
-    ) {
-        assert!(layout.alignment >= layout.disc_width);
-        assert!(layout.alignment <= 8);
+    fn build_union(&mut self, layout: &Union, to_fill: StructType<'ctx>, ctx: &'ctx Context) {
         assert_eq!(layout.size % layout.alignment, 0);
+        let align_unit_ty = ctx.custom_width_int_type((layout.alignment * 8) as _);
+        let body = align_unit_ty.array_type((layout.size / layout.alignment) as _);
+        to_fill.set_body(&[body.into()], false);
+    }
 
-        // TODO: ick, there's a lot of roundtrips between reprs here
-        let disc_part = match layout.disc_width {
-            1 => ctx.i8_type().into(),
-            2 => ctx.i16_type().into(),
-            4 => ctx.i32_type().into(),
-            8 => ctx.i64_type().into(),
-            w => panic!("impossible disc_width: {}", w),
-        };
-
-        if layout.field_layouts.is_empty() {
-            // Special case: fieldless enums consist of just the disc
-            assert_eq!(layout.alignment, layout.disc_width);
-            to_fill.set_body(&[disc_part], false);
-        } else {
-            let disc_padding_length = layout.alignment - layout.disc_width;
-            let val_length = layout.size - layout.alignment;
-
-            let disc_padding_part = ctx.i8_type().array_type(disc_padding_length as _).into();
-
-            let align_part = match layout.alignment {
-                1 => ctx.i8_type(),
-                2 => ctx.i16_type(),
-                4 => ctx.i32_type(),
-                8 => ctx.i64_type(),
-                w => panic!("unsupported alignment: {}", w),
-            };
-            let val_part = align_part
-                .array_type((val_length / layout.alignment) as _)
-                .into();
-
-            to_fill.set_body(&[disc_part, disc_padding_part, val_part], false);
-        }
+    fn build_tagged_union(
+        &mut self, layout: &TaggedUnion, to_fill: StructType<'ctx>, ctx: &'ctx Context,
+    ) {
+        let tag_part = self.build_layout(layout.tag_layout, ctx).1.unwrap();
+        let union_part = self.build_layout(layout.union_layout, ctx).1.unwrap();
+        to_fill.set_body(&[tag_part.into(), union_part.into()], false);
     }
 }

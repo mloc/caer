@@ -32,6 +32,13 @@ impl<T: PinionData> StateRef<T> {
     }
 }
 
+#[derive(PinionData)]
+#[repr(C, u8)]
+enum FooE {
+    A,
+    B(u8) = 7,
+}
+
 /*#[derive(PinionData)]
 #[pinion(name = "foo")]
 #[repr(C)]
