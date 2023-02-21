@@ -109,8 +109,13 @@ pub struct PinionField<const N: u32, S: PinionStruct, T: PinionData> {
     phantom: PhantomData<(S, T)>,
 }
 
-impl<const N: u32, S: PinionStruct, T: PinionData> Default for PinionField<N, S, T> {
-    fn default() -> Self {
+impl<const N: u32, S: PinionStruct, T: PinionData> PinionField<N, S, T> {
+    /// # Safety
+    /// Creating a PinionField is unsafe.
+    /// For the struct S, T must be the correct type for the Nth field. If this isn't the case, we
+    /// can emit bad code.
+    /// For the most part this is called by derive code.
+    pub unsafe fn create() -> Self {
         Self {
             phantom: PhantomData,
         }

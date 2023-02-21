@@ -810,7 +810,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             //Intrinsic::InvariantStart => ("llvm.invariant.start", vec![]),
         };
 
-        unsafe { self.ctx.get_intrinsic(name, &tys).unwrap() }
+        self.ctx.get_intrinsic(name, &tys).unwrap()
     }
 }
 

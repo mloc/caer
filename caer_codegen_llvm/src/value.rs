@@ -232,11 +232,15 @@ where
 {
     pub fn gep_disc(self, ctx: &Context<'_, 'ctx>) -> BrandedValue<'ctx, *mut TU::Tag> {
         let ptr = unsafe { ctx.const_gep(self.ptr_val(), &[0, 0]) };
+        // Safety: assuming TUs are {enum, union}, doing [0,0] on a TU pointer will give you a tag
+        // pointer.
         unsafe { BrandedValue::materialize(ctx, ptr.into()) }
     }
 
     pub fn gep_value(self, ctx: &Context<'_, 'ctx>) -> BrandedValue<'ctx, *mut TU::Union> {
         let ptr = unsafe { ctx.const_gep(self.ptr_val(), &[0, 1]) };
+        // Safety: assuming TUs are {enum, union}, doing [0,1] on a TU pointer will give you a
+        // union pointer.
         unsafe { BrandedValue::materialize(ctx, ptr.into()) }
     }
 }
@@ -246,10 +250,16 @@ where
     S: PinionStruct,
     T: PinionPointerType<Element = S>,
 {
+    // Something odd: _field here is unused in the body, but it's used to constrain the generics.
+    // This is weird and hacky, but I don't think there's a better way to namespace types like in a
+    // way that can be used for fns...
     pub fn gep_field<const N: u32, F: PinionData>(
-        self, ctx: &Context<'_, 'ctx>, field: PinionField<N, S, F>,
+        self, ctx: &Context<'_, 'ctx>, _field: PinionField<N, S, F>,
     ) -> BrandedValue<'ctx, *mut F> {
         let ptr = unsafe { ctx.const_gep(self.ptr_val(), &[0, N as _]) };
+        // Safety: We need to assume that the PinionField has correct generic parameters. Creating
+        // a PinionField is unsafe and (mostly) only done in derived code; in which case, we can
+        // trust it.
         unsafe { BrandedValue::materialize(ctx, ptr.into()) }
     }
 }
@@ -262,6 +272,7 @@ impl<'ctx> BrandedValue<'ctx, f32> {
             ctx.llvm_ctx.i32_type(),
             "",
         );
+        // Safety: The FPToSI cast is configured to produce a signed int32.
         // TODO: freeze, or handle poison values in some other way
         unsafe { BrandedValue::materialize(ctx, cast_maybe) }
     }

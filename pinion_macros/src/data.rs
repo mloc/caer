@@ -80,7 +80,7 @@ impl DeriveCtx {
             let i_u32 = i as u32;
             quote! {
                 pub fn #field_ident() -> pinion::PinionField<#i_u32, #ident #ty_generics, #ty> #where_clause {
-                    pinion::PinionField::default()
+                    unsafe { pinion::PinionField::create() }
                 }
             }
         });
