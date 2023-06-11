@@ -28,10 +28,12 @@ pub type ExMod = <caer_runtime::export::Runtime as PinionModule>::TFuncs;
 pub const GC_ADDRESS_SPACE: inkwell::AddressSpace = inkwell::AddressSpace::Generic;
 
 #[derive(Debug)]
-pub struct Context<'a, 'ctx> {
+pub struct Context<'ctx> {
     pub llvm_ctx: &'ctx inkwell::context::Context,
-    pub builder: &'a inkwell::builder::Builder<'ctx>,
-    pub module: &'a inkwell::module::Module<'ctx>,
+    // Module contains a RefCell, which makes it invariant over 'ctx. Using an Rc gets around
+    // needing another lifetime. (somehow??? builder also needs one)
+    pub builder: Rc<inkwell::builder::Builder<'ctx>>,
+    pub module: Rc<inkwell::module::Module<'ctx>>,
     pub rt: RtFuncs<'ctx>,
 
     target_data: TargetData,
@@ -41,10 +43,10 @@ pub struct Context<'a, 'ctx> {
     newfuncs: HashMap<TypeId, (Func, FunctionValue<'ctx>)>,
 }
 
-impl<'a, 'ctx> Context<'a, 'ctx> {
+impl<'ctx> Context<'ctx> {
     pub fn new(
-        llctx: &'ctx inkwell::context::Context, llmod: &'a inkwell::module::Module<'ctx>,
-        llbuild: &'a inkwell::builder::Builder<'ctx>,
+        llctx: &'ctx inkwell::context::Context, llmod: Rc<inkwell::module::Module<'ctx>>,
+        llbuild: Rc<inkwell::builder::Builder<'ctx>>,
     ) -> Self {
         let mut repr_manager = ReprManager::new();
         let funcs_vec = repr_manager.get_all_funcs::<caer_runtime::export::Runtime>(llctx);
@@ -67,7 +69,7 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
             .map(|(k, v, _)| (k, v))
             .collect();
 
-        let rt = RtFuncs::new(llctx, llmod, &mut repr_manager);
+        let rt = RtFuncs::new(llctx, llmod.clone(), &mut repr_manager);
 
         // is this.. OK?
         let data_layout = llmod.get_data_layout();
@@ -75,7 +77,7 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
 
         Self {
             builder: llbuild,
-            module: llmod,
+            module: llmod.clone(),
             llvm_ctx: llctx,
             rt,
             target_data,
@@ -153,7 +155,7 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
         &self, name: &str, param_types: &[BasicTypeEnum],
     ) -> Option<FunctionValue<'ctx>> {
         let intrinsic = Intrinsic::find(name)?;
-        intrinsic.get_declaration(self.module, param_types)
+        intrinsic.get_declaration(&self.module, param_types)
     }
 
     // wrong spot for this
@@ -215,6 +217,22 @@ impl<'a, 'ctx> Context<'a, 'ctx> {
         vt_lookup
     }*/
 }
+
+/*impl<'a, 'ctx> pinion::interface::Context for Context<'a, 'ctx> {
+    type BasicType = ();
+    type Funcs = &'ctx Self;
+    type FunctionType = ();
+    type Repr = ();
+    type ReprManager;
+
+    fn get_funcs(&self) -> Self::Funcs {
+        todo!()
+    }
+
+    fn get_repr_manager(&self) -> Self::ReprManager {
+        todo!()
+    }
+}*/
 
 // TODO: probably move out of context
 // TODO: redo all of this to a friendlier system
@@ -279,7 +297,7 @@ macro_rules! rt_funcs {
         }
 
         impl<'ctx> $name <'ctx> {
-            fn new(ctx: &'ctx inkwell::context::Context, module: &inkwell::module::Module<'ctx>, rm: &mut ReprManager<'ctx>) -> $name<'ctx> {
+            fn new(ctx: &'ctx inkwell::context::Context, module: Rc<inkwell::module::Module<'ctx>>, rm: &mut ReprManager<'ctx>) -> $name<'ctx> {
                 assert_eq!(size_of::<caer_runtime::val::Val>(), 24);
 
                 let tyb = RtFuncTyBundle::new(ctx, rm);

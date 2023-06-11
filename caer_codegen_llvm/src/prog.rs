@@ -1,5 +1,6 @@
 use std::fs::{self, File};
 use std::ptr::NonNull;
+use std::rc::Rc;
 
 use caer_ir::cfg::*;
 use caer_ir::module::Module;
@@ -27,10 +28,10 @@ use crate::context::{ExFunc, GC_ADDRESS_SPACE};
 use crate::value::BrandedValue;
 
 #[derive(Debug)]
-pub struct ProgEmit<'a, 'ctx> {
-    pub ctx: &'a Context<'a, 'ctx>,
-    pub env: &'a Module,
-    pub funcs: Vec<(&'a Function, FunctionValue<'ctx>)>,
+pub struct ProgEmit<'ctx> {
+    pub ctx: Rc<Context<'ctx>>,
+    pub env: &'ctx Module,
+    pub funcs: Vec<(&'ctx Function, FunctionValue<'ctx>)>,
     pub rt_global: inkwell::values::GlobalValue<'ctx>,
     pub rt_global_val: BrandedValue<'ctx, *mut Runtime>,
     // vtable global
@@ -45,8 +46,8 @@ pub struct ProgEmit<'a, 'ctx> {
     proc_type: FunctionType<'ctx>,
 }
 
-impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
-    pub fn new(ctx: &'a Context<'a, 'ctx>, env: &'a Module) -> Self {
+impl<'ctx> ProgEmit<'ctx> {
+    pub fn new(ctx: Rc<Context<'ctx>>, env: &'ctx Module) -> Self {
         let rt_type = ctx.get_llvm_type::<Runtime>();
         let funcptr_ty = ctx.get_llvm_type::<FuncPtr>();
 
@@ -84,12 +85,12 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         ft_global.set_constant(true);
 
         Self {
-            ctx,
+            ctx: ctx.clone(),
             env,
             funcs: Vec::new(),
             rt_global,
             rt_global_val: unsafe {
-                BrandedValue::<*mut Runtime>::materialize(ctx, rt_global.as_pointer_value().into())
+                BrandedValue::<*mut Runtime>::materialize(&ctx, rt_global.as_pointer_value().into())
             },
             vt_global,
             ft_global,
@@ -118,7 +119,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
         global_dty.proc_lookup[&name].top_func
     }
 
-    fn add_func(&mut self, ir_func: &'a Function) {
+    fn add_func(&mut self, ir_func: &'ctx Function) {
         let ty = if ir_func.closure.is_some() {
             self.ctx.rt.ty.closure_type
         } else {
@@ -148,7 +149,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             // TODO no
             println!("EMITTING {:?}", ir_func.id);
             let walker = CFGWalker::build(ir_func);
-            let mut func_emit = FuncEmit::new(self.ctx, self, ir_func, ll_func);
+            let mut func_emit = FuncEmit::new(&self.ctx, self, ir_func, ll_func);
             walker.walk(ir_func, &mut func_emit);
         }
         let main_proc = self.lookup_global_proc(self.env.intern_string_ro("entry"));
@@ -166,18 +167,17 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
     pub(crate) fn copy_val(&self, src: PointerValue<'ctx>, dest: PointerValue<'ctx>) {
         assert_eq!(src.get_type(), dest.get_type());
 
-        let memcpy_intrinsic = unsafe {
-            self.ctx
-                .get_intrinsic(
-                    "llvm.memcpy",
-                    &[
-                        src.get_type().into(),
-                        dest.get_type().into(),
-                        self.ctx.llvm_ctx.i64_type().into(),
-                    ],
-                )
-                .unwrap()
-        };
+        let memcpy_intrinsic = self
+            .ctx
+            .get_intrinsic(
+                "llvm.memcpy",
+                &[
+                    src.get_type().into(),
+                    dest.get_type().into(),
+                    self.ctx.llvm_ctx.i64_type().into(),
+                ],
+            )
+            .unwrap();
 
         self.ctx.builder.build_call(
             memcpy_intrinsic,
@@ -347,7 +347,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
                 );
                 asg.set_initializer(&alloc_string);
                 asg.set_constant(true);
-                unsafe { BrandedValue::materialize(self.ctx, asg.as_pointer_value().into()) }
+                unsafe { BrandedValue::materialize(&self.ctx, asg.as_pointer_value().into()) }
             })
             .collect();
     }
@@ -774,7 +774,7 @@ impl<'a, 'ctx> ProgEmit<'a, 'ctx> {
             pm_builder.set_optimization_level(inkwell::OptimizationLevel::Aggressive);
             let pm = inkwell::passes::PassManager::create(());
             pm_builder.populate_module_pass_manager(&pm);
-            pm.run_on(self.ctx.module);
+            pm.run_on(&self.ctx.module);
 
             //self.ctx.module.print_to_stderr();
             self.dump_module("opt");

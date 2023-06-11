@@ -9,5 +9,5 @@ description = "Mid-level wrappers around inkwell's API"
 
 [dependencies]
 pinion_macros = { path = "../pinion_macros" }
-once_cell = "1.4.0"
-ordered-float = "2.0.0"
+once_cell = "1.7.2"
+ordered-float = "2.2.0"

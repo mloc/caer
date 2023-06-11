@@ -64,6 +64,15 @@ pub struct ReprManager<'ctx> {
     tagged_unions: HashMap<LayoutId, Rc<TaggedUnionRepr<'ctx>>>,
 }
 
+/*impl<'ctx> pinion::ReprManager for ReprManager<'ctx> {
+    type Funcs = ();
+    type Repr = ();
+
+    fn build_repr<T: PinionData>(&mut self, ctx: Self::Funcs) -> Self::Repr {
+        todo!()
+    }
+}*/
+
 impl<'ctx> ReprManager<'ctx> {
     pub fn new() -> Self {
         Self::default()

@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 mod context;
 mod emit_type;
 mod func;
@@ -10,11 +12,11 @@ pub fn emit(ir: &caer_ir::module::Module) {
         .unwrap();
 
     let llctx = inkwell::context::Context::create();
-    let llmod = llctx.create_module("main");
-    let llbuild = llctx.create_builder();
+    let llmod = Rc::new(llctx.create_module("main"));
+    let llbuild = Rc::new(llctx.create_builder());
 
-    let emit_ctx = context::Context::new(&llctx, &llmod, &llbuild);
-    let mut builder = prog::ProgEmit::new(&emit_ctx, ir);
+    let emit_ctx = context::Context::new(&llctx, llmod.clone(), llbuild.clone());
+    let mut builder = prog::ProgEmit::new(Rc::new(emit_ctx), ir);
 
     builder.build_funcs();
     builder.emit();

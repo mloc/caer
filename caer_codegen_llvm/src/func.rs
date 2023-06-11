@@ -27,10 +27,10 @@ use crate::prog::{Intrinsic, ProgEmit};
 use crate::value::{BrandedStackValue, BrandedValue};
 
 #[derive(Debug)]
-pub struct FuncEmit<'a, 'p, 'ctx> {
-    ctx: &'a Context<'a, 'ctx>,
+pub struct FuncEmit<'a, 'ctx> {
+    ctx: &'a Context<'ctx>,
     ir_func: &'a Function,
-    prog_emit: &'a ProgEmit<'p, 'ctx>,
+    prog_emit: &'a ProgEmit<'ctx>,
 
     var_allocs: IndexVec<VarId, BrandedStackValue<'ctx>>,
     locals: IndexVec<LocalId, Option<BrandedStackValue<'ctx>>>,
@@ -39,9 +39,9 @@ pub struct FuncEmit<'a, 'p, 'ctx> {
     ll_func: FunctionValue<'ctx>,
 }
 
-impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
+impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
     pub fn new(
-        ctx: &'a Context<'a, 'ctx>, prog_emit: &'a ProgEmit<'p, 'ctx>, ir_func: &'a Function,
+        ctx: &'a Context<'ctx>, prog_emit: &'a ProgEmit<'ctx>, ir_func: &'a Function,
         ll_func: FunctionValue<'ctx>,
     ) -> Self {
         Self {
@@ -58,7 +58,7 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
     }
 }
 
-impl<'a, 'p, 'ctx> WalkActor for FuncEmit<'a, 'p, 'ctx> {
+impl<'a, 'ctx> WalkActor for FuncEmit<'a, 'ctx> {
     fn pre_start(&mut self, _: &CFGWalker) {
         let entry_bb = self.emit_entry_block();
         for cfg_block in self.ir_func.blocks.iter() {
@@ -92,7 +92,7 @@ impl<'a, 'p, 'ctx> WalkActor for FuncEmit<'a, 'p, 'ctx> {
     fn end(&mut self, _: &CFGWalker) {}
 }
 
-impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
+impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
     fn get_ty(&self, ty: TypeId) -> &Type {
         self.prog_emit.env.types.get(ty)
     }
@@ -503,11 +503,10 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
     ) -> Option<BasicValueEnum<'ctx>> {
         // TODO: NEEDS TO USE OP BUNDLES FOR LLVM 12+
 
-        let sp_intrinsic = unsafe {
-            self.ctx
-                .get_intrinsic("llvm.experimental.gc.statepoint", &[func.get_type().into()])
-                .unwrap()
-        };
+        let sp_intrinsic = self
+            .ctx
+            .get_intrinsic("llvm.experimental.gc.statepoint", &[func.get_type().into()])
+            .unwrap();
 
         let mut stack_ptrs: Vec<BasicValueEnum> = Vec::new();
         for live_local in live.local.iter().copied() {
@@ -604,11 +603,10 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
             .into_function_type()
             .get_return_type();
         if let Some(return_type) = return_type {
-            let result_intrinsic = unsafe {
-                self.ctx
-                    .get_intrinsic("llvm.experimental.gc.result", &[return_type])
-                    .unwrap()
-            };
+            let result_intrinsic = self
+                .ctx
+                .get_intrinsic("llvm.experimental.gc.result", &[return_type])
+                .unwrap();
             self.ctx
                 .builder
                 .build_call(result_intrinsic, &[statepoint_token.into()], "")
@@ -1527,35 +1525,32 @@ impl<'a, 'p, 'ctx> FuncEmit<'a, 'p, 'ctx> {
 
         // SETNAME argpack
         let argpack = BrandedValue::<*mut ProcPack>::build_as_alloca(self.ctx);
-        unsafe {
-            let unnamed_field =
-                argpack.gep_field(self.ctx, <ProcPack as PinionStruct>::Fields::unnamed());
 
-            unnamed_field
-                .gep_field(self.ctx, <FfiArray<Val> as PinionStruct>::Fields::len())
-                .build_store(
-                    self.ctx,
-                    BrandedValue::<u64>::literal(args.len() as _, self.ctx),
-                );
-            unnamed_field
-                .gep_field(self.ctx, <FfiArray<Val> as PinionStruct>::Fields::data())
-                .build_store(self.ctx, argpack_unnamed.cast_ptr(self.ctx));
+        let unnamed_field =
+            argpack.gep_field(self.ctx, <ProcPack as PinionStruct>::Fields::unnamed());
 
-            let named_field =
-                argpack.gep_field(self.ctx, <ProcPack as PinionStruct>::Fields::named());
+        unnamed_field
+            .gep_field(self.ctx, <FfiArray<Val> as PinionStruct>::Fields::len())
+            .build_store(
+                self.ctx,
+                BrandedValue::<u64>::literal(args.len() as _, self.ctx),
+            );
+        unnamed_field
+            .gep_field(self.ctx, <FfiArray<Val> as PinionStruct>::Fields::data())
+            .build_store(self.ctx, argpack_unnamed.cast_ptr(self.ctx));
 
-            named_field
-                .gep_field(
-                    self.ctx,
-                    <FfiArray<(StringId, Val)> as PinionStruct>::Fields::len(),
-                )
-                .build_store(self.ctx, BrandedValue::<u64>::literal(0, self.ctx));
+        let named_field = argpack.gep_field(self.ctx, <ProcPack as PinionStruct>::Fields::named());
 
-            if let Some(id) = src {
-                let src_field =
-                    argpack.gep_field(self.ctx, <ProcPack as PinionStruct>::Fields::src());
-                self.conv_local_any_into(id, src_field);
-            }
+        named_field
+            .gep_field(
+                self.ctx,
+                <FfiArray<(StringId, Val)> as PinionStruct>::Fields::len(),
+            )
+            .build_store(self.ctx, BrandedValue::<u64>::literal(0, self.ctx));
+
+        if let Some(id) = src {
+            let src_field = argpack.gep_field(self.ctx, <ProcPack as PinionStruct>::Fields::src());
+            self.conv_local_any_into(id, src_field);
         }
 
         argpack
