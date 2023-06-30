@@ -1,71 +1,51 @@
 use proc_macro2::{Span, TokenStream};
-use quote::{quote, ToTokens};
-use syn::parse::{ParseStream, Parser};
-use syn::punctuated::Punctuated;
-use syn::token::Comma;
-use syn::{parse_quote, GenericParam, Generics, Token, TypeGenerics};
+use quote::quote;
+use syn::parse_quote;
 
-use crate::attr::DataAttributes;
+use super::Derivable;
+use crate::ctx::DeriveCtx;
+use crate::helpers::{ident_to_litstr, make_impl_bounds, make_ty_static, phantom_generics};
 use crate::ty;
+pub struct PinionDataDerivable;
 
-pub struct DeriveCtx {
-    vis: syn::Visibility,
-    ident: syn::Ident,
-    data: syn::Data,
-    generics: syn::Generics,
-    attrs: DataAttributes,
+impl Derivable for PinionDataDerivable {
+    fn derive_struct_named(
+        &self, ctx: &DeriveCtx, fields: &[syn::Field],
+    ) -> syn::Result<TokenStream> {
+        Ok(Self::derive_named(ctx, fields))
+    }
+
+    // TODO: newtype handling needs a rework, probably with an attribute
+    fn derive_struct_unnamed(
+        &self, ctx: &DeriveCtx, fields: &[syn::Field],
+    ) -> syn::Result<TokenStream> {
+        Ok(Self::derive_newtype(ctx, fields))
+    }
+
+    fn derive_unit_enum(
+        &self, ctx: &DeriveCtx, enum_data: &syn::DataEnum, disc_ty: &syn::Type,
+    ) -> syn::Result<TokenStream> {
+        Ok(Self::derive_unit_enum(ctx, enum_data, disc_ty, &ctx.ident))
+    }
+
+    fn derive_field_enum(
+        &self, ctx: &DeriveCtx, enum_data: &syn::DataEnum, disc_ty: &syn::Type,
+    ) -> syn::Result<TokenStream> {
+        Ok(Self::derive_enum(ctx, enum_data, disc_ty))
+    }
 }
 
-impl DeriveCtx {
-    pub fn create(input: syn::DeriveInput) -> Self {
-        let syn::DeriveInput {
-            vis,
-            ident,
-            data,
-            generics,
-            attrs,
-            ..
-        } = input;
-
-        let attrs = DataAttributes::from_attrs(&attrs).unwrap();
-
-        Self {
-            vis,
-            ident,
-            data,
-            generics,
-            attrs,
-        }
-    }
-
-    pub fn derive(&self) -> TokenStream {
-        match &self.data {
-            syn::Data::Struct(s) => match &s.fields {
-                syn::Fields::Named(f) => {
-                    let fields: Vec<_> = f.named.iter().cloned().collect();
-                    self.derive_named(&fields)
-                },
-                syn::Fields::Unnamed(f) => {
-                    let fields: Vec<_> = f.unnamed.iter().cloned().collect();
-                    self.derive_newtype(&fields)
-                },
-                _ => panic!("struct must have fields"),
-            },
-            syn::Data::Enum(e) => self.derive_enum(e),
-            _ => panic!("can only derive for structs and enums"),
-        }
-    }
-
-    pub fn derive_named(&self, fields: &[syn::Field]) -> TokenStream {
+impl PinionDataDerivable {
+    pub fn derive_named(ctx: &DeriveCtx, fields: &[syn::Field]) -> TokenStream {
         let lctxq: syn::Ident = parse_quote! { lctx };
 
-        let ident = &self.ident;
+        let ident = &ctx.ident;
         let ident_str = ident.to_string();
-        let vis = &self.vis;
+        let vis = &ctx.vis;
 
-        let (impl_generics, ty_generics, _) = self.generics.split_for_impl();
+        let (impl_generics, ty_generics, _) = ctx.generics.split_for_impl();
         let static_params = make_ty_static(&ty_generics);
-        let where_clause = make_impl_bounds(&self.generics);
+        let where_clause = make_impl_bounds(&ctx.generics);
         let phantom_generics = phantom_generics(&ty_generics);
 
         let field_names = fields
@@ -92,7 +72,7 @@ impl DeriveCtx {
         });
 
         let field_ty_name = syn::Ident::new(
-            &format!("__PINION_FIELD_ENUM__{}", self.ident),
+            &format!("__PINION_FIELD_ENUM__{}", ctx.ident),
             Span::call_site(),
         );
 
@@ -133,7 +113,7 @@ impl DeriveCtx {
         }
     }
 
-    fn derive_newtype(&self, fields: &[syn::Field]) -> TokenStream {
+    fn derive_newtype(ctx: &DeriveCtx, fields: &[syn::Field]) -> TokenStream {
         assert_eq!(fields.len(), 1);
 
         let s_ty = &fields.first().unwrap().ty;
@@ -142,11 +122,11 @@ impl DeriveCtx {
 
         let inner_data = ty::populate_ty(&lctxq, s_ty);
         let validate_body = ty::build_validate(&parse_quote! { ptr }, s_ty);
-        let ident = &self.ident;
+        let ident = &ctx.ident;
 
-        let (impl_generics, ty_generics, _) = self.generics.split_for_impl();
+        let (impl_generics, ty_generics, _) = ctx.generics.split_for_impl();
         let static_params = make_ty_static(&ty_generics);
-        let where_clause = make_impl_bounds(&self.generics);
+        let where_clause = make_impl_bounds(&ctx.generics);
 
         quote! {
             #[automatically_derived]
@@ -167,7 +147,7 @@ impl DeriveCtx {
 
     // Create a unit (fieldless) enum from this enum, and derive the right bits for it.
     fn materialize_enum(
-        &self, enum_data: &syn::DataEnum, name: &syn::Ident, prim: &syn::Type,
+        ctx: &DeriveCtx, enum_data: &syn::DataEnum, name: &syn::Ident, prim: &syn::Type,
     ) -> TokenStream {
         let variants = enum_data.variants.iter().map(|v| syn::Variant {
             attrs: vec![],
@@ -175,9 +155,9 @@ impl DeriveCtx {
             fields: syn::Fields::Unit,
             discriminant: v.discriminant.clone(),
         });
-        let vis = &self.vis;
+        let vis = &ctx.vis;
 
-        let derives = self.derive_unit_enum(enum_data, name, prim);
+        let derives = Self::derive_unit_enum(ctx, enum_data, prim, name);
 
         quote! {
             #[repr(#prim)]
@@ -191,7 +171,7 @@ impl DeriveCtx {
     }
 
     fn derive_unit_enum(
-        &self, enum_data: &syn::DataEnum, name: &syn::Ident, prim: &syn::Type,
+        ctx: &DeriveCtx, enum_data: &syn::DataEnum, disc_ty: &syn::Type, name: &syn::Ident,
     ) -> TokenStream {
         let disc_const_names: Vec<syn::Ident> = (0..enum_data.variants.len())
             .map(|i| syn::Ident::new(&format!("DISC_{}", i), Span::call_site()))
@@ -202,7 +182,7 @@ impl DeriveCtx {
         for (i, v) in enum_data.variants.iter().enumerate() {
             let v_ident = &v.ident;
             let i_expr: syn::Expr = parse_quote! { #i };
-            disc_values.push(parse_quote! { #name::#v_ident as #prim });
+            disc_values.push(parse_quote! { #name::#v_ident as #disc_ty });
             disc_values_reverse.push(parse_quote! { (#name::#v_ident as u64, #i_expr) });
         }
 
@@ -217,7 +197,7 @@ impl DeriveCtx {
                 fn get_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Layout {
                     let enum_layout = pinion::layout::Enum {
                         name: Some(#ident_str),
-                        disc_layout: lctx.populate::<#prim>(),
+                        disc_layout: lctx.populate::<#disc_ty>(),
                         disc_values: vec![#(#disc_values as u64,)*],
                         disc_values_reverse: [#(#disc_values_reverse,)*].into(),
                     };
@@ -225,9 +205,9 @@ impl DeriveCtx {
                 }
 
                 unsafe fn validate(ptr: *const u8) {
-                    #(const #disc_const_names: #prim = #disc_values;)*
+                    #(const #disc_const_names: #disc_ty = #disc_values;)*
 
-                    let disc: #prim = *(ptr as *const #prim);
+                    let disc: #disc_ty = *(ptr as *const #disc_ty);
                     match disc {
                         #(#disc_const_names)|* => {},
                         _ => panic!(),
@@ -236,10 +216,10 @@ impl DeriveCtx {
             }
             #[automatically_derived]
             impl pinion::PinionEnum for #name {
-                type Disc = #prim;
+                type Disc = #disc_ty;
 
                 fn to_disc(self) -> Self::Disc {
-                    self as #prim
+                    self as #disc_ty
                 }
             }
         }
@@ -247,8 +227,8 @@ impl DeriveCtx {
 
     // wow so many verbs, is this a thesaurus?
     // organise!!!
-    fn build_union(&self, enum_data: &syn::DataEnum, name: &syn::Ident) -> TokenStream {
-        let vis = &self.vis;
+    fn build_union(ctx: &DeriveCtx, enum_data: &syn::DataEnum, name: &syn::Ident) -> TokenStream {
+        let vis = &ctx.vis;
         let name_str = name.to_string();
 
         let mut variant_names: Vec<&syn::Ident> = vec![];
@@ -260,7 +240,11 @@ impl DeriveCtx {
             match &v.fields {
                 syn::Fields::Named(_) => todo!(),
                 syn::Fields::Unnamed(u) => {
-                    assert_eq!(u.unnamed.len(), 1);
+                    assert_eq!(
+                        u.unnamed.len(),
+                        1,
+                        "union can't handle variant with >1 types"
+                    );
                     let ty = &u.unnamed[0].ty;
                     variant_tys.push(ty);
                 },
@@ -272,7 +256,7 @@ impl DeriveCtx {
 
         assert!(!variant_tys.is_empty());
 
-        let generics = &self.generics;
+        let generics = &ctx.generics;
 
         quote! {
             #[repr(C)]
@@ -304,48 +288,34 @@ impl DeriveCtx {
         }
     }
 
-    fn derive_enum(&self, enum_data: &syn::DataEnum) -> TokenStream {
-        let (disc_width, has_c) = self.attrs.repr().as_enum().unwrap();
-        let prim: syn::Type = match disc_width {
-            1 => parse_quote! {u8},
-            2 => parse_quote! {u16},
-            4 => parse_quote! {u32},
-            8 => parse_quote! {u64},
-            _ => unreachable!(),
-        };
-
-        let has_fields = enum_data
-            .variants
-            .iter()
-            .any(|v| !matches!(v.fields, syn::Fields::Unit));
-
-        assert_eq!(has_fields, has_c);
-
-        if !has_fields {
-            return self.derive_unit_enum(enum_data, &self.ident, &prim);
-        }
-
+    fn derive_enum(ctx: &DeriveCtx, enum_data: &syn::DataEnum, disc_ty: &syn::Type) -> TokenStream {
         // We create a unit enum to act as the tag, and a union marker type for the fields.
         // TODO: names from attr
-        let tag_enum_name = syn::Ident::new(&format!("{}Tag", self.ident), self.ident.span());
-        let field_union_name = syn::Ident::new(&format!("{}Union", self.ident), self.ident.span());
+        let tag_enum_name = syn::Ident::new(&format!("{}Tag", ctx.ident), ctx.ident.span());
+        let field_union_name = syn::Ident::new(&format!("{}Union", ctx.ident), ctx.ident.span());
 
-        let tag_enum_decl = self.materialize_enum(enum_data, &tag_enum_name, &prim);
-        let field_union_decl = self.build_union(enum_data, &field_union_name);
+        let tag_enum_decl = Self::materialize_enum(ctx, enum_data, &tag_enum_name, disc_ty);
+        let field_union_decl = Self::build_union(ctx, enum_data, &field_union_name);
 
         // Sanity check: currently we only handle unnamed fields with a single type
         // TODO(ERRH)
         enum_data.variants.iter().for_each(|v| match &v.fields {
             syn::Fields::Named(_) => todo!(),
-            syn::Fields::Unnamed(u) => assert_eq!(u.unnamed.len(), 1),
+            syn::Fields::Unnamed(u) => assert_eq!(u.unnamed.len(), 1, "enum has >1 types"),
             syn::Fields::Unit => {},
         });
 
-        let ident = &self.ident;
+        let as_tag_mappers = enum_data.variants.iter().map(|v| {
+            let ident = &v.ident;
+            let field_q = (!v.fields.is_empty()).then(|| quote!((..)));
+            quote!(Self::#ident #field_q => Self::Tag::#ident)
+        });
+
+        let ident = &ctx.ident;
         let ident_str = ident.to_string();
-        let (impl_generics, ty_generics, _) = self.generics.split_for_impl();
+        let (impl_generics, ty_generics, _) = ctx.generics.split_for_impl();
         let static_params = make_ty_static(&ty_generics);
-        let where_clause = make_impl_bounds(&self.generics);
+        let where_clause = make_impl_bounds(&ctx.generics);
 
         quote! {
             #[automatically_derived]
@@ -370,82 +340,17 @@ impl DeriveCtx {
             impl #impl_generics pinion::PinionTaggedUnion for #ident #ty_generics #where_clause {
                 type Tag = #tag_enum_name;
                 type Union = #field_union_name;
+
+                fn as_tag(&self) -> Self::Tag {
+                    match self {
+                        #(#as_tag_mappers,)*
+                    }
+                }
             }
 
             #tag_enum_decl
 
             #field_union_decl
         }
-    }
-}
-
-fn ident_to_litstr(ident: &syn::Ident) -> syn::LitStr {
-    syn::LitStr::new(&ident.to_string(), ident.span())
-}
-
-fn make_ty_static(ty_generics: &TypeGenerics) -> TokenStream {
-    let ts = ty_generics.to_token_stream();
-    if ts.is_empty() {
-        return ts;
-    }
-
-    let params = parse_spec.parse2(ts).expect("weewhooo");
-
-    let tss = params.iter().map(|param| match param {
-        GenericParam::Lifetime(_) => parse_quote! {'static},
-        GenericParam::Type(ty) => quote! {<#ty as pinion::PinionData> :: Static},
-        GenericParam::Const(_) => panic!("can't handle const"),
-    });
-
-    quote! {
-        < #(#tss,)* >
-    }
-}
-
-fn phantom_generics(ty_generics: &TypeGenerics) -> TokenStream {
-    let ts = ty_generics.to_token_stream();
-    if ts.is_empty() {
-        return quote! { <()> };
-    }
-
-    let params = parse_spec.parse2(ts).expect("weewhooo");
-
-    let tss = params.iter().map(|param| match param {
-        GenericParam::Lifetime(lt) => parse_quote! { & #lt () },
-        GenericParam::Type(ty) => quote! { #ty },
-        GenericParam::Const(_) => panic!("can't handle const"),
-    });
-
-    quote! {
-        < ( #(#tss),* ) >
-    }
-}
-
-fn parse_spec(input: ParseStream) -> Result<Punctuated<GenericParam, Comma>, syn::Error> {
-    let _: Token![<] = input.parse()?;
-    let res = Punctuated::<GenericParam, Comma>::parse_separated_nonempty(input)?;
-    let _: Token![>] = input.parse()?;
-    Ok(res)
-}
-
-fn make_impl_bounds(generics: &Generics) -> TokenStream {
-    if generics.params.is_empty() {
-        return quote! {};
-    }
-    let mut where_clauses: Vec<_> = generics
-        .where_clause
-        .as_ref()
-        .map(|c| c.predicates.iter().cloned().collect())
-        .unwrap_or_default();
-
-    for param in generics.params.iter() {
-        if let GenericParam::Type(ty) = param {
-            let ident = &ty.ident;
-            where_clauses.push(parse_quote! { #ident: pinion::PinionData })
-        }
-    }
-
-    quote! {
-        where #(#where_clauses),*
     }
 }

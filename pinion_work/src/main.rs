@@ -1,11 +1,52 @@
-#![feature(arbitrary_enum_discriminant)]
-
 use std::marker::PhantomData;
 
 use pinion::layout_ctx::LayoutCtx;
-use pinion::{gep_path, pinion_export, pinion_module, PinionData, PinionField, PinionStruct};
+use pinion::{
+    gep_path, pinion_export, pinion_module, PinionConstWrap, PinionData, PinionField, PinionStruct,
+};
 
-#[derive(PinionData)]
+#[repr(C)]
+#[derive(PinionData, PinionConstWrap)]
+struct Foo {
+    a: bool,
+    b: Bar,
+}
+
+#[repr(C)]
+#[derive(PinionData, PinionConstWrap)]
+struct Bar {
+    count: i64,
+}
+
+#[repr(C, u8)]
+#[derive(PinionData, PinionConstWrap)]
+enum Bcwar {
+    A(i8),
+    B(Bar),
+    E,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PinionData, PinionConstWrap)]
+enum Sunit {
+    E,
+    F,
+    J,
+}
+
+fn main() {
+    let mut ctx = LayoutCtx::new();
+    let id = ctx.populate::<Foo>();
+    println!("{:#?}", ctx.get(id));
+
+    let x = Foo {
+        a: false,
+        b: Bar { count: 3939 },
+    };
+    println!("{:#?}", x.const_wrap(&mut ctx));
+}
+
+/*#[derive(PinionData)]
 #[repr(C)]
 struct Foo<P> {
     a: u8,
@@ -37,7 +78,7 @@ impl<T: PinionData> StateRef<T> {
 enum FooE {
     A,
     B(u8) = 7,
-}
+}*/
 
 /*#[derive(PinionData)]
 #[pinion(name = "foo")]

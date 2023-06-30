@@ -2,26 +2,37 @@ use anyhow::{anyhow, bail, Context, Result};
 use syn::parse::{ParseStream, Parser};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
-use syn::{parenthesized, Attribute, Ident, Lit, Meta};
+use syn::{parenthesized, parse_quote, Attribute, Ident, Lit, Meta};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Repr {
-    Struct { packed: bool },
-    Enum { disc_width: i32, has_c: bool },
+    Struct(StructRepr),
+    Enum(EnumRepr),
+}
+
+#[derive(Debug, Clone)]
+pub struct StructRepr {
+    pub packed: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumRepr {
+    pub disc_ty: syn::Type,
+    pub has_c: bool,
 }
 
 impl Repr {
-    pub fn as_struct(self) -> Option<bool> {
-        if let Self::Struct { packed } = self {
-            Some(packed)
+    pub fn as_struct(&self) -> Option<&StructRepr> {
+        if let Self::Struct(s) = self {
+            Some(s)
         } else {
             None
         }
     }
 
-    pub fn as_enum(self) -> Option<(i32, bool)> {
-        if let Self::Enum { disc_width, has_c } = self {
-            Some((disc_width, has_c))
+    pub fn as_enum(&self) -> Option<&EnumRepr> {
+        if let Self::Enum(e) = self {
+            Some(e)
         } else {
             None
         }
@@ -82,27 +93,24 @@ impl DataAttributes {
             Parser::parse2(parser, attr.tokens.clone()).context("failed to parse punct")?;
 
         let mut has_c = false;
-        let mut width = None;
+        let mut disc_ty = None;
 
         for part in repr_parts {
             match part.to_string().as_str() {
                 "C" if !has_c => has_c = true,
                 // TODO: hmmm
                 "transparent" if !has_c => has_c = true,
-                "u8" if width.is_none() => width = Some(1),
-                "u16" if width.is_none() => width = Some(2),
-                "u32" if width.is_none() => width = Some(4),
-                "u64" if width.is_none() => width = Some(8),
+                "u8" if disc_ty.is_none() => disc_ty = Some(parse_quote! {u8}),
+                "u16" if disc_ty.is_none() => disc_ty = Some(parse_quote! {u16}),
+                "u32" if disc_ty.is_none() => disc_ty = Some(parse_quote! {u32}),
+                "u64" if disc_ty.is_none() => disc_ty = Some(parse_quote! {u64}),
                 p => bail!("Bad part in repr: {}", p),
             }
         }
 
-        Ok(match (has_c, width) {
-            (true, None) => Repr::Struct { packed: false },
-            (has_c, Some(w)) => Repr::Enum {
-                disc_width: w,
-                has_c,
-            },
+        Ok(match (has_c, disc_ty) {
+            (true, None) => Repr::Struct(StructRepr { packed: false }),
+            (has_c, Some(disc_ty)) => Repr::Enum(EnumRepr { disc_ty, has_c }),
             (false, None) => unreachable!(),
         })
     }
@@ -111,7 +119,7 @@ impl DataAttributes {
         self.name.as_deref()
     }
 
-    pub fn repr(&self) -> Repr {
-        self.repr
+    pub fn repr(&self) -> &Repr {
+        &self.repr
     }
 }

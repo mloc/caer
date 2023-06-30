@@ -1,21 +1,37 @@
 mod attr;
-mod data;
+mod ctx;
+mod derivable;
 mod export;
 mod func;
+mod helpers;
 mod ty;
 
 extern crate proc_macro;
 
-use data::DeriveCtx;
+use ctx::DeriveCtx;
+use derivable::pinion_const_wrap::PinionConstWrapDerivable;
+use derivable::pinion_data::PinionDataDerivable;
 use proc_macro::TokenStream;
 use syn::{parse_macro_input, DeriveInput};
 
 #[proc_macro_derive(PinionData, attributes(pinion))]
-pub fn derive_data(input: TokenStream) -> TokenStream {
+pub fn derive_pinion_data(input: TokenStream) -> TokenStream {
     let input: DeriveInput = parse_macro_input!(input);
-
     let ctx = DeriveCtx::create(input);
-    ctx.derive().into()
+
+    derivable::derive(&PinionDataDerivable, &ctx)
+        .unwrap()
+        .into()
+}
+
+#[proc_macro_derive(PinionConstWrap)]
+pub fn derive_pinion_const_wrap(input: TokenStream) -> TokenStream {
+    let input: DeriveInput = parse_macro_input!(input);
+    let ctx = DeriveCtx::create(input);
+
+    derivable::derive(&PinionConstWrapDerivable, &ctx)
+        .unwrap()
+        .into()
 }
 
 #[proc_macro_attribute]

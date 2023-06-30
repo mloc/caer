@@ -6,6 +6,7 @@ use std::ptr::NonNull;
 
 use ordered_float::OrderedFloat;
 
+use crate::const_wrap::PinionConstWrap;
 use crate::interface::Context;
 use crate::layout::{self, Func, Layout, StructLayout};
 use crate::layout_ctx::LayoutCtx;
@@ -21,7 +22,7 @@ pub trait PinionData: Sized {
     fn get_layout(lctx: &mut LayoutCtx) -> Layout;
 }
 
-pub trait PinionPrim: PinionData + Copy {}
+pub trait PinionPrim: PinionData + PinionConstWrap + Copy {}
 
 // When derived, has an fn pinion_bind(fields...) -> PSB
 pub trait PinionStruct: PinionData {
@@ -42,6 +43,8 @@ pub trait PinionUnion: PinionData {}
 pub trait PinionTaggedUnion: PinionData {
     type Tag: PinionEnum;
     type Union: PinionUnion;
+
+    fn as_tag(&self) -> Self::Tag;
 }
 
 // marker trait. must be a nicheable type
