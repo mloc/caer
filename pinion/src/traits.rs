@@ -61,24 +61,44 @@ pub trait PinionFunc {
     fn get_func_layout(lctx: &mut LayoutCtx) -> Func;
 }
 
-pub trait PinionModule {
+pub trait PinionModule: 'static {
     type Funcs: PinionModuleFuncsEnum;
     type TFuncs: PinionModuleFuncs;
     fn get_funcs(lctx: &mut LayoutCtx) -> Vec<(Self::Funcs, TypeId, Func)>;
+
+    fn get_bundle_func<const N: usize, F: PinionFuncInstance<Self>, R, V>(
+        _bundle: &PinionCallBundle<N, Self, F, R, V>,
+    ) -> Self::Funcs
+    where
+        Self: PinionModuleIdForFunc<F> + Sized,
+    {
+        <Self as PinionModuleIdForFunc<F>>::get_id()
+    }
 }
 
 pub trait PinionModuleFuncsEnum: Clone + Copy + Debug {
     fn get_name(self) -> &'static str;
 }
 
-pub trait PinionModuleFuncs {}
+pub trait PinionModuleIdForFunc<F: PinionFunc>: PinionModule {
+    fn get_id() -> Self::Funcs;
+}
+
+pub trait PinionModuleFuncs {
+    type Module: PinionModule;
+}
 
 // Should always have `bind(arg1, arg2, ...) -> PCB<Self, ret>`
-pub trait PinionFuncInstance: PinionFunc + 'static {}
+// Must be bound to a specific module M.
+// TODO: maybe make M an associated type. this complicates derivation: the export macro needs to
+// somehow be aware of the arguments.
+pub trait PinionFuncInstance<M: PinionModule>: PinionFunc + 'static {
+    fn create() -> Self;
+}
 
-pub struct PinionCallBundle<const N: usize, F: PinionFuncInstance, R, V> {
+pub struct PinionCallBundle<const N: usize, M: PinionModule, F: PinionFuncInstance<M>, R, V> {
     pub args: [V; N],
-    phantom: PhantomData<(F, R)>,
+    phantom: PhantomData<(F, R, M)>,
 }
 
 pub struct PinionStructBundle<const N: usize, S: PinionStruct, V> {
@@ -86,7 +106,9 @@ pub struct PinionStructBundle<const N: usize, S: PinionStruct, V> {
     phantom: PhantomData<S>,
 }
 
-impl<const N: usize, F: PinionFuncInstance, R, V> PinionCallBundle<N, F, R, V> {
+impl<const N: usize, M: PinionModule, F: PinionFuncInstance<M>, R, V>
+    PinionCallBundle<N, M, F, R, V>
+{
     pub fn new(args: [V; N]) -> Self {
         Self {
             args,

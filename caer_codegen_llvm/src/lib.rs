@@ -1,5 +1,6 @@
 use std::rc::Rc;
 
+mod const_value;
 mod context;
 mod emit_type;
 mod func;
@@ -15,8 +16,8 @@ pub fn emit(ir: &caer_ir::module::Module) {
     let llmod = Rc::new(llctx.create_module("main"));
     let llbuild = Rc::new(llctx.create_builder());
 
-    let emit_ctx = context::Context::new(&llctx, llmod.clone(), llbuild.clone());
-    let mut builder = prog::ProgEmit::new(Rc::new(emit_ctx), ir);
+    let mut emit_ctx = context::Context::new(&llctx, llmod.clone(), llbuild.clone());
+    let mut builder = prog::ProgEmit::new(emit_ctx, ir);
 
     builder.build_funcs();
     builder.emit();

@@ -13,16 +13,17 @@ use inkwell::types::{BasicType, BasicTypeEnum, PointerType};
 use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
 use pinion::layout::Func;
 use pinion::{
-    PinionCallBundle, PinionData, PinionEnum, PinionFuncInstance, PinionModule, PinionStruct,
-    PinionTaggedUnion,
+    ConstItem, PinionCallBundle, PinionConstWrap, PinionData, PinionEnum, PinionFuncInstance,
+    PinionModule, PinionStruct, PinionTaggedUnion,
 };
 
 use crate::emit_type::EmitType;
 use crate::repr::{EnumRepr, ReprManager, StructRepr, TaggedUnionRepr};
-use crate::value::MaybeRet;
+use crate::value::{BrandedValue, MaybeRet};
 
-pub type ExFunc = <caer_runtime::export::Runtime as PinionModule>::Funcs;
-pub type ExMod = <caer_runtime::export::Runtime as PinionModule>::TFuncs;
+pub type ExRuntime = caer_runtime::export::Runtime;
+pub type ExFunc = <ExRuntime as PinionModule>::Funcs;
+pub type ExMod = <ExRuntime as PinionModule>::TFuncs;
 
 /// Not really needed currently while using explicit forms- set to same as normal
 pub const GC_ADDRESS_SPACE: inkwell::AddressSpace = inkwell::AddressSpace::Generic;
@@ -39,6 +40,7 @@ pub struct Context<'ctx> {
     target_data: TargetData,
 
     repr_manager: RefCell<ReprManager<'ctx>>,
+
     funcs: HashMap<ExFunc, (Func, FunctionValue<'ctx>)>,
     newfuncs: HashMap<TypeId, (Func, FunctionValue<'ctx>)>,
 }
@@ -121,7 +123,7 @@ impl<'ctx> Context<'ctx> {
             .ptr_type(inkwell::AddressSpace::Generic)
     }
 
-    pub fn get_store_size<T: PinionData>(&self) -> u64 {
+    pub fn get_store_size<T: PinionData>(&mut self) -> u64 {
         let ty = self.get_llvm_type::<T>();
         self.target_data.get_store_size(&ty)
     }
@@ -136,8 +138,8 @@ impl<'ctx> Context<'ctx> {
     }
 
     // TODO: most callers of this should be using catch machinery
-    pub fn build_call<const N: usize, F: PinionFuncInstance, R>(
-        &self, cb: PinionCallBundle<N, F, R, BasicValueEnum<'ctx>>,
+    pub fn build_call<const N: usize, F: PinionFuncInstance<ExRuntime>, R>(
+        &self, cb: PinionCallBundle<N, ExRuntime, F, R, BasicValueEnum<'ctx>>,
     ) -> MaybeRet<'ctx, R> {
         let func_typeid = TypeId::of::<F>();
         let func_val = self.newfuncs[&func_typeid].1;
@@ -157,6 +159,13 @@ impl<'ctx> Context<'ctx> {
         let intrinsic = Intrinsic::find(name)?;
         intrinsic.get_declaration(&self.module, param_types)
     }
+
+    // TODO: there's a lot of monomorph in this chain :( there's also a lot of borrow_mut thrashing
+    // there's def. a better way to arrange this with some other type and a wrapper trait
+    /*pub fn const_wrap<T: PinionConstWrap>(&self, val: &T) -> BrandedValue<'ctx, T> {
+        let const_wrap = self.repr_manager.borrow_mut().const_wrap(val);
+        todo!()
+    }*/
 
     // wrong spot for this
     /*pub fn make_vtable_lookup(

@@ -39,6 +39,13 @@ pub struct ReifiedValue<'ctx> {
     pub layout_id: LayoutId,
 }
 
+impl<'ctx> ReifiedValue<'ctx> {
+    pub unsafe fn lift<T: PinionData>(&self) -> BrandedValue<'ctx, T> {
+        assert!(self.layout_id.is::<T>());
+        BrandedValue::new(self.inkwell_value, self.layout_id)
+    }
+}
+
 #[derive(Debug)]
 pub struct BrandedValue<'ctx, T> {
     pub val: BasicValueEnum<'ctx>,
@@ -70,6 +77,7 @@ impl<'ctx, T> Copy for BrandedValue<'ctx, T> {}
 impl<'ctx, T: PinionData> BrandedValue<'ctx, T> {
     // TODO: checks
     unsafe fn new(val: BasicValueEnum<'ctx>, layout_id: LayoutId /*, ty: TypeId*/) -> Self {
+        assert!(layout_id.is::<T>());
         Self {
             val,
             layout_id,
@@ -138,7 +146,7 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
         unsafe { Self::materialize(ctx, alloca.into()) }
     }
 
-    pub fn copy(ctx: &Context<'ctx>, src: Self, dest: Self) {
+    pub fn copy(ctx: &mut Context<'ctx>, src: Self, dest: Self) {
         assert_eq!(src.val.get_type(), dest.val.get_type());
 
         let size = ctx.get_store_size::<T>();
@@ -166,7 +174,7 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
         );
     }
 
-    pub fn copy_to_alloca(self, ctx: &Context<'ctx>) -> Self {
+    pub fn copy_to_alloca(self, ctx: &mut Context<'ctx>) -> Self {
         let dest = Self::build_as_alloca(ctx);
         Self::copy(ctx, self, dest);
         dest
@@ -345,7 +353,7 @@ impl<'ctx> BrandedStackValue<'ctx> {
         }
     }
 
-    pub fn copy_to_alloca(self, ctx: &Context<'ctx>) -> Self {
+    pub fn copy_to_alloca(self, ctx: &mut Context<'ctx>) -> Self {
         match self {
             BrandedStackValue::Val(val) => val.copy_to_alloca(ctx).into(),
             BrandedStackValue::Null => self,

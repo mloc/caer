@@ -65,20 +65,27 @@ pub fn build_export_func(mut fn_item: syn::ItemFn) -> TokenStream2 {
 
         #[doc(hidden)]
         #[allow(non_camel_case_types)]
-        #vis struct #fnmeta_ident;
-
-        impl pinion::PinionFuncInstance for #fnmeta_ident {
+        #vis struct #fnmeta_ident<M> {
+            phantom: std::marker::PhantomData<M>,
         }
 
-        impl #fnmeta_ident {
-            pub fn bind<V>(self, #(#param_bind_params),*) -> pinion::PinionCallBundle<#params_n, #fnmeta_ident, #return_ty, V> {
+        impl<M: pinion::PinionModule> pinion::PinionFuncInstance<M> for #fnmeta_ident<M> {
+            fn create() -> Self {
+                Self {
+                    phantom: std::marker::PhantomData,
+                }
+            }
+        }
+
+        impl <M: pinion::PinionModule> #fnmeta_ident<M> {
+            pub fn bind<V>(self, #(#param_bind_params),*) -> pinion::PinionCallBundle<#params_n, M, Self, #return_ty, V> {
                 pinion::PinionCallBundle::new([
                     #(#param_bind_idents.reify(),)*
                 ])
             }
         }
 
-        impl pinion::PinionFunc for #fnmeta_ident {
+        impl<M> pinion::PinionFunc for #fnmeta_ident<M> {
             fn get_func_layout(lctx: &mut pinion::layout_ctx::LayoutCtx) -> pinion::layout::Func {
                 pinion::layout::Func {
                     name: #ident_str,
@@ -180,20 +187,39 @@ pub fn build_module_export(def: ModuleDef) -> TokenStream2 {
         let mut fnmeta_path = path.clone();
         fnmeta_path.segments.last_mut().unwrap().ident = fnmeta_ident;
         quote! {
-            (Self::Funcs::#func_id, std::any::TypeId::of::<#fnmeta_path>(), <#fnmeta_path as pinion::PinionFunc>::get_func_layout(lctx))
+            (Self::Funcs::#func_id, std::any::TypeId::of::<#fnmeta_path<Self>>(), <#fnmeta_path<Self> as pinion::PinionFunc>::get_func_layout(lctx))
         }
     });
-    let func_methods = def.func_idents.iter().map(|path| {
-        let func_id = get_last_id(path);
-        let fnmeta_ident = make_fnmeta_ident(func_id);
-        let mut fnmeta_path = path.clone();
-        fnmeta_path.segments.last_mut().unwrap().ident = fnmeta_ident;
+
+    let func_metas: Vec<_> = def
+        .func_idents
+        .iter()
+        .map(|path| {
+            let func_id = get_last_id(path);
+            let fnmeta_ident = make_fnmeta_ident(func_id);
+            let mut fnmeta_path = path.clone();
+            fnmeta_path.segments.last_mut().unwrap().ident = fnmeta_ident;
+            (func_id, fnmeta_path)
+        })
+        .collect();
+
+    let func_methods = func_metas.iter().map(|(func_id, fnmeta_path)| {
         quote! {
-            pub fn #func_id() -> #fnmeta_path {
-                #fnmeta_path
+            pub fn #func_id() -> #fnmeta_path<<Self as pinion::PinionModuleFuncs>::Module> {
+                <#fnmeta_path<_> as pinion::PinionFuncInstance<_>>::create()
             }
         }
     });
+    let func_pmiff = func_metas.iter().map(|(func_id, fnmeta_path)| {
+        quote! {
+            impl pinion::PinionModuleIdForFunc<#fnmeta_path<Self>> for #mod_id {
+                fn get_id() -> Self::Funcs {
+                    Self::Funcs::#func_id
+                }
+            }
+        }
+    });
+
     let mod_funcs_enum = syn::Ident::new(
         &format!("__PINION_EXPORT_FUNCS_ENUM__{}", mod_id),
         mod_id.span(),
@@ -224,7 +250,9 @@ pub fn build_module_export(def: ModuleDef) -> TokenStream2 {
         #[derive(Clone, Copy)]
         pub struct #mod_tfuncs;
 
-        impl pinion::PinionModuleFuncs for #mod_tfuncs {}
+        impl pinion::PinionModuleFuncs for #mod_tfuncs {
+            type Module = #mod_id;
+        }
 
         impl #mod_tfuncs {
             #(#func_methods)*
@@ -244,5 +272,7 @@ pub fn build_module_export(def: ModuleDef) -> TokenStream2 {
                 }
             }
         }
+
+        #(#func_pmiff)*
     }
 }

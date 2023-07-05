@@ -28,8 +28,10 @@ use crate::context::{ExFunc, GC_ADDRESS_SPACE};
 use crate::value::BrandedValue;
 
 #[derive(Debug)]
+pub struct ProgCtx<'ctx> {}
+
+#[derive(Debug)]
 pub struct ProgEmit<'ctx> {
-    pub ctx: Rc<Context<'ctx>>,
     pub env: &'ctx Module,
     pub funcs: Vec<(&'ctx Function, FunctionValue<'ctx>)>,
     pub rt_global: inkwell::values::GlobalValue<'ctx>,
@@ -47,7 +49,7 @@ pub struct ProgEmit<'ctx> {
 }
 
 impl<'ctx> ProgEmit<'ctx> {
-    pub fn new(ctx: Rc<Context<'ctx>>, env: &'ctx Module) -> Self {
+    pub fn new(ctx: &'ctx mut Context<'ctx>, env: &'ctx Module) -> Self {
         let rt_type = ctx.get_llvm_type::<Runtime>();
         let funcptr_ty = ctx.get_llvm_type::<FuncPtr>();
 
@@ -84,14 +86,15 @@ impl<'ctx> ProgEmit<'ctx> {
                 .add_global(ft_global_ty, Some(inkwell::AddressSpace::Generic), "ftable");
         ft_global.set_constant(true);
 
+        let rt_global_val = unsafe {
+            BrandedValue::<*mut Runtime>::materialize(&ctx, rt_global.as_pointer_value().into())
+        };
+
         Self {
-            ctx: ctx.clone(),
             env,
             funcs: Vec::new(),
             rt_global,
-            rt_global_val: unsafe {
-                BrandedValue::<*mut Runtime>::materialize(&ctx, rt_global.as_pointer_value().into())
-            },
+            rt_global_val,
             vt_global,
             ft_global,
             //vt_lookup: ctx.make_vtable_lookup(vt_global),
@@ -103,10 +106,33 @@ impl<'ctx> ProgEmit<'ctx> {
         }
     }
 
-    pub fn build_funcs(&mut self) {
-        for func in self.env.funcs.iter() {
+    pub fn build_funcs(ctx: &'ctx Context<'ctx>, env: &'ctx Module, proc_type: FunctionType<'ctx>) {
+
+        for ir_func in self.env.funcs.iter() {
+            assert_eq!(ir_func.id.index(), self.sym.len());
+            Self::initialize_func(ctx, ir_func, proc_type)
             self.add_func(func);
+            self.sym.push(ll_func);
+            self.funcs.push((ir_func, ll_func));
         }
+    }
+
+    fn initialize_func(
+        ctx: &'ctx Context<'ctx>, ir_func: &'ctx Function, proc_type: FunctionType<'ctx>,
+    ) {
+        let ty = if ir_func.closure.is_some() {
+            ctx.rt.ty.closure_type
+        } else {
+            proc_type
+        };
+
+        let ll_func = ctx
+            .module
+            .add_function(&format!("proc_{}", ir_func.id.index()), ty, None);
+        ll_func.set_personality_function(ctx.rt.dm_eh_personality);
+        ll_func.set_gc("statepoint-example");
+
+        ll_func
     }
 
     // TODO: ERRH
@@ -117,25 +143,6 @@ impl<'ctx> ProgEmit<'ctx> {
     pub fn lookup_global_proc(&self, name: StringId) -> FuncId {
         let global_dty = self.env.type_tree.global_type();
         global_dty.proc_lookup[&name].top_func
-    }
-
-    fn add_func(&mut self, ir_func: &'ctx Function) {
-        let ty = if ir_func.closure.is_some() {
-            self.ctx.rt.ty.closure_type
-        } else {
-            self.proc_type
-        };
-
-        let ll_func =
-            self.ctx
-                .module
-                .add_function(&format!("proc_{}", ir_func.id.index()), ty, None);
-        ll_func.set_personality_function(self.ctx.rt.dm_eh_personality);
-        ll_func.set_gc("statepoint-example");
-
-        assert_eq!(ir_func.id.index(), self.sym.len());
-        self.sym.push(ll_func);
-        self.funcs.push((ir_func, ll_func));
     }
 
     pub fn emit(&mut self) {

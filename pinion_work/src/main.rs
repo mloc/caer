@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use pinion::layout_ctx::LayoutCtx;
 use pinion::{
     gep_path, pinion_export, pinion_module, PinionConstWrap, PinionData, PinionField, PinionStruct,
+    PinionValueHolder,
 };
 
 #[repr(C)]
@@ -34,6 +35,28 @@ enum Sunit {
     J,
 }
 
+#[pinion_export]
+pub fn expo(a: u8) {}
+
+pinion_module! {
+    Whee,
+    [
+        crate::expo,
+    ]
+}
+
+struct Valb<T> {
+    v: T,
+}
+
+impl<T: PinionData + std::fmt::Debug> PinionValueHolder<T> for Valb<T> {
+    type Reified = String;
+
+    fn reify(&self) -> Self::Reified {
+        format!("{:?}", self.v)
+    }
+}
+
 fn main() {
     let mut ctx = LayoutCtx::new();
     let id = ctx.populate::<Foo>();
@@ -44,6 +67,12 @@ fn main() {
         b: Bar { count: 3939 },
     };
     println!("{:#?}", x.const_wrap(&mut ctx));
+
+    type Ef = <Whee as pinion::PinionModule>::TFuncs;
+
+    let x = Ef::expo().bind::<String>(Valb { v: 8 });
+    let y = <Whee as pinion::PinionModule>::get_bundle_func(&x);
+    assert_eq!(y, <Whee as pinion::PinionModule>::Funcs::expo);
 }
 
 /*#[derive(PinionData)]

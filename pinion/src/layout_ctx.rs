@@ -22,6 +22,10 @@ impl LayoutId {
             tyid: any::TypeId::of::<T>(),
         }
     }
+
+    pub fn is<T: PinionData>(self) -> bool {
+        self == LayoutId::of::<T>()
+    }
 }
 
 #[derive(Debug, Default)]

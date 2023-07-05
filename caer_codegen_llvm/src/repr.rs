@@ -8,7 +8,10 @@ use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, IntType, StructType
 use pinion::layout::{Enum, Func, Layout, StructLayout, TaggedUnion, Union};
 use pinion::layout_ctx::{LayoutCtx, LayoutId};
 use pinion::types::Primitive;
-use pinion::{PinionData, PinionEnum, PinionModule, PinionStruct, PinionTaggedUnion};
+use pinion::{
+    ConstItem, PinionConstWrap, PinionData, PinionEnum, PinionModule, PinionStruct,
+    PinionTaggedUnion,
+};
 
 use crate::emit_type::EmitType;
 
@@ -76,6 +79,11 @@ pub struct ReprManager<'ctx> {
 impl<'ctx> ReprManager<'ctx> {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    // TODO: might be cleaner to move this out
+    pub fn const_wrap<T: PinionConstWrap>(&mut self, val: &T) -> ConstItem {
+        val.const_wrap(&mut self.layout_ctx)
     }
 
     pub fn get_type<T: PinionData>(&mut self, ctx: &'ctx Context) -> EmitType<'ctx> {
