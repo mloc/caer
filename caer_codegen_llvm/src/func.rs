@@ -2,6 +2,7 @@ use std::ptr::NonNull;
 
 use caer_ir::cfg::*;
 use caer_ir::id::{BlockId, LocalId, VarId};
+use caer_ir::module::Module;
 use caer_ir::walker::{CFGWalker, Lifetimes, WalkActor};
 use caer_runtime::arg_pack::ProcPack;
 use caer_runtime::datum::Datum;
@@ -24,13 +25,15 @@ use ty::Type;
 
 use crate::context::{Context, ExFunc, ExMod, GC_ADDRESS_SPACE};
 use crate::prog::{Intrinsic, ProgEmit};
+use crate::symbol_table::SymbolTable;
 use crate::value::{BrandedStackValue, BrandedValue};
 
 #[derive(Debug)]
 pub struct FuncEmit<'a, 'ctx> {
     ctx: &'a Context<'ctx>,
-    ir_func: &'a Function,
-    prog_emit: &'a ProgEmit<'ctx>,
+    env: &'ctx Module,
+    ir_func: &'ctx Function,
+    sym: &'a SymbolTable<'ctx>,
 
     var_allocs: IndexVec<VarId, BrandedStackValue<'ctx>>,
     locals: IndexVec<LocalId, Option<BrandedStackValue<'ctx>>>,
@@ -41,13 +44,14 @@ pub struct FuncEmit<'a, 'ctx> {
 
 impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
     pub fn new(
-        ctx: &'a Context<'ctx>, prog_emit: &'a ProgEmit<'ctx>, ir_func: &'a Function,
-        ll_func: FunctionValue<'ctx>,
+        ctx: &'a Context<'ctx>, env: &'ctx Module, sym: &'a SymbolTable<'ctx>,
+        ir_func: &'ctx Function, ll_func: FunctionValue<'ctx>,
     ) -> Self {
         Self {
             ctx,
+            env,
             ir_func,
-            prog_emit,
+            sym,
 
             var_allocs: IndexVec::new(),
             locals: IndexVec::new(),
@@ -94,7 +98,7 @@ impl<'a, 'ctx> WalkActor for FuncEmit<'a, 'ctx> {
 
 impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
     fn get_ty(&self, ty: TypeId) -> &Type {
-        self.prog_emit.env.types.get(ty)
+        self.env.types.get(ty)
     }
 
     fn build_alloca(&self, ty: impl BasicType<'ctx> + Copy, name: &str) -> PointerValue<'ctx> {
@@ -148,7 +152,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
 
         for var in self.ir_func.vars.iter() {
             let name = &if var.name.index() != 0 {
-                format!("var_{}", self.prog_emit.env.string_table.get(var.name))
+                format!("var_{}", self.env.string_table.get(var.name))
             } else {
                 "ret_var".to_string()
             };
@@ -214,7 +218,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                         .i64_type()
                         .const_int(self.ir_func.id.index() as u64, false)
                         .into(),
-                    self.prog_emit.rt_global.as_basic_value_enum().into(),
+                    self.sym.rt_global.as_basic_value_enum().into(),
                 ],
             );
         }
@@ -239,9 +243,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                 alloca.build_store(self.ctx, BrandedValue::<f32>::literal(x, self.ctx));
                 alloca.into()
             },
-            Literal::String(id) => self.prog_emit.string_allocs[id]
-                .alloca_emplace(self.ctx)
-                .into(),
+            Literal::String(id) => self.sym.string_table[id].alloca_emplace(self.ctx).into(),
             Literal::Null => BrandedStackValue::Null,
             _ => unimplemented!("{:?}", lit),
         }
@@ -453,7 +455,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
     }
 
     fn copy_val(&self, src: PointerValue<'ctx>, dest: PointerValue<'ctx>) {
-        self.prog_emit.copy_val(src, dest);
+        self.ctx.copy_val(src, dest);
     }
 
     fn copy_branded_val<T: PinionPointerType>(
@@ -505,7 +507,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
 
         let sp_intrinsic = self
             .ctx
-            .get_intrinsic("llvm.experimental.gc.statepoint", &[func.get_type().into()])
+            .get_intrinsic_raw("llvm.experimental.gc.statepoint", &[func.get_type().into()])
             .unwrap();
 
         let mut stack_ptrs: Vec<BasicValueEnum> = Vec::new();
@@ -525,7 +527,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
         }
         for live_var in live.var.iter().copied() {
             let var_ty_id = self.ir_func.vars[live_var].ty;
-            let var_ty = self.prog_emit.env.types.get(var_ty_id);
+            let var_ty = self.env.types.get(var_ty_id);
             if var_ty.get_layout().is_val() {
                 stack_ptrs.push(self.var_allocs[live_var].as_bve().unwrap());
                 stack_ptrs.push(
@@ -605,7 +607,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
         if let Some(return_type) = return_type {
             let result_intrinsic = self
                 .ctx
-                .get_intrinsic("llvm.experimental.gc.result", &[return_type])
+                .get_intrinsic_raw("llvm.experimental.gc.result", &[return_type])
                 .unwrap();
             self.ctx
                 .builder
@@ -620,7 +622,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
     fn build_call_intrinsic(
         &mut self, intrinsic: Intrinsic, args: &[BasicMetadataValueEnum<'ctx>],
     ) -> Option<BasicValueEnum<'ctx>> {
-        let func = self.prog_emit.get_intrinsic(intrinsic);
+        let func = self.ctx.get_intrinsic(intrinsic);
         self.build_call_internal(func, args)
     }
 
@@ -777,8 +779,8 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
             Op::Put(id) => {
                 let norm = self.get_local_any_ro(*id);
 
-                let cb = ExMod::rt_val_print()
-                    .bind(norm.cast_ptr(self.ctx), self.prog_emit.rt_global_val);
+                let cb =
+                    ExMod::rt_val_print().bind(norm.cast_ptr(self.ctx), self.sym.rt_global_val);
                 self.ctx.build_call(cb);
             },
 
@@ -791,7 +793,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                 let res = BrandedValue::<*mut Val>::build_as_alloca(self.ctx);
 
                 let cb = ExMod::rt_val_binary_op().bind(
-                    self.prog_emit.rt_global_val,
+                    self.sym.rt_global_val,
                     op_var,
                     lhs_ref.cast_ptr(self.ctx),
                     rhs_ref.cast_ptr(self.ctx),
@@ -813,7 +815,10 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                 let argpack_ptr = self.build_argpack(None, args);
 
                 // TODO: better proc lookup, consider src
-                let func = self.prog_emit.sym[self.prog_emit.lookup_global_proc(*name)]
+                let func = self
+                    .sym
+                    .get_ir_llvm_func(self.sym.lookup_global_proc(*name))
+                    .unwrap()
                     .as_global_value()
                     .as_pointer_value();
                 let res_alloca = BrandedValue::<*mut Val>::build_as_alloca(self.ctx);
@@ -823,7 +828,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                     func,
                     &[
                         argpack_ptr.val,
-                        self.prog_emit.rt_global.as_basic_value_enum(),
+                        self.sym.rt_global.as_basic_value_enum(),
                         res_alloca.val,
                     ],
                 );
@@ -840,7 +845,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                 let src = self.get_local_any_ro(*src);
 
                 let cb = ExMod::rt_val_cast_string_val()
-                    .bind(src.cast_ptr(self.ctx), self.prog_emit.rt_global_val);
+                    .bind(src.cast_ptr(self.ctx), self.sym.rt_global_val);
                 let res: BrandedValue<Option<NonNull<RtString>>> =
                     self.ctx.build_call(cb).result(self.ctx).cast_ptr(self.ctx);
 
@@ -857,7 +862,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                     .const_int(ity_id.raw() as u64, false);
                 let vt_ptr = unsafe {
                     let ptr = self.ctx.builder.build_in_bounds_gep(
-                        self.prog_emit.vt_global.as_pointer_value(),
+                        self.sym.vt_global.as_pointer_value(),
                         &[self.ctx.llvm_ctx.i32_type().const_zero(), ty_id_val],
                         "vt_ptr",
                     );
@@ -881,7 +886,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                         block,
                         self.ctx.get_func(ExFunc::rt_runtime_alloc_datum),
                         &[
-                            self.prog_emit.rt_global.as_basic_value_enum(),
+                            self.sym.rt_global.as_basic_value_enum(),
                             self.ctx
                                 .llvm_ctx
                                 .i32_type()
@@ -1154,7 +1159,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                 self.build_call(
                     self.ctx.get_func(ExFunc::rt_runtime_suspend),
                     &[
-                        self.prog_emit.rt_global.as_pointer_value().into(),
+                        self.sym.rt_global.as_pointer_value().into(),
                         local.as_val().unwrap().val.into(),
                     ],
                 );
@@ -1277,7 +1282,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                     block,
                     self.ctx.get_func(ExFunc::rt_runtime_concat_strings),
                     &[
-                        self.prog_emit.rt_global.as_basic_value_enum(),
+                        self.sym.rt_global.as_basic_value_enum(),
                         lhs.as_string().unwrap().build_load(self.ctx).val,
                         rhs.as_string().unwrap().build_load(self.ctx).val,
                     ],
@@ -1574,7 +1579,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                 );
 
                 self.ctx.builder.position_at_end(trap_block);
-                let trap_fn = self.prog_emit.get_intrinsic(Intrinsic::Trap);
+                let trap_fn = self.ctx.get_intrinsic(Intrinsic::Trap);
                 self.ctx.builder.build_call(trap_fn, &[], "");
                 self.ctx.builder.build_unreachable();
 
@@ -1659,7 +1664,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
     ) -> BasicValueEnum<'ctx> {
         let field_ptr = unsafe {
             self.ctx.builder.build_in_bounds_gep(
-                self.prog_emit.vt_global.as_pointer_value(),
+                self.sym.vt_global.as_pointer_value(),
                 &[
                     self.ctx.llvm_ctx.i32_type().const_zero(),
                     ty_id,

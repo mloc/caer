@@ -5,19 +5,20 @@ use std::ffi::c_void;
 use std::mem::size_of;
 use std::rc::Rc;
 
+use caer_runtime::arg_pack::ProcPack;
 use caer_runtime::runtime::Runtime;
 use caer_runtime::val::Val;
-use inkwell::intrinsics::Intrinsic;
 use inkwell::targets::TargetData;
-use inkwell::types::{BasicType, BasicTypeEnum, PointerType};
+use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, PointerType};
 use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
-use pinion::layout::Func;
+use pinion::layout::{self, Func};
 use pinion::{
     ConstItem, PinionCallBundle, PinionConstWrap, PinionData, PinionEnum, PinionFuncInstance,
     PinionModule, PinionStruct, PinionTaggedUnion,
 };
 
 use crate::emit_type::EmitType;
+use crate::prog;
 use crate::repr::{EnumRepr, ReprManager, StructRepr, TaggedUnionRepr};
 use crate::value::{BrandedValue, MaybeRet};
 
@@ -33,45 +34,20 @@ pub struct Context<'ctx> {
     pub llvm_ctx: &'ctx inkwell::context::Context,
     // Module contains a RefCell, which makes it invariant over 'ctx. Using an Rc gets around
     // needing another lifetime. (somehow??? builder also needs one)
-    pub builder: Rc<inkwell::builder::Builder<'ctx>>,
-    pub module: Rc<inkwell::module::Module<'ctx>>,
-    pub rt: RtFuncs<'ctx>,
+    pub builder: inkwell::builder::Builder<'ctx>,
+    pub module: inkwell::module::Module<'ctx>,
 
-    target_data: TargetData,
+    pub target_data: TargetData,
 
-    repr_manager: RefCell<ReprManager<'ctx>>,
-
-    funcs: HashMap<ExFunc, (Func, FunctionValue<'ctx>)>,
-    newfuncs: HashMap<TypeId, (Func, FunctionValue<'ctx>)>,
+    repr_manager: Rc<RefCell<ReprManager<'ctx>>>,
 }
 
 impl<'ctx> Context<'ctx> {
     pub fn new(
-        llctx: &'ctx inkwell::context::Context, llmod: Rc<inkwell::module::Module<'ctx>>,
-        llbuild: Rc<inkwell::builder::Builder<'ctx>>,
+        llctx: &'ctx inkwell::context::Context, llmod: inkwell::module::Module<'ctx>,
+        llbuild: inkwell::builder::Builder<'ctx>,
     ) -> Self {
         let mut repr_manager = ReprManager::new();
-        let funcs_vec = repr_manager.get_all_funcs::<caer_runtime::export::Runtime>(llctx);
-        let inter_funcs: Vec<_> = funcs_vec
-            .into_iter()
-            .map(|(typeid, (layout, ty), id)| {
-                let val = llmod.add_function(layout.name, ty, None);
-                (typeid, (layout, val), id)
-            })
-            .collect();
-
-        let funcs = inter_funcs
-            .iter()
-            .cloned()
-            .map(|(_, v, k)| (k, v))
-            .collect();
-        let newfuncs = inter_funcs
-            .iter()
-            .cloned()
-            .map(|(k, v, _)| (k, v))
-            .collect();
-
-        let rt = RtFuncs::new(llctx, llmod.clone(), &mut repr_manager);
 
         // is this.. OK?
         let data_layout = llmod.get_data_layout();
@@ -79,53 +55,11 @@ impl<'ctx> Context<'ctx> {
 
         Self {
             builder: llbuild,
-            module: llmod.clone(),
+            module: llmod,
             llvm_ctx: llctx,
-            rt,
             target_data,
-            repr_manager: RefCell::new(repr_manager),
-            funcs,
-            newfuncs,
+            repr_manager: RefCell::new(repr_manager).into(),
         }
-    }
-
-    // TODO: collapse the monomorphing here..? it's nice for the API but bad for code size
-    pub fn get_struct<T: PinionStruct>(&self) -> Rc<StructRepr<'ctx>> {
-        self.repr_manager
-            .borrow_mut()
-            .get_struct::<T>(self.llvm_ctx)
-    }
-
-    pub fn get_enum<T: PinionEnum>(&self) -> Rc<EnumRepr<'ctx>> {
-        self.repr_manager.borrow_mut().get_enum::<T>(self.llvm_ctx)
-    }
-
-    pub fn get_tagged_union<T: PinionTaggedUnion>(&self) -> Rc<TaggedUnionRepr<'ctx>> {
-        self.repr_manager
-            .borrow_mut()
-            .get_tagged_union::<T>(self.llvm_ctx)
-    }
-
-    pub fn get_func(&self, func: ExFunc) -> FunctionValue<'ctx> {
-        self.funcs.get(&func).unwrap().1
-    }
-
-    pub fn get_type<T: PinionData>(&self) -> EmitType<'ctx> {
-        self.repr_manager.borrow_mut().get_type::<T>(self.llvm_ctx)
-    }
-
-    pub fn get_llvm_type<T: PinionData>(&self) -> BasicTypeEnum<'ctx> {
-        self.get_type::<T>().get_ty().unwrap()
-    }
-
-    pub fn get_llvm_type_ptr<T: PinionData>(&self) -> PointerType<'ctx> {
-        self.get_llvm_type::<T>()
-            .ptr_type(inkwell::AddressSpace::Generic)
-    }
-
-    pub fn get_store_size<T: PinionData>(&mut self) -> u64 {
-        let ty = self.get_llvm_type::<T>();
-        self.target_data.get_store_size(&ty)
     }
 
     pub unsafe fn const_gep(&self, ptr: PointerValue<'ctx>, indexes: &[u64]) -> PointerValue<'ctx> {
@@ -141,7 +75,7 @@ impl<'ctx> Context<'ctx> {
     pub fn build_call<const N: usize, F: PinionFuncInstance<ExRuntime>, R>(
         &self, cb: PinionCallBundle<N, ExRuntime, F, R, BasicValueEnum<'ctx>>,
     ) -> MaybeRet<'ctx, R> {
-        let func_typeid = TypeId::of::<F>();
+        /*let func_typeid = TypeId::of::<F>();
         let func_val = self.newfuncs[&func_typeid].1;
         // TODO: use BMVE in call bundles
         let args_bmve: Vec<_> = cb.args.iter().copied().map(Into::into).collect();
@@ -150,14 +84,56 @@ impl<'ctx> Context<'ctx> {
             .build_call(func_val, &args_bmve, "")
             .try_as_basic_value()
             .left();
-        MaybeRet::create(ret)
+        MaybeRet::create(ret)*/
+        todo!()
     }
 
-    pub fn get_intrinsic(
+    pub fn get_intrinsic(&self, intrinsic: prog::Intrinsic) -> FunctionValue<'ctx> {
+        // TODO: cache?
+        let ty_f32 = self.llvm_ctx.f32_type().into();
+
+        let (name, tys): (&str, Vec<BasicTypeEnum>) = match intrinsic {
+            prog::Intrinsic::FPow => ("llvm.pow", vec![ty_f32]),
+            prog::Intrinsic::Trap => ("llvm.trap", vec![]),
+            //Intrinsic::LifetimeStart => ("llvm.lifetime.start", vec![]),
+            //Intrinsic::LifetimeEnd => ("llvm.lifetime.end", vec![]),
+            //Intrinsic::InvariantStart => ("llvm.invariant.start", vec![]),
+        };
+
+        self.get_intrinsic_raw(name, &tys).unwrap()
+    }
+
+    pub fn get_intrinsic_raw(
         &self, name: &str, param_types: &[BasicTypeEnum],
     ) -> Option<FunctionValue<'ctx>> {
-        let intrinsic = Intrinsic::find(name)?;
+        let intrinsic = inkwell::intrinsics::Intrinsic::find(name)?;
         intrinsic.get_declaration(&self.module, param_types)
+    }
+
+    pub(crate) fn copy_val(&self, src: PointerValue<'ctx>, dest: PointerValue<'ctx>) {
+        assert_eq!(src.get_type(), dest.get_type());
+
+        let memcpy_intrinsic = self
+            .get_intrinsic_raw(
+                "llvm.memcpy",
+                &[
+                    src.get_type().into(),
+                    dest.get_type().into(),
+                    self.llvm_ctx.i64_type().into(),
+                ],
+            )
+            .unwrap();
+
+        self.builder.build_call(
+            memcpy_intrinsic,
+            &[
+                dest.into(),
+                src.into(),
+                self.llvm_ctx.i64_type().const_int(24, false).into(),
+                self.llvm_ctx.bool_type().const_zero().into(),
+            ],
+            "",
+        );
     }
 
     // TODO: there's a lot of monomorph in this chain :( there's also a lot of borrow_mut thrashing
@@ -242,122 +218,3 @@ impl<'ctx> Context<'ctx> {
         todo!()
     }
 }*/
-
-// TODO: probably move out of context
-// TODO: redo all of this to a friendlier system
-#[derive(Debug)]
-pub struct RtFuncTyBundle<'ctx> {
-    // TODO: undo this, it's a hack to clean up optimized output
-    pub val_type: inkwell::types::StructType<'ctx>,
-    pub opaque_type: inkwell::types::StructType<'ctx>,
-
-    pub closure_type: inkwell::types::FunctionType<'ctx>,
-
-    pub landingpad_type: inkwell::types::StructType<'ctx>,
-}
-
-impl<'ctx> RtFuncTyBundle<'ctx> {
-    fn new(ctx: &'ctx inkwell::context::Context, rm: &mut ReprManager<'ctx>) -> Self {
-        let val_type = rm.get_type::<Val>(ctx).get_ty().unwrap().into_struct_type();
-        let val_type_ptr = val_type.ptr_type(GC_ADDRESS_SPACE);
-
-        let opaque_type = rm
-            .get_type::<c_void>(ctx)
-            .get_ty()
-            .unwrap()
-            .into_struct_type();
-
-        let rt_type = rm.get_type::<Runtime>(ctx).get_ty().unwrap();
-        let closure_type = ctx.void_type().fn_type(
-            &[
-                val_type_ptr.into(),
-                rt_type.ptr_type(inkwell::AddressSpace::Generic).into(),
-                val_type_ptr.into(),
-            ],
-            false,
-        );
-
-        let landingpad_type = ctx.opaque_struct_type("landingpad");
-        landingpad_type.set_body(
-            &[
-                opaque_type.ptr_type(inkwell::AddressSpace::Generic).into(),
-                ctx.i32_type().into(),
-            ],
-            false,
-        );
-
-        RtFuncTyBundle {
-            val_type,
-            opaque_type,
-            closure_type,
-            landingpad_type,
-        }
-    }
-}
-
-macro_rules! rt_funcs {
-    ( $name:ident, [ $( ( $func:ident, $ret:ident ~ $retspec:ident, [ $( $arg:ident ~ $argspec:ident ),* $(,)* ] ) ),* $(,)* ] ) => {
-        #[derive(Debug)]
-        pub struct $name <'ctx> {
-            pub ty: RtFuncTyBundle<'ctx>,
-            $(
-                pub $func: inkwell::values::FunctionValue<'ctx>,
-            )*
-        }
-
-        impl<'ctx> $name <'ctx> {
-            fn new(ctx: &'ctx inkwell::context::Context, module: Rc<inkwell::module::Module<'ctx>>, rm: &mut ReprManager<'ctx>) -> $name<'ctx> {
-                assert_eq!(size_of::<caer_runtime::val::Val>(), 24);
-
-                let tyb = RtFuncTyBundle::new(ctx, rm);
-
-                $name {
-                    $(
-                        $func: module.add_function(stringify!($func),
-                            rt_funcs!(@genty ctx $retspec tyb $ret $ret).fn_type(&[
-                                $(
-                                    rt_funcs!(@genty ctx $argspec tyb $arg $arg).into(),
-                                )*
-                            ], false),
-                        None),
-                    )*
-                    ty: tyb,
-                }
-            }
-        }
-    };
-
-    ( @genty $ctx:ident $spec:ident $tyb:ident val_type $ty:ident) => (
-        rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
-    );
-
-    ( @genty $ctx:ident $spec:ident $tyb:ident opaque_type $ty:ident) => (
-        rt_funcs!(@genty @ptrify $spec , $tyb.$ty)
-    );
-
-    ( @genty $ctx:ident $spec:ident $tyb:ident $tym:ident $ty:ident) => (
-        rt_funcs!(@genty @ptrify $spec , $ctx.$ty())
-    );
-
-    ( @genty @ptrify val , $e:expr) => (
-        $e
-    );
-
-    ( @genty @ptrify ptr , $e:expr) => (
-        $e.ptr_type(GC_ADDRESS_SPACE)
-    );
-
-    ( @genty @ptrify gptr , $e:expr) => (
-        $e.ptr_type(inkwell::AddressSpace::Generic)
-    );
-}
-
-rt_funcs! {
-    RtFuncs,
-    [
-        (rt_throw, void_type~val, [val_type~ptr]),
-        (rt_exception_get_val, void_type~val, [opaque_type~gptr, val_type~ptr]),
-
-        (dm_eh_personality, i32_type~val, [i32_type~val, i32_type~val, i64_type~val, opaque_type~ptr, opaque_type~ptr]),
-    ]
-}

@@ -25,13 +25,16 @@ use inkwell::values::{AnyValueEnum, FunctionValue, PointerValue};
 use super::context::Context;
 use super::func::FuncEmit;
 use crate::context::{ExFunc, GC_ADDRESS_SPACE};
+use crate::symbol_table::SymbolTable;
+use crate::type_manager::TypeManager;
 use crate::value::BrandedValue;
 
-#[derive(Debug)]
-pub struct ProgCtx<'ctx> {}
+//#[derive(Debug)]
+//pub struct ProgCtx<'ctx> {}
 
 #[derive(Debug)]
 pub struct ProgEmit<'ctx> {
+    pub ctx: &'ctx Context<'ctx>,
     pub env: &'ctx Module,
     pub funcs: Vec<(&'ctx Function, FunctionValue<'ctx>)>,
     pub rt_global: inkwell::values::GlobalValue<'ctx>,
@@ -42,107 +45,37 @@ pub struct ProgEmit<'ctx> {
     pub ft_global: inkwell::values::GlobalValue<'ctx>,
     //pub vt_lookup: Vec<FunctionValue<'ctx>>,
     pub datum_types: IndexVec<InstanceTypeId, inkwell::types::StructType<'ctx>>,
-    pub sym: IndexVec<FuncId, FunctionValue<'ctx>>,
     pub string_allocs: IndexVec<StringId, BrandedValue<'ctx, Option<NonNull<RtString>>>>,
 
-    proc_type: FunctionType<'ctx>,
+    pub sym: SymbolTable<'ctx>,
+    pub tys: TypeManager<'ctx>,
 }
 
 impl<'ctx> ProgEmit<'ctx> {
-    pub fn new(ctx: &'ctx mut Context<'ctx>, env: &'ctx Module) -> Self {
-        let rt_type = ctx.get_llvm_type::<Runtime>();
-        let funcptr_ty = ctx.get_llvm_type::<FuncPtr>();
-
-        let proc_type = {
-            let argpack_ptr_type = ctx.get_llvm_type::<*const ProcPack>();
-            let val_ptr_type = ctx.get_llvm_type::<*mut Val>();
-            let rt_ptr_type = ctx.get_llvm_type::<*mut Runtime>();
-            ctx.llvm_ctx.void_type().fn_type(
-                &[
-                    argpack_ptr_type.into(),
-                    rt_ptr_type.into(),
-                    val_ptr_type.into(),
-                ],
-                false,
-            )
-        };
-
-        let rt_global =
-            ctx.module
-                .add_global(rt_type, Some(inkwell::AddressSpace::Generic), "runtime");
-        rt_global.set_initializer(&rt_type.const_zero());
-
-        // TODO: don't dig so deep into env?
-        let vt_global_ty = ctx
-            .get_llvm_type::<vtable::Entry>()
-            .array_type(env.type_tree.len() as u32);
-        let vt_global =
-            ctx.module
-                .add_global(vt_global_ty, Some(inkwell::AddressSpace::Generic), "vtable");
-        vt_global.set_constant(true);
-        let ft_global_ty = funcptr_ty.array_type(env.funcs.len() as u32);
-        let ft_global =
-            ctx.module
-                .add_global(ft_global_ty, Some(inkwell::AddressSpace::Generic), "ftable");
-        ft_global.set_constant(true);
-
-        let rt_global_val = unsafe {
-            BrandedValue::<*mut Runtime>::materialize(&ctx, rt_global.as_pointer_value().into())
-        };
+    pub fn new(ctx: &'ctx Context<'ctx>, env: &'ctx Module) -> Self {
+        let tys = TypeManager::new(ctx);
+        let sym = SymbolTable::new(ctx, &tys, env);
 
         Self {
+            ctx,
             env,
             funcs: Vec::new(),
-            rt_global,
-            rt_global_val,
-            vt_global,
-            ft_global,
+            rt_global: sym.rt_global,
+            rt_global_val: sym.rt_global_val,
+            vt_global: sym.vt_global,
+            ft_global: sym.ft_global,
             //vt_lookup: ctx.make_vtable_lookup(vt_global),
             datum_types: IndexVec::new(),
-            sym: IndexVec::new(),
             string_allocs: IndexVec::new(),
 
-            proc_type,
+            sym,
+            tys,
         }
-    }
-
-    pub fn build_funcs(ctx: &'ctx Context<'ctx>, env: &'ctx Module, proc_type: FunctionType<'ctx>) {
-
-        for ir_func in self.env.funcs.iter() {
-            assert_eq!(ir_func.id.index(), self.sym.len());
-            Self::initialize_func(ctx, ir_func, proc_type)
-            self.add_func(func);
-            self.sym.push(ll_func);
-            self.funcs.push((ir_func, ll_func));
-        }
-    }
-
-    fn initialize_func(
-        ctx: &'ctx Context<'ctx>, ir_func: &'ctx Function, proc_type: FunctionType<'ctx>,
-    ) {
-        let ty = if ir_func.closure.is_some() {
-            ctx.rt.ty.closure_type
-        } else {
-            proc_type
-        };
-
-        let ll_func = ctx
-            .module
-            .add_function(&format!("proc_{}", ir_func.id.index()), ty, None);
-        ll_func.set_personality_function(ctx.rt.dm_eh_personality);
-        ll_func.set_gc("statepoint-example");
-
-        ll_func
     }
 
     // TODO: ERRH
     pub fn resolve_func(&self, id: FuncId) -> FunctionValue<'ctx> {
-        self.sym[id]
-    }
-
-    pub fn lookup_global_proc(&self, name: StringId) -> FuncId {
-        let global_dty = self.env.type_tree.global_type();
-        global_dty.proc_lookup[&name].top_func
+        self.sym.get_ir_llvm_func(id).unwrap()
     }
 
     pub fn emit(&mut self) {
@@ -156,10 +89,13 @@ impl<'ctx> ProgEmit<'ctx> {
             // TODO no
             println!("EMITTING {:?}", ir_func.id);
             let walker = CFGWalker::build(ir_func);
-            let mut func_emit = FuncEmit::new(&self.ctx, self, ir_func, ll_func);
+            let ctx = self.ctx.clone();
+            let mut func_emit = FuncEmit::new(&ctx, self.env, &self.sym, ir_func, ll_func);
             walker.walk(ir_func, &mut func_emit);
         }
-        let main_proc = self.lookup_global_proc(self.env.intern_string_ro("entry"));
+        let main_proc = self
+            .sym
+            .lookup_global_proc(self.env.intern_string_ro("entry"));
 
         self.finalize_main(main_block, main_proc);
     }
@@ -169,33 +105,6 @@ impl<'ctx> ProgEmit<'ctx> {
         let func = self.ctx.module.add_function("main", func_type, None);
 
         self.ctx.llvm_ctx.append_basic_block(func, "entry")
-    }
-
-    pub(crate) fn copy_val(&self, src: PointerValue<'ctx>, dest: PointerValue<'ctx>) {
-        assert_eq!(src.get_type(), dest.get_type());
-
-        let memcpy_intrinsic = self
-            .ctx
-            .get_intrinsic(
-                "llvm.memcpy",
-                &[
-                    src.get_type().into(),
-                    dest.get_type().into(),
-                    self.ctx.llvm_ctx.i64_type().into(),
-                ],
-            )
-            .unwrap();
-
-        self.ctx.builder.build_call(
-            memcpy_intrinsic,
-            &[
-                dest.into(),
-                src.into(),
-                self.ctx.llvm_ctx.i64_type().const_int(24, false).into(),
-                self.ctx.llvm_ctx.bool_type().const_zero().into(),
-            ],
-            "",
-        );
     }
 
     fn finalize_main(&self, block: inkwell::basic_block::BasicBlock, entry_func: FuncId) {
@@ -255,7 +164,7 @@ impl<'ctx> ProgEmit<'ctx> {
         stackmap_end.set_linkage(inkwell::module::Linkage::External);
 
         self.ctx.builder.build_call(
-            self.ctx.get_func(ExFunc::rt_runtime_init),
+            self.sym.get_func(ExFunc::rt_runtime_init),
             &[
                 self.rt_global.as_pointer_value().into(),
                 stackmap_start.as_pointer_value().into(),
@@ -279,7 +188,7 @@ impl<'ctx> ProgEmit<'ctx> {
     fn populate_datum_types(&mut self) {
         for ty in self.env.instances.iter() {
             let vars_field_ty = self
-                .ctx
+                .tys
                 .get_llvm_type::<Val>()
                 .array_type(ty.pty.vars.len() as u32);
             let datum_ty = self
@@ -287,7 +196,7 @@ impl<'ctx> ProgEmit<'ctx> {
                 .llvm_ctx
                 .opaque_struct_type(&format!("datum_{}", ty.id.index()));
             datum_ty.set_body(
-                &[self.ctx.get_llvm_type::<Datum>(), vars_field_ty.into()],
+                &[self.tys.get_llvm_type::<Datum>(), vars_field_ty.into()],
                 false,
             );
             assert_eq!(ty.id.index(), self.datum_types.len());
@@ -296,9 +205,9 @@ impl<'ctx> ProgEmit<'ctx> {
     }
 
     fn emit_string_table(&mut self) {
-        let string_repr = self.ctx.get_struct::<RtString>();
-        let hh_repr = self.ctx.get_struct::<HeapHeader>();
-        let gcm_repr = self.ctx.get_enum::<GcMarker>();
+        let string_repr = self.tys.get_struct::<RtString>();
+        let hh_repr = self.tys.get_struct::<HeapHeader>();
+        let gcm_repr = self.tys.get_enum::<GcMarker>();
 
         let string_globals: IndexVec<StringId, _> = self
             .env
@@ -360,12 +269,12 @@ impl<'ctx> ProgEmit<'ctx> {
     }
 
     fn emit_ftable(&mut self) {
-        let funcptr_ty = self.ctx.get_llvm_type::<FuncPtr>().into_pointer_type();
+        let funcptr_ty = self.tys.get_llvm_type::<FuncPtr>().into_pointer_type();
 
         let ft_entries: Vec<_> = self
             .sym
-            .iter()
-            .map(|fv| {
+            .iter_ir_llvm_funcs()
+            .map(|(_, fv)| {
                 fv.as_global_value()
                     .as_pointer_value()
                     .const_cast(funcptr_ty)
@@ -376,7 +285,7 @@ impl<'ctx> ProgEmit<'ctx> {
     }
 
     fn emit_vtable(&mut self) {
-        let vt_entry_ty = self.ctx.get_struct::<vtable::Entry>().ty;
+        let vt_entry_ty = self.tys.get_struct::<vtable::Entry>().ty;
         let mut vt_entries = Vec::new();
         for instance in self.env.instances.iter() {
             let size_val = self.datum_types[instance.id]
@@ -407,9 +316,9 @@ impl<'ctx> ProgEmit<'ctx> {
                         .const_int(ity.id.raw() as _, false)
                         .into(),
                     size_val.into(),
-                    self.ctx.get_func(ExFunc::rt_list_var_get).into(),
-                    self.ctx.get_func(ExFunc::rt_list_var_set).into(),
-                    self.ctx.get_func(ExFunc::rt_list_proc_lookup).into(),
+                    self.sym.get_func(ExFunc::rt_list_var_get).into(),
+                    self.sym.get_func(ExFunc::rt_list_var_set).into(),
+                    self.sym.get_func(ExFunc::rt_list_proc_lookup).into(),
                 ],
                 Specialization::String => {
                     [
@@ -476,7 +385,7 @@ impl<'ctx> ProgEmit<'ctx> {
 
     fn make_trapping_func(&mut self, ty: FunctionType<'ctx>, name: &str) -> FunctionValue<'ctx> {
         let func = self.ctx.module.add_function(name, ty, None);
-        let trap_fn = self.get_intrinsic(Intrinsic::Trap);
+        let trap_fn = self.ctx.get_intrinsic(Intrinsic::Trap);
         let block = self.ctx.llvm_ctx.append_basic_block(func, "trap");
 
         self.ctx.builder.position_at_end(block);
@@ -520,7 +429,7 @@ impl<'ctx> ProgEmit<'ctx> {
         self.ctx.builder.build_call(self.ctx.rt.rt_throw, &[datum_ptr.into()], "");
         */
         // TODO: RTE no such var
-        let trap_fn = self.get_intrinsic(Intrinsic::Trap);
+        let trap_fn = self.ctx.get_intrinsic(Intrinsic::Trap);
         self.ctx.builder.build_call(trap_fn, &[], "");
         self.ctx.builder.build_unreachable();
 
@@ -573,14 +482,14 @@ impl<'ctx> ProgEmit<'ctx> {
     }
 
     fn make_get_var_func(
-        &self, ty: &InstanceType, index_func: FunctionValue<'ctx>,
+        &mut self, ty: &InstanceType, index_func: FunctionValue<'ctx>,
     ) -> FunctionValue<'ctx> {
         let datum_type_ptr = self.datum_types[ty.id].ptr_type(GC_ADDRESS_SPACE);
         let func_ty = self.ctx.llvm_ctx.void_type().fn_type(
             &[
                 datum_type_ptr.into(),
                 self.ctx.llvm_ctx.i64_type().into(),
-                self.ctx.get_llvm_type_ptr::<Val>().into(),
+                self.tys.get_llvm_type_ptr::<Val>().into(),
             ],
             false,
         );
@@ -627,14 +536,14 @@ impl<'ctx> ProgEmit<'ctx> {
     }
 
     fn make_set_var_func(
-        &self, ty: &InstanceType, index_func: FunctionValue<'ctx>,
+        &mut self, ty: &InstanceType, index_func: FunctionValue<'ctx>,
     ) -> FunctionValue<'ctx> {
         let datum_type_ptr = self.datum_types[ty.id].ptr_type(GC_ADDRESS_SPACE);
         let func_ty = self.ctx.llvm_ctx.void_type().fn_type(
             &[
                 datum_type_ptr.into(),
                 self.ctx.llvm_ctx.i64_type().into(),
-                self.ctx.get_llvm_type_ptr::<Val>().into(),
+                self.tys.get_llvm_type_ptr::<Val>().into(),
             ],
             false,
         );
@@ -673,14 +582,14 @@ impl<'ctx> ProgEmit<'ctx> {
                 "var_val_ptr",
             )
         };
-        self.copy_val(asg_val, var_val_ptr);
+        self.ctx.copy_val(asg_val, var_val_ptr);
         self.ctx.builder.build_return(None);
 
         func
     }
 
     fn make_proc_lookup_func(&mut self, ty: &InstanceType) -> FunctionValue<'ctx> {
-        let ret_ty = self.proc_type.ptr_type(inkwell::AddressSpace::Generic);
+        let ret_ty = self.sym.proc_type.ptr_type(inkwell::AddressSpace::Generic);
         let func_ty = ret_ty.fn_type(&[self.ctx.llvm_ctx.i64_type().into()], false);
         let func = self.ctx.module.add_function(
             &format!("ty_{}_proc_lookup", ty.id.index()),
@@ -694,7 +603,7 @@ impl<'ctx> ProgEmit<'ctx> {
 
         self.ctx.builder.position_at_end(dropout_block);
         // TODO: RTE no such proc
-        let trap_fn = self.get_intrinsic(Intrinsic::Trap);
+        let trap_fn = self.ctx.get_intrinsic(Intrinsic::Trap);
         self.ctx.builder.build_call(trap_fn, &[], "");
         self.ctx.builder.build_unreachable();
 
@@ -717,7 +626,7 @@ impl<'ctx> ProgEmit<'ctx> {
             cases.push((disc_val, case_block));
             phi_incoming.push((proc_index_val, case_block));
             proc_lookup_vals.push(
-                self.sym[ty.pty.proc_lookup[proc_name].top_func]
+                self.resolve_func(ty.pty.proc_lookup[proc_name].top_func)
                     .as_global_value()
                     .as_pointer_value(),
             );
@@ -803,21 +712,6 @@ impl<'ctx> ProgEmit<'ctx> {
             .module
             .write_bitcode_to_path(std::path::Path::new(&format!("out/{}.bc", name)));
         assert!(success);
-    }
-
-    pub fn get_intrinsic(&self, intrinsic: Intrinsic) -> FunctionValue<'ctx> {
-        // TODO: cache?
-        let ty_f32 = self.ctx.llvm_ctx.f32_type().into();
-
-        let (name, tys): (_, Vec<inkwell::types::BasicTypeEnum>) = match intrinsic {
-            Intrinsic::FPow => ("llvm.pow", vec![ty_f32]),
-            Intrinsic::Trap => ("llvm.trap", vec![]),
-            //Intrinsic::LifetimeStart => ("llvm.lifetime.start", vec![]),
-            //Intrinsic::LifetimeEnd => ("llvm.lifetime.end", vec![]),
-            //Intrinsic::InvariantStart => ("llvm.invariant.start", vec![]),
-        };
-
-        self.ctx.get_intrinsic(name, &tys).unwrap()
     }
 }
 

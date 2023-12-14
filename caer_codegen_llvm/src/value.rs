@@ -19,6 +19,7 @@ use pinion::{
 
 use crate::context::Context;
 
+// TODO: ERRH
 fn any_to_basic(any: AnyTypeEnum) -> BasicTypeEnum {
     match any {
         AnyTypeEnum::ArrayType(ty) => ty.into(),
@@ -146,13 +147,13 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
         unsafe { Self::materialize(ctx, alloca.into()) }
     }
 
-    pub fn copy(ctx: &mut Context<'ctx>, src: Self, dest: Self) {
+    pub fn copy(ctx: &Context<'ctx>, src: Self, dest: Self) {
         assert_eq!(src.val.get_type(), dest.val.get_type());
 
         let size = ctx.get_store_size::<T>();
 
         let memcpy_intrinsic = ctx
-            .get_intrinsic(
+            .get_intrinsic_raw(
                 "llvm.memcpy",
                 &[
                     src.val.get_type(),
@@ -174,7 +175,7 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
         );
     }
 
-    pub fn copy_to_alloca(self, ctx: &mut Context<'ctx>) -> Self {
+    pub fn copy_to_alloca(self, ctx: &Context<'ctx>) -> Self {
         let dest = Self::build_as_alloca(ctx);
         Self::copy(ctx, self, dest);
         dest
@@ -353,7 +354,7 @@ impl<'ctx> BrandedStackValue<'ctx> {
         }
     }
 
-    pub fn copy_to_alloca(self, ctx: &mut Context<'ctx>) -> Self {
+    pub fn copy_to_alloca(self, ctx: &Context<'ctx>) -> Self {
         match self {
             BrandedStackValue::Val(val) => val.copy_to_alloca(ctx).into(),
             BrandedStackValue::Null => self,

@@ -6,6 +6,8 @@ mod emit_type;
 mod func;
 mod prog;
 mod repr;
+mod symbol_table;
+mod type_manager;
 mod value;
 
 pub fn emit(ir: &caer_ir::module::Module) {
@@ -13,13 +15,12 @@ pub fn emit(ir: &caer_ir::module::Module) {
         .unwrap();
 
     let llctx = inkwell::context::Context::create();
-    let llmod = Rc::new(llctx.create_module("main"));
-    let llbuild = Rc::new(llctx.create_builder());
+    let llmod = llctx.create_module("main");
+    let llbuild = llctx.create_builder();
 
-    let mut emit_ctx = context::Context::new(&llctx, llmod.clone(), llbuild.clone());
+    let emit_ctx = Rc::new(context::Context::new(&llctx, llmod, llbuild));
     let mut builder = prog::ProgEmit::new(emit_ctx, ir);
 
-    builder.build_funcs();
     builder.emit();
 
     // not really run, just prints out crap
