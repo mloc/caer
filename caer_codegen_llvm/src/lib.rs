@@ -18,12 +18,22 @@ pub fn emit(ir: &caer_ir::module::Module) {
     let llmod = llctx.create_module("main");
     let llbuild = llctx.create_builder();
 
-    let emit_ctx = Rc::new(context::Context::new(&llctx, llmod, llbuild));
-    let mut builder = prog::ProgEmit::new(emit_ctx, ir);
+    sub(&llctx, llmod, llbuild, ir)
+}
 
-    builder.emit();
+fn sub<'ctx, 'ir: 'ctx>(
+    llctx: &'ctx inkwell::context::Context, llmod: inkwell::module::Module<'ctx>,
+    llbuild: inkwell::builder::Builder<'ctx>, ir: &'ir caer_ir::module::Module,
+) {
+    let emit_ctx = context::Context::new(llctx, llmod, llbuild);
 
-    // not really run, just prints out crap
-    // TODO: expose seperately, don't hardcode paths
-    builder.run(true);
+    {
+        let mut builder = prog::ProgEmit::new(&emit_ctx, ir);
+
+        builder.emit();
+
+        // not really run, just prints out crap
+        // TODO: expose seperately, don't hardcode paths
+        builder.run(true);
+    }
 }

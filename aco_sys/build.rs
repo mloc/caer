@@ -6,6 +6,7 @@ fn main() {
         .file("src/aco.c")
         .file("src/acosw.S")
         .file("src/shim.c")
+        .opt_level(2)
         .compile("aco");
 
     let mut builder = bindgen::Builder::default()

@@ -28,7 +28,10 @@ fn any_to_basic(any: AnyTypeEnum) -> BasicTypeEnum {
         AnyTypeEnum::PointerType(ty) => ty.into(),
         AnyTypeEnum::StructType(ty) => ty.into(),
         AnyTypeEnum::VectorType(ty) => ty.into(),
-        AnyTypeEnum::VoidType(_) | AnyTypeEnum::FunctionType(_) | AnyTypeEnum::TokenType(_) => {
+        AnyTypeEnum::VoidType(_)
+        | AnyTypeEnum::FunctionType(_)
+        | AnyTypeEnum::TokenType(_)
+        | AnyTypeEnum::ScalableVectorType(_) => {
             panic!("{:?} is not basic", any)
         },
     }
@@ -89,7 +92,7 @@ impl<'ctx, T: PinionData> BrandedValue<'ctx, T> {
 
     // TODO: checks!!!
     pub unsafe fn materialize(ctx: &Context<'ctx>, val: BasicValueEnum<'ctx>) -> Self {
-        let ty = ctx.get_type::<T>();
+        let ty = ctx.r.get_type::<T>();
         assert_eq!(Some(val.get_type()), ty.get_ty());
         Self::new(val, ty.get_id())
     }
@@ -123,7 +126,8 @@ impl<'ctx, T: PrimLiteral> BrandedValue<'ctx, T> {
     pub unsafe fn bitcast_self<O: PinionData>(self, ctx: &Context<'ctx>) -> BrandedValue<'ctx, O> {
         let cast = ctx
             .builder
-            .build_bitcast(self.val, ctx.get_llvm_type::<O>(), "");
+            .build_bit_cast(self.val, ctx.r.get_llvm_type::<O>(), "")
+            .unwrap();
         // Safety: inherently unsafe, so this fn is unsafe
         BrandedValue::<O>::materialize(ctx, cast)
     }
@@ -133,14 +137,14 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
     // Create an instance of a pointer type by stack-allocating
     // Data is uninitialized
     pub fn build_as_alloca(ctx: &Context<'ctx>) -> Self {
-        let elem_ty = ctx.get_llvm_type::<T::Element>();
+        let elem_ty = ctx.r.get_llvm_type::<T::Element>();
         let alloca = ctx.builder.build_alloca(elem_ty, "");
         // Safety: alloca creates a raw pointer to appropriate memory
         unsafe { Self::materialize(ctx, alloca.into()) }
     }
 
     pub fn build_as_alloca_array(ctx: &Context<'ctx>, n: u64) -> Self {
-        let elem_ty = ctx.get_llvm_type::<T::Element>();
+        let elem_ty = ctx.r.get_llvm_type::<T::Element>();
         let n_val = ctx.llvm_ctx.i64_type().const_int(n, false);
         let alloca = ctx.builder.build_array_alloca(elem_ty, n_val, "");
         // Safety: array alloca creates a raw pointer to appropriate memory
@@ -150,7 +154,7 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
     pub fn copy(ctx: &Context<'ctx>, src: Self, dest: Self) {
         assert_eq!(src.val.get_type(), dest.val.get_type());
 
-        let size = ctx.get_store_size::<T>();
+        let size = ctx.r.get_store_size::<T>();
 
         let memcpy_intrinsic = ctx
             .get_intrinsic_raw(
@@ -221,7 +225,7 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
     ) -> BrandedValue<'ctx, O> {
         let cast = ctx
             .builder
-            .build_bitcast(self.val, ctx.get_llvm_type::<O>(), "");
+            .build_bitcast(self.val, ctx.r.get_llvm_type::<O>(), "");
         // Safety: inherently unsafe, so fn is unsafe
         BrandedValue::materialize(ctx, cast)
     }
@@ -397,13 +401,9 @@ pub struct GlobalValue<'ctx, T> {
 
 impl<'ctx, T: PinionData> GlobalValue<'ctx, T> {
     pub fn create(ctx: &Context<'ctx>, name: Option<&str>) -> Self {
-        let ty = ctx.get_type::<T>();
+        let ty = ctx.r.get_type::<T>();
         let ty_ll = ty.get_ty().unwrap();
-        let val = ctx.module.add_global(
-            ty_ll,
-            Some(inkwell::AddressSpace::Generic),
-            name.unwrap_or_default(),
-        );
+        let val = ctx.module.add_global(ty_ll, None, name.unwrap_or_default());
         Self {
             val,
             layout_id: ty.get_id(),

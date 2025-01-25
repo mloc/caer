@@ -23,7 +23,7 @@ use inkwell::values::*;
 use pinion::{PinionData, PinionPointerType, PinionStruct, PinionTaggedUnion};
 use ty::Type;
 
-use crate::context::{Context, ExFunc, ExMod, GC_ADDRESS_SPACE};
+use crate::context::{Context, ExFunc, ExMod};
 use crate::prog::{Intrinsic, ProgEmit};
 use crate::symbol_table::SymbolTable;
 use crate::value::{BrandedStackValue, BrandedValue};
@@ -76,7 +76,8 @@ impl<'a, 'ctx> WalkActor for FuncEmit<'a, 'ctx> {
         self.jumper = Some(
             self.ctx
                 .builder
-                .build_unconditional_branch(self.blocks[BlockId::new(0)]),
+                .build_unconditional_branch(self.blocks[BlockId::new(0)])
+                .unwrap(),
         );
     }
 
@@ -104,11 +105,11 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
     fn build_alloca(&self, ty: impl BasicType<'ctx> + Copy, name: &str) -> PointerValue<'ctx> {
         match self.jumper {
             // Not set- we're still in setup + in the entry block, safe to just emit
-            None => self.ctx.builder.build_alloca(ty, name),
+            None => self.ctx.builder.build_alloca(ty, name).unwrap(),
             Some(jumper) => {
                 let cur_block = self.ctx.builder.get_insert_block().unwrap();
                 self.ctx.builder.position_before(&jumper);
-                let alloca = self.ctx.builder.build_alloca(ty, name);
+                let alloca = self.ctx.builder.build_alloca(ty, name).unwrap();
                 self.ctx.builder.position_at_end(cur_block);
                 alloca
             },
@@ -119,7 +120,8 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
         let alloca = self.build_alloca(ty, name);
         self.ctx
             .builder
-            .build_address_space_cast(alloca, ty.ptr_type(GC_ADDRESS_SPACE), "")
+            .build_address_space_cast(alloca, ty.ptr_type(inkwell::AddressSpace::default()), "")
+            .unwrap()
     }
 
     fn build_val_alloca(&self, ty: &Type) -> BrandedStackValue<'ctx> {
@@ -450,7 +452,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
             .ptr_type(inkwell::AddressSpace::Generic);
         self.ctx
             .builder
-            .build_bitcast(ptr, dest_ty, "")
+            .build_bit_cast(ptr, dest_ty, "")
             .into_pointer_value()
     }
 
@@ -480,6 +482,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
         self.ctx
             .builder
             .build_call(func, &args, "")
+            .unwrap()
             .try_as_basic_value()
             .left()
     }
@@ -581,6 +584,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                 .ctx
                 .builder
                 .build_invoke(sp_intrinsic, &sp_args, continuation, self.blocks[pad], "")
+                .unwrap()
                 .try_as_basic_value()
                 .left()
                 .unwrap();
@@ -594,6 +598,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                 .ctx
                 .builder
                 .build_call(sp_intrinsic, &sp_args_bmve, "")
+                .unwrap()
                 .try_as_basic_value()
                 .left()
                 .unwrap();
@@ -612,6 +617,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
             self.ctx
                 .builder
                 .build_call(result_intrinsic, &[statepoint_token.into()], "")
+                .unwrap()
                 .try_as_basic_value()
                 .left()
         } else {
@@ -639,6 +645,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                 .ctx
                 .builder
                 .build_invoke(func, &args, continuation, self.blocks[pad], "")
+                .unwrap()
                 .try_as_basic_value()
                 .left();
             self.ctx.builder.position_at_end(continuation);
@@ -1062,13 +1069,17 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                     panic!("CatchException op not at start of block");
                 }
 
-                let landingpad = self.ctx.builder.build_landing_pad(
-                    self.ctx.rt.ty.landingpad_type,
-                    self.ctx.rt.dm_eh_personality,
-                    &[],
-                    true,
-                    "lp",
-                );
+                let landingpad = self
+                    .ctx
+                    .builder
+                    .build_landing_pad(
+                        self.ctx.rt.ty.landingpad_type,
+                        self.ctx.rt.dm_eh_personality,
+                        &[],
+                        true,
+                        "lp",
+                    )
+                    .unwrap();
 
                 if let Some(except_var) = maybe_except_var {
                     let exception_container = self
@@ -1304,6 +1315,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                     .ctx
                     .builder
                     .build_float_add(lhs_bve.into_float_value(), rhs_bve.into_float_value(), "")
+                    .unwrap()
                     .into();
                 // ewwww TODO: cleanup cleanup
                 let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
@@ -1317,6 +1329,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                     .ctx
                     .builder
                     .build_float_sub(lhs_bve.into_float_value(), rhs_bve.into_float_value(), "")
+                    .unwrap()
                     .into();
                 let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
                 alloca.build_store(self.ctx, unsafe {
@@ -1329,6 +1342,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                     .ctx
                     .builder
                     .build_float_mul(lhs_bve.into_float_value(), rhs_bve.into_float_value(), "")
+                    .unwrap()
                     .into();
                 let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
                 alloca.build_store(self.ctx, unsafe {
@@ -1341,6 +1355,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                     .ctx
                     .builder
                     .build_float_div(lhs_bve.into_float_value(), rhs_bve.into_float_value(), "")
+                    .unwrap()
                     .into();
                 let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
                 alloca.build_store(self.ctx, unsafe {
@@ -1353,6 +1368,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                     .ctx
                     .builder
                     .build_float_rem(lhs_bve.into_float_value(), rhs_bve.into_float_value(), "")
+                    .unwrap()
                     .into();
                 let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
                 alloca.build_store(self.ctx, unsafe {
@@ -1371,16 +1387,21 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                 alloca.into()
             },
             op::HardBinary::FloatCmp(pred) => {
-                let bool_res = self.ctx.builder.build_float_compare(
-                    Self::conv_pred(pred),
-                    lhs_bve.into_float_value(),
-                    rhs_bve.into_float_value(),
-                    "",
-                );
+                let bool_res = self
+                    .ctx
+                    .builder
+                    .build_float_compare(
+                        Self::conv_pred(pred),
+                        lhs_bve.into_float_value(),
+                        rhs_bve.into_float_value(),
+                        "",
+                    )
+                    .unwrap();
                 let res = self
                     .ctx
                     .builder
                     .build_unsigned_int_to_float(bool_res, self.ctx.llvm_ctx.f32_type(), "")
+                    .unwrap()
                     .into();
                 let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
                 alloca.build_store(self.ctx, unsafe {
@@ -1392,14 +1413,19 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                 let lhs_i24 = self.float_to_i24(lhs_bve.into_float_value());
                 let rhs_i24 = self.float_to_i24(rhs_bve.into_float_value());
                 let res_i24 = match bitop {
-                    op::BitOp::And => self.ctx.builder.build_and(lhs_i24, rhs_i24, ""),
-                    op::BitOp::Or => self.ctx.builder.build_or(lhs_i24, rhs_i24, ""),
-                    op::BitOp::Xor => self.ctx.builder.build_xor(lhs_i24, rhs_i24, ""),
-                    op::BitOp::Shl => self.ctx.builder.build_left_shift(lhs_i24, rhs_i24, ""),
+                    op::BitOp::And => self.ctx.builder.build_and(lhs_i24, rhs_i24, "").unwrap(),
+                    op::BitOp::Or => self.ctx.builder.build_or(lhs_i24, rhs_i24, "").unwrap(),
+                    op::BitOp::Xor => self.ctx.builder.build_xor(lhs_i24, rhs_i24, "").unwrap(),
+                    op::BitOp::Shl => self
+                        .ctx
+                        .builder
+                        .build_left_shift(lhs_i24, rhs_i24, "")
+                        .unwrap(),
                     op::BitOp::Shr => self
                         .ctx
                         .builder
-                        .build_right_shift(lhs_i24, rhs_i24, false, ""),
+                        .build_right_shift(lhs_i24, rhs_i24, false, "")
+                        .unwrap(),
                 };
                 let res = self.i24_to_float(res_i24).into();
                 let alloca = BrandedValue::<*mut f32>::build_as_alloca(self.ctx);
@@ -1426,64 +1452,71 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
         let f_min_val = self
             .ctx
             .builder
-            .build_bitcast(i32_type.const_int(f_min_int.into(), false), f32_type, "")
+            .build_bit_cast(i32_type.const_int(f_min_int.into(), false), f32_type, "")
+            .unwrap()
             .into_float_value();
         let f_max_val = self
             .ctx
             .builder
-            .build_bitcast(i32_type.const_int(f_max_int.into(), false), f32_type, "")
+            .build_bit_cast(i32_type.const_int(f_max_int.into(), false), f32_type, "")
+            .unwrap()
             .into_float_value();
         let f_trunc_val = self
             .ctx
             .builder
-            .build_float_to_signed_int(f32_val, i32_type, "");
+            .build_float_to_signed_int(f32_val, i32_type, "")
+            .unwrap();
 
         let i_min_val = i32_type.const_int(i32::MIN as u64, true);
         let i_max_val = i32_type.const_int(i32::MAX as u64, true);
 
-        let less_or_nan = self.ctx.builder.build_float_compare(
-            inkwell::FloatPredicate::ULT,
-            f32_val,
-            f_min_val,
-            "",
-        );
-        let greater = self.ctx.builder.build_float_compare(
-            inkwell::FloatPredicate::OGT,
-            f32_val,
-            f_max_val,
-            "",
-        );
-        let is_nan = self.ctx.builder.build_float_compare(
-            inkwell::FloatPredicate::UNO,
-            f32_val,
-            f32_val,
-            "",
-        );
+        let less_or_nan = self
+            .ctx
+            .builder
+            .build_float_compare(inkwell::FloatPredicate::ULT, f32_val, f_min_val, "")
+            .unwrap();
+        let greater = self
+            .ctx
+            .builder
+            .build_float_compare(inkwell::FloatPredicate::OGT, f32_val, f_max_val, "")
+            .unwrap();
+        let is_nan = self
+            .ctx
+            .builder
+            .build_float_compare(inkwell::FloatPredicate::UNO, f32_val, f32_val, "")
+            .unwrap();
 
         let s0 = self
             .ctx
             .builder
-            .build_select(less_or_nan, i_min_val, f_trunc_val, "");
+            .build_select(less_or_nan, i_min_val, f_trunc_val, "")
+            .unwrap();
         let s1 = self
             .ctx
             .builder
-            .build_select(greater, i_max_val.into(), s0, "");
+            .build_select(greater, i_max_val.into(), s0, "")
+            .unwrap();
         self.ctx
             .builder
             .build_select(is_nan, i32_type.const_zero().into(), s1, "")
+            .unwrap()
             .into_int_value()
     }
 
     fn float_to_i24(&self, f32_val: FloatValue<'ctx>) -> IntValue<'ctx> {
         let i24_type = self.ctx.llvm_ctx.custom_width_int_type(24);
         let i32_val = self.f32_to_i32_sat(f32_val);
-        self.ctx.builder.build_int_truncate(i32_val, i24_type, "")
+        self.ctx
+            .builder
+            .build_int_truncate(i32_val, i24_type, "")
+            .unwrap()
     }
 
     fn i24_to_float(&self, i24_val: IntValue<'ctx>) -> FloatValue<'ctx> {
         self.ctx
             .builder
             .build_unsigned_int_to_float(i24_val, self.ctx.llvm_ctx.f32_type(), "")
+            .unwrap()
     }
 
     unsafe fn const_gep_insertvalue(
@@ -1500,6 +1533,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
         self.ctx
             .builder
             .build_load(self.const_gep(ptr, indexes), "")
+            .unwrap()
     }
 
     unsafe fn const_gep(&self, ptr: PointerValue<'ctx>, indexes: &[u64]) -> PointerValue<'ctx> {
@@ -1510,6 +1544,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
         self.ctx
             .builder
             .build_in_bounds_gep(ptr, &gep_indexes, "gepiv_ptr")
+            .unwrap()
     }
 
     fn build_argpack(
@@ -1663,20 +1698,24 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
         &self, ty_id: IntValue<'ctx>, offset: u64,
     ) -> BasicValueEnum<'ctx> {
         let field_ptr = unsafe {
-            self.ctx.builder.build_in_bounds_gep(
-                self.sym.vt_global.as_pointer_value(),
-                &[
-                    self.ctx.llvm_ctx.i32_type().const_zero(),
-                    ty_id,
-                    self.ctx.llvm_ctx.i32_type().const_int(offset, false),
-                ],
-                &format!("vtable_field_{}_ptr", offset),
-            )
+            self.ctx
+                .builder
+                .build_in_bounds_gep(
+                    self.sym.vt_global.as_pointer_value(),
+                    &[
+                        self.ctx.llvm_ctx.i32_type().const_zero(),
+                        ty_id,
+                        self.ctx.llvm_ctx.i32_type().const_int(offset, false),
+                    ],
+                    &format!("vtable_field_{}_ptr", offset),
+                )
+                .unwrap()
         };
 
         self.ctx
             .builder
             .build_load(field_ptr, &format!("vtable_field_{}", offset))
+            .unwrap()
     }
 
     fn build_vtentry_extract(&self, vptr: PointerValue<'ctx>, offset: u64) -> BasicValueEnum<'ctx> {

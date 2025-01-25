@@ -237,7 +237,7 @@ impl<'ctx> ReprManager<'ctx> {
                 Some(
                     pointee
                         .expect("pointee must be sized")
-                        .ptr_type(inkwell::AddressSpace::Generic)
+                        .ptr_type(inkwell::AddressSpace::default())
                         .into(),
                 )
             },
@@ -254,7 +254,7 @@ impl<'ctx> ReprManager<'ctx> {
             ),
             Layout::FuncPtr(func) => {
                 let func_ty = self.build_func(func, ctx);
-                Some(func_ty.ptr_type(inkwell::AddressSpace::Generic).into())
+                Some(func_ty.ptr_type(inkwell::AddressSpace::default()).into())
             },
             Layout::OpaqueStruct(opaque_layout) => {
                 let name = opaque_layout.name.unwrap_or_default();

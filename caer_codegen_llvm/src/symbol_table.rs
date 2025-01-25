@@ -14,7 +14,7 @@ use index_vec::IndexVec;
 use inkwell::types::{BasicType, FunctionType};
 use inkwell::values::{FunctionValue, GlobalValue};
 
-use crate::context::{Context, ExFunc, ExRuntime, GC_ADDRESS_SPACE};
+use crate::context::{Context, ExFunc, ExRuntime};
 use crate::type_manager::TypeManager;
 use crate::value::BrandedValue;
 
@@ -58,9 +58,7 @@ impl<'ctx> SymbolTable<'ctx> {
         let rt_type = tys.get_llvm_type::<Runtime>();
         let funcptr_ty = tys.get_llvm_type::<FuncPtr>();
 
-        let rt_global =
-            ctx.module
-                .add_global(rt_type, Some(inkwell::AddressSpace::Generic), "runtime");
+        let rt_global = ctx.module.add_global(rt_type, None, "runtime");
         rt_global.set_initializer(&rt_type.const_zero());
 
         let rt_global_val = unsafe {
@@ -71,15 +69,11 @@ impl<'ctx> SymbolTable<'ctx> {
         let vt_global_ty = tys
             .get_llvm_type::<vtable::Entry>()
             .array_type(ir_env.type_tree.len() as u32);
-        let vt_global =
-            ctx.module
-                .add_global(vt_global_ty, Some(inkwell::AddressSpace::Generic), "vtable");
+        let vt_global = ctx.module.add_global(vt_global_ty, None, "vtable");
         vt_global.set_constant(true);
 
         let ft_global_ty = funcptr_ty.array_type(ir_env.funcs.len() as u32);
-        let ft_global =
-            ctx.module
-                .add_global(ft_global_ty, Some(inkwell::AddressSpace::Generic), "ftable");
+        let ft_global = ctx.module.add_global(ft_global_ty, None, "ftable");
         ft_global.set_constant(true);
 
         let string_table = Self::initialize_string_table(ctx, tys, ir_env);
@@ -171,20 +165,22 @@ impl<'ctx> SymbolTable<'ctx> {
                         .into(),
                     ctx.llvm_ctx.i64_type().const_int(len as _, false).into(),
                     unsafe {
-                        ctx.builder.build_in_bounds_gep(
-                            string_global.as_pointer_value(),
-                            &[
-                                ctx.llvm_ctx.i32_type().const_zero(),
-                                ctx.llvm_ctx.i32_type().const_zero(),
-                            ],
-                            "",
-                        )
+                        ctx.builder
+                            .build_in_bounds_gep(
+                                string_global.as_pointer_value(),
+                                &[
+                                    ctx.llvm_ctx.i32_type().const_zero(),
+                                    ctx.llvm_ctx.i32_type().const_zero(),
+                                ],
+                                "",
+                            )
+                            .unwrap()
                     }
                     .into(),
                 ]);
                 let asg = ctx.module.add_global(
                     string_repr.ty,
-                    Some(GC_ADDRESS_SPACE),
+                    None,
                     &format!("alloc_string_{}", id.raw()),
                 );
                 asg.set_initializer(&alloc_string);

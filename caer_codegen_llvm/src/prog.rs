@@ -24,7 +24,7 @@ use inkwell::values::{AnyValueEnum, FunctionValue, PointerValue};
 
 use super::context::Context;
 use super::func::FuncEmit;
-use crate::context::{ExFunc, GC_ADDRESS_SPACE};
+use crate::context::ExFunc;
 use crate::symbol_table::SymbolTable;
 use crate::type_manager::TypeManager;
 use crate::value::BrandedValue;
@@ -52,7 +52,8 @@ pub struct ProgEmit<'ctx> {
 }
 
 impl<'ctx> ProgEmit<'ctx> {
-    pub fn new(ctx: &'ctx Context<'ctx>, env: &'ctx Module) -> Self {
+    pub fn new<'ir: 'ctx, 'inctx: 'ctx>(ctx: &'inctx Context<'inctx>, env: &'ir Module) -> Self {
+        let ctx: &'ctx Context<'ctx> = ctx;
         let tys = TypeManager::new(ctx);
         let sym = SymbolTable::new(ctx, &tys, env);
 
@@ -131,24 +132,30 @@ impl<'ctx> ProgEmit<'ctx> {
         serde_json::to_writer_pretty(File::create("environment.json").unwrap(), &rt_env).unwrap();
 
         let vt_ptr = unsafe {
-            self.ctx.builder.build_in_bounds_gep(
-                self.vt_global.as_pointer_value(),
-                &[
-                    self.ctx.llvm_ctx.i32_type().const_zero(),
-                    self.ctx.llvm_ctx.i32_type().const_zero(),
-                ],
-                "vt_ptr",
-            )
+            self.ctx
+                .builder
+                .build_in_bounds_gep(
+                    self.vt_global.as_pointer_value(),
+                    &[
+                        self.ctx.llvm_ctx.i32_type().const_zero(),
+                        self.ctx.llvm_ctx.i32_type().const_zero(),
+                    ],
+                    "vt_ptr",
+                )
+                .unwrap()
         };
         let ft_ptr = unsafe {
-            self.ctx.builder.build_in_bounds_gep(
-                self.ft_global.as_pointer_value(),
-                &[
-                    self.ctx.llvm_ctx.i32_type().const_zero(),
-                    self.ctx.llvm_ctx.i32_type().const_zero(),
-                ],
-                "ft_ptr",
-            )
+            self.ctx
+                .builder
+                .build_in_bounds_gep(
+                    self.ft_global.as_pointer_value(),
+                    &[
+                        self.ctx.llvm_ctx.i32_type().const_zero(),
+                        self.ctx.llvm_ctx.i32_type().const_zero(),
+                    ],
+                    "ft_ptr",
+                )
+                .unwrap()
         };
 
         // defined in linker script
@@ -245,14 +252,17 @@ impl<'ctx> ProgEmit<'ctx> {
                         .const_int(len as _, false)
                         .into(),
                     unsafe {
-                        self.ctx.builder.build_in_bounds_gep(
-                            string_global.as_pointer_value(),
-                            &[
-                                self.ctx.llvm_ctx.i32_type().const_zero(),
-                                self.ctx.llvm_ctx.i32_type().const_zero(),
-                            ],
-                            "",
-                        )
+                        self.ctx
+                            .builder
+                            .build_in_bounds_gep(
+                                string_global.as_pointer_value(),
+                                &[
+                                    self.ctx.llvm_ctx.i32_type().const_zero(),
+                                    self.ctx.llvm_ctx.i32_type().const_zero(),
+                                ],
+                                "",
+                            )
+                            .unwrap()
                     }
                     .into(),
                 ]);
@@ -366,11 +376,11 @@ impl<'ctx> ProgEmit<'ctx> {
                 .iter()
                 .enumerate()
                 .map(|(i, entry)| match *entry {
-                    AnyValueEnum::FunctionValue(f) => self.ctx.builder.build_bitcast(
-                        f.as_global_value().as_pointer_value(),
-                        field_tys[i],
-                        "",
-                    ),
+                    AnyValueEnum::FunctionValue(f) => self
+                        .ctx
+                        .builder
+                        .build_bit_cast(f.as_global_value().as_pointer_value(), field_tys[i], "")
+                        .unwrap(),
                     AnyValueEnum::IntValue(v) => v.into(),
                     _ => unimplemented!("add handler"),
                 })
@@ -472,7 +482,8 @@ impl<'ctx> ProgEmit<'ctx> {
         let offset_val = self
             .ctx
             .builder
-            .build_phi(self.ctx.llvm_ctx.i32_type(), "offset");
+            .build_phi(self.ctx.llvm_ctx.i32_type(), "offset")
+            .unwrap();
         offset_val.add_incoming(phi_incoming.as_slice());
         self.ctx
             .builder
@@ -510,27 +521,31 @@ impl<'ctx> ProgEmit<'ctx> {
             .ctx
             .builder
             .build_call(index_func, &[var_name.into()], "var_index")
+            .unwrap()
             .try_as_basic_value()
             .left()
             .unwrap()
             .into_int_value();
         let var_val_ptr = unsafe {
-            self.ctx.builder.build_in_bounds_gep(
-                datum_ptr,
-                &[
-                    self.ctx.llvm_ctx.i32_type().const_zero(),
-                    self.ctx
-                        .llvm_ctx
-                        .i32_type()
-                        .const_int(layout::DATUM_VARS_FIELD_OFFSET, false),
-                    var_index,
-                ],
-                "var_val_ptr",
-            )
+            self.ctx
+                .builder
+                .build_in_bounds_gep(
+                    datum_ptr,
+                    &[
+                        self.ctx.llvm_ctx.i32_type().const_zero(),
+                        self.ctx
+                            .llvm_ctx
+                            .i32_type()
+                            .const_int(layout::DATUM_VARS_FIELD_OFFSET, false),
+                        var_index,
+                    ],
+                    "var_val_ptr",
+                )
+                .unwrap()
         };
-        let var_val = self.ctx.builder.build_load(var_val_ptr, "var_val");
-        self.ctx.builder.build_store(dest_ptr, var_val);
-        self.ctx.builder.build_return(None);
+        let var_val = self.ctx.builder.build_load(var_val_ptr, "var_val").unwrap();
+        self.ctx.builder.build_store(dest_ptr, var_val).unwrap();
+        self.ctx.builder.build_return(None).unwrap();
 
         func
     }
@@ -538,7 +553,7 @@ impl<'ctx> ProgEmit<'ctx> {
     fn make_set_var_func(
         &mut self, ty: &InstanceType, index_func: FunctionValue<'ctx>,
     ) -> FunctionValue<'ctx> {
-        let datum_type_ptr = self.datum_types[ty.id].ptr_type(GC_ADDRESS_SPACE);
+        let datum_type_ptr = self.datum_types[ty.id].ptr_type(inkwell::AddressSpace::default());
         let func_ty = self.ctx.llvm_ctx.void_type().fn_type(
             &[
                 datum_type_ptr.into(),
@@ -564,32 +579,39 @@ impl<'ctx> ProgEmit<'ctx> {
             .ctx
             .builder
             .build_call(index_func, &[var_name.into()], "var_index")
+            .unwrap()
             .try_as_basic_value()
             .left()
             .unwrap()
             .into_int_value();
         let var_val_ptr = unsafe {
-            self.ctx.builder.build_in_bounds_gep(
-                datum_ptr,
-                &[
-                    self.ctx.llvm_ctx.i32_type().const_zero(),
-                    self.ctx
-                        .llvm_ctx
-                        .i32_type()
-                        .const_int(layout::DATUM_VARS_FIELD_OFFSET, false),
-                    var_index,
-                ],
-                "var_val_ptr",
-            )
+            self.ctx
+                .builder
+                .build_in_bounds_gep(
+                    datum_ptr,
+                    &[
+                        self.ctx.llvm_ctx.i32_type().const_zero(),
+                        self.ctx
+                            .llvm_ctx
+                            .i32_type()
+                            .const_int(layout::DATUM_VARS_FIELD_OFFSET, false),
+                        var_index,
+                    ],
+                    "var_val_ptr",
+                )
+                .unwrap()
         };
         self.ctx.copy_val(asg_val, var_val_ptr);
-        self.ctx.builder.build_return(None);
+        self.ctx.builder.build_return(None).unwrap();
 
         func
     }
 
     fn make_proc_lookup_func(&mut self, ty: &InstanceType) -> FunctionValue<'ctx> {
-        let ret_ty = self.sym.proc_type.ptr_type(inkwell::AddressSpace::Generic);
+        let ret_ty = self
+            .sym
+            .proc_type
+            .ptr_type(inkwell::AddressSpace::default());
         let func_ty = ret_ty.fn_type(&[self.ctx.llvm_ctx.i64_type().into()], false);
         let func = self.ctx.module.add_function(
             &format!("ty_{}_proc_lookup", ty.id.index()),
@@ -634,7 +656,7 @@ impl<'ctx> ProgEmit<'ctx> {
         let proc_lookup_tbl_ty = ret_ty.array_type(cases.len() as u32);
         let proc_lookup_tbl_global = self.ctx.module.add_global(
             proc_lookup_tbl_ty,
-            Some(inkwell::AddressSpace::Generic),
+            Some(inkwell::AddressSpace::default()),
             &format!("ty_{}_proc_lookup_tbl", ty.id.index()),
         );
         proc_lookup_tbl_global.set_constant(true);
@@ -660,20 +682,28 @@ impl<'ctx> ProgEmit<'ctx> {
         let proc_index_val = self
             .ctx
             .builder
-            .build_phi(self.ctx.llvm_ctx.i32_type(), "offset");
+            .build_phi(self.ctx.llvm_ctx.i32_type(), "offset")
+            .unwrap();
         proc_index_val.add_incoming(phi_incoming.as_slice());
 
         let proc_ptr_ptr = unsafe {
-            self.ctx.builder.build_in_bounds_gep(
-                proc_lookup_tbl_global.as_pointer_value(),
-                &[
-                    self.ctx.llvm_ctx.i32_type().const_zero(),
-                    proc_index_val.as_basic_value().into_int_value(),
-                ],
-                "proc_ptr_ptr",
-            )
+            self.ctx
+                .builder
+                .build_in_bounds_gep(
+                    proc_lookup_tbl_global.as_pointer_value(),
+                    &[
+                        self.ctx.llvm_ctx.i32_type().const_zero(),
+                        proc_index_val.as_basic_value().into_int_value(),
+                    ],
+                    "proc_ptr_ptr",
+                )
+                .unwrap()
         };
-        let proc_ptr = self.ctx.builder.build_load(proc_ptr_ptr, "proc_ptr");
+        let proc_ptr = self
+            .ctx
+            .builder
+            .build_load(proc_ptr_ptr, "proc_ptr")
+            .unwrap();
         self.ctx.builder.build_return(Some(&proc_ptr));
 
         func

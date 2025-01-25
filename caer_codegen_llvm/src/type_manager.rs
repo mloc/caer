@@ -9,7 +9,7 @@ use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, PointerType};
 use inkwell::values::FunctionValue;
 use pinion::{layout, PinionData, PinionEnum, PinionStruct, PinionTaggedUnion};
 
-use crate::context::{Context, ExFunc, ExRuntime, GC_ADDRESS_SPACE};
+use crate::context::{Context, ExFunc, ExRuntime};
 use crate::emit_type::EmitType;
 use crate::repr::{EnumRepr, ReprManager, StructRepr, TaggedUnionRepr};
 
@@ -32,7 +32,7 @@ impl<'ctx> TypeManager<'ctx> {
     }
 
     pub fn get_external_funcs(
-        &mut self,
+        &self,
     ) -> impl Iterator<Item = (ExFunc, (layout::Func, FunctionType<'ctx>))> {
         self.repr_manager
             .borrow_mut()
@@ -66,7 +66,7 @@ impl<'ctx> TypeManager<'ctx> {
 
     pub fn get_llvm_type_ptr<T: PinionData>(&self) -> PointerType<'ctx> {
         self.get_llvm_type::<T>()
-            .ptr_type(inkwell::AddressSpace::Generic)
+            .ptr_type(inkwell::AddressSpace::default())
     }
 
     pub fn get_store_size<T: PinionData>(&self) -> u64 {
@@ -91,7 +91,7 @@ pub struct RtFuncTyBundle<'ctx> {
 impl<'ctx> RtFuncTyBundle<'ctx> {
     fn new(ctx: &'ctx Context<'ctx>, rm: &mut ReprManager<'ctx>) -> Self {
         let val_type = rm.get_type::<Val>(ctx).get_ty().unwrap().into_struct_type();
-        let val_type_ptr = val_type.ptr_type(GC_ADDRESS_SPACE);
+        let val_type_ptr = val_type.ptr_type(inkwell::AddressSpace::default());
 
         let opaque_type = rm
             .get_type::<c_void>(ctx)
@@ -103,7 +103,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
         let closure_type = ctx.llvm_ctx.void_type().fn_type(
             &[
                 val_type_ptr.into(),
-                rt_type.ptr_type(inkwell::AddressSpace::Generic).into(),
+                rt_type.ptr_type(inkwell::AddressSpace::default()).into(),
                 val_type_ptr.into(),
             ],
             false,
@@ -112,7 +112,9 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
         let landingpad_type = ctx.llvm_ctx.opaque_struct_type("landingpad");
         landingpad_type.set_body(
             &[
-                opaque_type.ptr_type(inkwell::AddressSpace::Generic).into(),
+                opaque_type
+                    .ptr_type(inkwell::AddressSpace::default())
+                    .into(),
                 ctx.llvm_ctx.i32_type().into(),
             ],
             false,
@@ -177,11 +179,11 @@ macro_rules! rt_funcs {
     );
 
     ( @genty @ptrify ptr , $e:expr) => (
-        $e.ptr_type(GC_ADDRESS_SPACE)
+        $e.ptr_type(inkwell::AddressSpace::default())
     );
 
     ( @genty @ptrify gptr , $e:expr) => (
-        $e.ptr_type(inkwell::AddressSpace::Generic)
+        $e.ptr_type(inkwell::AddressSpace::default())
     );
 }
 

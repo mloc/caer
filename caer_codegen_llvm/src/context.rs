@@ -27,7 +27,18 @@ pub type ExFunc = <ExRuntime as PinionModule>::Funcs;
 pub type ExMod = <ExRuntime as PinionModule>::TFuncs;
 
 /// Not really needed currently while using explicit forms- set to same as normal
-pub const GC_ADDRESS_SPACE: inkwell::AddressSpace = inkwell::AddressSpace::Generic;
+//pub const GC_ADDRESS_SPACE: inkwell::AddressSpace = inkwell::AddressSpace::default();
+
+type TestType<'a> = Box<inkwell::module::Module<'a>>;
+
+// Verify that `TestType` is covariant.
+fn test_covariance<'short, 'long: 'short>() {
+    let long: TestType<'long> = make();
+    let short: TestType<'short> = long;
+}
+fn make<T>() -> T {
+    unimplemented!()
+}
 
 #[derive(Debug)]
 pub struct Context<'ctx> {
@@ -39,7 +50,12 @@ pub struct Context<'ctx> {
 
     pub target_data: TargetData,
 
-    repr_manager: Rc<RefCell<ReprManager<'ctx>>>,
+    pub r: ReprManager<'ctx>,
+}
+
+fn get_target_data(module: &inkwell::module::Module<'_>) -> TargetData {
+    let data_layout = module.get_data_layout();
+    TargetData::create(data_layout.as_str().to_str().unwrap())
 }
 
 impl<'ctx> Context<'ctx> {
@@ -50,15 +66,14 @@ impl<'ctx> Context<'ctx> {
         let mut repr_manager = ReprManager::new();
 
         // is this.. OK?
-        let data_layout = llmod.get_data_layout();
-        let target_data = TargetData::create(data_layout.as_str().to_str().unwrap());
+        let target_data = get_target_data(&llmod);
 
         Self {
             builder: llbuild,
             module: llmod,
             llvm_ctx: llctx,
             target_data,
-            repr_manager: RefCell::new(repr_manager).into(),
+            r: repr_manager,
         }
     }
 
@@ -69,6 +84,7 @@ impl<'ctx> Context<'ctx> {
             .collect();
         self.builder
             .build_in_bounds_gep(ptr, &gep_indexes, "gepiv_ptr")
+            .unwrap()
     }
 
     // TODO: most callers of this should be using catch machinery
