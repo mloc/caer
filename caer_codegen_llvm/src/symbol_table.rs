@@ -27,6 +27,8 @@ pub struct SymbolTable<'ctx> {
 
     // TODO: this really shouldn't be here...
     pub proc_type: FunctionType<'ctx>,
+    pub closure_type: FunctionType<'ctx>,
+    pub dm_eh_personality: FunctionValue<'ctx>,
 
     // TODO: maybe move these out too, they're not exactly "symbols"
     pub rt_global: GlobalValue<'ctx>,
@@ -38,13 +40,15 @@ pub struct SymbolTable<'ctx> {
 }
 
 impl<'ctx> SymbolTable<'ctx> {
-    pub fn new(ctx: &Context<'ctx>, tys: &TypeManager<'ctx>, ir_env: &'ctx Module) -> Self {
+    pub fn new(ctx: &mut Context<'ctx>, ir_env: &'ctx Module) -> Self {
         let ir_funcs = ir_env.funcs.iter().collect();
 
+        let val_ptr_type = ctx.r.get_llvm_type::<*mut Val>();
+        let opaque_ptr_type = ctx.r
+            .get_llvm_type::<*mut std::ffi::c_void>();
         let proc_type = {
-            let argpack_ptr_type = tys.get_llvm_type::<*const ProcPack>();
-            let val_ptr_type = tys.get_llvm_type::<*mut Val>();
-            let rt_ptr_type = tys.get_llvm_type::<*mut Runtime>();
+            let argpack_ptr_type = ctx.r.get_llvm_type::<*const ProcPack>();
+            let rt_ptr_type = ctx.r.get_llvm_type::<*mut Runtime>();
             ctx.llvm_ctx.void_type().fn_type(
                 &[
                     argpack_ptr_type.into(),
@@ -54,9 +58,28 @@ impl<'ctx> SymbolTable<'ctx> {
                 false,
             )
         };
+        let closure_type = ctx.llvm_ctx.void_type().fn_type(
+            &[
+                val_ptr_type.into(),
+                opaque_ptr_type.into(),
+                val_ptr_type.into(),
+            ],
+            false,
+        );
+        let dm_eh_personality_ty = ctx.llvm_ctx.i32_type().fn_type(
+            &[
+                ctx.llvm_ctx.i32_type().into(),
+                ctx.llvm_ctx.i32_type().into(),
+                ctx.llvm_ctx.i64_type().into(),
+                opaque_ptr_type.into(),
+                opaque_ptr_type.into(),
+            ],
+            false,
+        );
+        let dm_eh_personality = ctx.module.add_function("dm_eh_personality", dm_eh_personality_ty, None);
 
-        let rt_type = tys.get_llvm_type::<Runtime>();
-        let funcptr_ty = tys.get_llvm_type::<FuncPtr>();
+        let rt_type = ctx.r.get_llvm_type::<Runtime>();
+        let funcptr_ty = ctx.r.get_llvm_type::<FuncPtr>();
 
         let rt_global = ctx.module.add_global(rt_type, None, "runtime");
         rt_global.set_initializer(&rt_type.const_zero());
@@ -66,7 +89,7 @@ impl<'ctx> SymbolTable<'ctx> {
         };
 
         // TODO: don't dig so deep into env?
-        let vt_global_ty = tys
+        let vt_global_ty = ctx.r
             .get_llvm_type::<vtable::Entry>()
             .array_type(ir_env.type_tree.len() as u32);
         let vt_global = ctx.module.add_global(vt_global_ty, None, "vtable");
@@ -76,14 +99,16 @@ impl<'ctx> SymbolTable<'ctx> {
         let ft_global = ctx.module.add_global(ft_global_ty, None, "ftable");
         ft_global.set_constant(true);
 
-        let string_table = Self::initialize_string_table(ctx, tys, ir_env);
+        let string_table = Self::initialize_string_table(ctx, ir_env);
 
         Self {
             ir_env,
             ir_funcs,
-            ir_llvm_funcs: Self::initialize_ir_funcs(ctx, tys, ir_env, proc_type),
-            external_llvm_funcs: Self::initialize_external_funcs(ctx, tys),
+            ir_llvm_funcs: Self::initialize_ir_funcs(ctx, ir_env, proc_type, closure_type, dm_eh_personality),
+            external_llvm_funcs: Self::initialize_external_funcs(ctx),
             proc_type,
+            closure_type,
+            dm_eh_personality,
             rt_global,
             rt_global_val,
             vt_global,
@@ -94,15 +119,15 @@ impl<'ctx> SymbolTable<'ctx> {
 
     // These could probably live somewhere else
     fn initialize_ir_funcs(
-        ctx: &Context<'ctx>, tys: &TypeManager<'ctx>, ir_env: &'ctx Module,
-        proc_type: FunctionType<'ctx>,
+        ctx: &Context<'ctx>, ir_env: &'ctx Module,
+        proc_type: FunctionType<'ctx>, closure_type: FunctionType<'ctx>, dm_eh_personality: FunctionValue<'ctx>
     ) -> IndexVec<FuncId, FunctionValue<'ctx>> {
         ir_env
             .funcs
             .iter()
             .map(|func| {
                 let ty = if func.closure.is_some() {
-                    tys.rt.ty.closure_type
+                    closure_type
                 } else {
                     proc_type
                 };
@@ -110,7 +135,7 @@ impl<'ctx> SymbolTable<'ctx> {
                 let ll_func =
                     ctx.module
                         .add_function(&format!("proc_{}", func.id.index()), ty, None);
-                ll_func.set_personality_function(tys.rt.dm_eh_personality);
+                ll_func.set_personality_function(dm_eh_personality);
                 ll_func.set_gc("statepoint-example");
 
                 ll_func
@@ -119,10 +144,10 @@ impl<'ctx> SymbolTable<'ctx> {
     }
 
     fn initialize_external_funcs(
-        ctx: &Context<'ctx>, tys: &TypeManager<'ctx>,
+        ctx: &mut Context<'ctx>,
     ) -> HashMap<ExFunc, FunctionValue<'ctx>> {
-        tys.get_external_funcs()
-            .map(|(func_enum, (layout, ty))| {
+        ctx.r.get_all_funcs::<ExRuntime>().into_iter()
+            .map(|(_, (layout, ty), func_enum)| {
                 let val = ctx.module.add_function(layout.name, ty, None);
                 (func_enum, val)
             })
@@ -130,11 +155,11 @@ impl<'ctx> SymbolTable<'ctx> {
     }
 
     fn initialize_string_table(
-        ctx: &Context<'ctx>, tys: &TypeManager<'ctx>, ir_env: &'ctx Module,
+        ctx: &mut Context<'ctx>, ir_env: &'ctx Module,
     ) -> IndexVec<StringId, BrandedValue<'ctx, Option<NonNull<RtString>>>> {
-        let string_repr = tys.get_struct::<RtString>();
-        let hh_repr = tys.get_struct::<HeapHeader>();
-        let gcm_repr = tys.get_enum::<GcMarker>();
+        let string_repr = ctx.r.get_struct::<RtString>();
+        let hh_repr = ctx.r.get_struct::<HeapHeader>();
+        let gcm_repr = ctx.r.get_enum::<GcMarker>();
 
         let string_globals: IndexVec<StringId, _> = ir_env
             .string_table

@@ -12,7 +12,6 @@ use pinion::{
     PinionTaggedUnion,
 };
 
-use crate::context::Context;
 use crate::emit_type::EmitType;
 
 #[derive(Debug)]
@@ -57,8 +56,9 @@ impl<'ctx> TaggedUnionRepr<'ctx> {
 }
 
 // TODO: reconsider name/loc, rethink structure. there's a bunch of icky repetition
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ReprManager<'ctx> {
+    ll_ctx: &'ctx inkwell::context::Context,
     layout_ctx: LayoutCtx,
     basic_types: HashMap<LayoutId, Option<BasicTypeEnum<'ctx>>>,
 
@@ -77,8 +77,15 @@ pub struct ReprManager<'ctx> {
 }*/
 
 impl<'ctx> ReprManager<'ctx> {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(ll_ctx: &'ctx inkwell::context::Context) -> Self {
+        Self {
+            ll_ctx,
+            layout_ctx: Default::default(),
+            basic_types: Default::default(),
+            structs: Default::default(),
+            enums: Default::default(),
+            tagged_unions: Default::default(),
+        }
     }
 
     // TODO: might be cleaner to move this out
@@ -86,54 +93,58 @@ impl<'ctx> ReprManager<'ctx> {
         val.const_wrap(&mut self.layout_ctx)
     }
 
-    pub fn get_type<T: PinionData>(&mut self, ctx: &Context<'ctx>) -> EmitType<'ctx> {
+    pub fn get_type<T: PinionData>(&mut self) -> EmitType<'ctx> {
         let id = self.layout_ctx.populate::<T>();
-        let (_, ty) = self.build_layout(id, ctx);
+        let (_, ty) = self.build_layout(id);
         EmitType::new(id, ty)
     }
 
+    pub fn get_llvm_type<T: PinionData>(&mut self) -> BasicTypeEnum<'ctx> {
+        self.get_type::<T>().get_ty().unwrap()
+    }
+
     pub fn get_all_funcs<T: PinionModule>(
-        &mut self, ctx: &Context<'ctx>,
+        &mut self,
     ) -> Vec<(TypeId, (Func, FunctionType<'ctx>), T::Funcs)> {
         T::get_funcs(&mut self.layout_ctx)
             .into_iter()
             .map(|(id, typeid, layout)| {
-                let func = self.build_func(&layout, ctx);
+                let func = self.build_func(&layout);
                 (typeid, (layout, func), id)
             })
             .collect()
     }
 
-    fn build_func(&mut self, func: &Func, ctx: &Context<'ctx>) -> FunctionType<'ctx> {
+    fn build_func(&mut self, func: &Func) -> FunctionType<'ctx> {
         println!("building func {:#?}", func);
         let params: Vec<_> = func
             .param_tys
             .iter()
-            .map(|id| self.build_layout(*id, ctx).1.expect("param must be sized"))
+            .map(|id| self.build_layout(*id).1.expect("param must be sized"))
             .map(Into::into)
             .collect();
 
         match func.return_ty {
             Some(id) => {
-                let (_, ret_ty) = self.build_layout(id, ctx);
+                let (_, ret_ty) = self.build_layout(id);
                 ret_ty
                     .expect("return type must be sized")
                     .fn_type(&params, false)
             },
-            None => ctx.llvm_ctx.void_type().fn_type(&params, false),
+            None => self.ll_ctx.void_type().fn_type(&params, false),
         }
     }
 
-    pub fn get_struct<T: PinionStruct>(&mut self, ctx: &Context<'ctx>) -> Rc<StructRepr<'ctx>> {
+    pub fn get_struct<T: PinionStruct>(&mut self) -> Rc<StructRepr<'ctx>> {
         let id = self.layout_ctx.populate::<T>();
-        self.get_struct_from_id(id, ctx)
+        self.get_struct_from_id(id)
     }
 
-    fn get_struct_from_id(&mut self, id: LayoutId, ctx: &Context<'ctx>) -> Rc<StructRepr<'ctx>> {
+    fn get_struct_from_id(&mut self, id: LayoutId) -> Rc<StructRepr<'ctx>> {
         if let Some(repr) = self.structs.get(&id) {
             return repr.clone();
         }
-        let (layout, bty) = self.build_layout(id, ctx);
+        let (layout, bty) = self.build_layout(id);
 
         let struct_layout = match layout.borrow() {
             Layout::Struct(sl) => sl.clone(),
@@ -148,16 +159,16 @@ impl<'ctx> ReprManager<'ctx> {
         repr
     }
 
-    pub fn get_enum<T: PinionEnum>(&mut self, ctx: &Context<'ctx>) -> Rc<EnumRepr<'ctx>> {
+    pub fn get_enum<T: PinionEnum>(&mut self) -> Rc<EnumRepr<'ctx>> {
         let id = self.layout_ctx.populate::<T>();
-        self.get_enum_from_id(id, ctx)
+        self.get_enum_from_id(id)
     }
 
-    fn get_enum_from_id(&mut self, id: LayoutId, ctx: &Context<'ctx>) -> Rc<EnumRepr<'ctx>> {
+    fn get_enum_from_id(&mut self, id: LayoutId) -> Rc<EnumRepr<'ctx>> {
         if let Some(repr) = self.enums.get(&id) {
             return repr.clone();
         }
-        let (layout, bty) = self.build_layout(id, ctx);
+        let (layout, bty) = self.build_layout(id);
         let enum_layout = match layout.borrow() {
             Layout::Enum(el) => el.clone(),
             _ => panic!("id didn't produce an enum layout"),
@@ -168,26 +179,22 @@ impl<'ctx> ReprManager<'ctx> {
         repr
     }
 
-    pub fn get_tagged_union<T: PinionTaggedUnion>(
-        &mut self, ctx: &Context<'ctx>,
-    ) -> Rc<TaggedUnionRepr<'ctx>> {
+    pub fn get_tagged_union<T: PinionTaggedUnion>(&mut self) -> Rc<TaggedUnionRepr<'ctx>> {
         let id = self.layout_ctx.populate::<T>();
-        self.get_tagged_union_from_id(id, ctx)
+        self.get_tagged_union_from_id(id)
     }
 
-    fn get_tagged_union_from_id(
-        &mut self, id: LayoutId, ctx: &Context<'ctx>,
-    ) -> Rc<TaggedUnionRepr<'ctx>> {
+    fn get_tagged_union_from_id(&mut self, id: LayoutId) -> Rc<TaggedUnionRepr<'ctx>> {
         if let Some(repr) = self.tagged_unions.get(&id) {
             return repr.clone();
         }
-        let (layout, bty) = self.build_layout(id, ctx);
+        let (layout, bty) = self.build_layout(id);
         let tagged_union_layout = match layout.borrow() {
             Layout::TaggedUnion(tul) => tul.clone(),
             _ => panic!("id didn't produce a tagged union layout"),
         };
 
-        let tag_repr = self.get_enum_from_id(tagged_union_layout.tag_layout, ctx);
+        let tag_repr = self.get_enum_from_id(tagged_union_layout.tag_layout);
         let repr = Rc::new(TaggedUnionRepr::new(
             tagged_union_layout,
             tag_repr,
@@ -197,43 +204,39 @@ impl<'ctx> ReprManager<'ctx> {
         repr
     }
 
-    fn build_layout(
-        &mut self, id: LayoutId, ctx: &Context<'ctx>,
-    ) -> (Rc<Layout>, Option<BasicTypeEnum<'ctx>>) {
+    fn build_layout(&mut self, id: LayoutId) -> (Rc<Layout>, Option<BasicTypeEnum<'ctx>>) {
         let layout = self.layout_ctx.get(id).unwrap();
         if let Some(bty) = self.basic_types.get(&id) {
             (layout, *bty)
         } else {
-            let bty = self.build_bty_stage1(&layout, ctx);
+            let bty = self.build_bty_stage1(&layout);
             self.basic_types.insert(id, bty);
             if let Some(bty) = bty {
-                self.build_bty_stage2(&layout, bty, ctx);
+                self.build_bty_stage2(&layout, bty);
             }
             (layout, bty)
         }
     }
 
-    fn build_bty_stage1(
-        &mut self, layout: &Layout, ctx: &Context<'ctx>,
-    ) -> Option<BasicTypeEnum<'ctx>> {
+    fn build_bty_stage1(&mut self, layout: &Layout) -> Option<BasicTypeEnum<'ctx>> {
         match layout {
             Layout::Struct(sl) => Some(
-                ctx.llvm_ctx
+                self.ll_ctx
                     .opaque_struct_type(sl.name.unwrap_or_default())
                     .into(),
             ),
             Layout::Primitive(prim) => Some(match prim {
-                Primitive::Bool => ctx.llvm_ctx.bool_type().into(),
-                Primitive::Int8 => ctx.llvm_ctx.i8_type().into(),
-                Primitive::Int16 => ctx.llvm_ctx.i16_type().into(),
-                Primitive::Int32 => ctx.llvm_ctx.i32_type().into(),
-                Primitive::Int64 => ctx.llvm_ctx.i64_type().into(),
-                Primitive::Float16 => ctx.llvm_ctx.f16_type().into(),
-                Primitive::Float32 => ctx.llvm_ctx.f32_type().into(),
-                Primitive::Float64 => ctx.llvm_ctx.f64_type().into(),
+                Primitive::Bool => self.ll_ctx.bool_type().into(),
+                Primitive::Int8 => self.ll_ctx.i8_type().into(),
+                Primitive::Int16 => self.ll_ctx.i16_type().into(),
+                Primitive::Int32 => self.ll_ctx.i32_type().into(),
+                Primitive::Int64 => self.ll_ctx.i64_type().into(),
+                Primitive::Float16 => self.ll_ctx.f16_type().into(),
+                Primitive::Float32 => self.ll_ctx.f32_type().into(),
+                Primitive::Float64 => self.ll_ctx.f64_type().into(),
             }),
             Layout::Pointer(ptr) => {
-                let (_, pointee) = self.build_layout(ptr.element, ctx);
+                let (_, pointee) = self.build_layout(ptr.element);
                 Some(
                     pointee
                         .expect("pointee must be sized")
@@ -242,25 +245,25 @@ impl<'ctx> ReprManager<'ctx> {
                 )
             },
             Layout::Union(ul) => Some(
-                ctx.llvm_ctx
+                self.ll_ctx
                     .opaque_struct_type(ul.name.unwrap_or_default())
                     .into(),
             ),
-            Layout::Enum(el) => Some(self.build_layout(el.disc_layout, ctx).1.unwrap()),
+            Layout::Enum(el) => Some(self.build_layout(el.disc_layout).1.unwrap()),
             Layout::TaggedUnion(tul) => Some(
-                ctx.llvm_ctx
+                self.ll_ctx
                     .opaque_struct_type(tul.name.unwrap_or_default())
                     .into(),
             ),
             Layout::FuncPtr(func) => {
-                let func_ty = self.build_func(func, ctx);
+                let func_ty = self.build_func(func);
                 Some(func_ty.ptr_type(inkwell::AddressSpace::default()).into())
             },
             Layout::OpaqueStruct(opaque_layout) => {
                 let name = opaque_layout.name.unwrap_or_default();
-                let ty = ctx.llvm_ctx.opaque_struct_type(name);
+                let ty = self.ll_ctx.opaque_struct_type(name);
                 if let Some(size) = opaque_layout.size {
-                    ty.set_body(&[ctx.llvm_ctx.i8_type().array_type(size).into()], false);
+                    ty.set_body(&[self.ll_ctx.i8_type().array_type(size).into()], false);
                 }
                 Some(ty.into())
             },
@@ -269,18 +272,16 @@ impl<'ctx> ReprManager<'ctx> {
         }
     }
 
-    fn build_bty_stage2(
-        &mut self, layout: &Layout, to_fill: BasicTypeEnum<'ctx>, ctx: &Context<'ctx>,
-    ) {
+    fn build_bty_stage2(&mut self, layout: &Layout, to_fill: BasicTypeEnum<'ctx>) {
         match layout {
             Layout::Struct(struct_layout) => {
-                self.build_struct(struct_layout, to_fill.into_struct_type(), ctx);
+                self.build_struct(struct_layout, to_fill.into_struct_type());
             },
             Layout::Union(union_layout) => {
-                self.build_union(union_layout, to_fill.into_struct_type(), ctx);
+                self.build_union(union_layout, to_fill.into_struct_type());
             },
             Layout::TaggedUnion(tagged_union_layout) => {
-                self.build_tagged_union(tagged_union_layout, to_fill.into_struct_type(), ctx);
+                self.build_tagged_union(tagged_union_layout, to_fill.into_struct_type());
             },
             Layout::Primitive(_)
             | Layout::Pointer(_)
@@ -292,31 +293,27 @@ impl<'ctx> ReprManager<'ctx> {
         }
     }
 
-    fn build_struct(
-        &mut self, layout: &StructLayout, to_fill: StructType<'ctx>, ctx: &Context<'ctx>,
-    ) {
+    fn build_struct(&mut self, layout: &StructLayout, to_fill: StructType<'ctx>) {
         let fields: Vec<_> = layout
             .fields
             .iter()
-            .filter_map(|id| self.build_layout(*id, ctx).1)
+            .filter_map(|id| self.build_layout(*id).1)
             .collect();
         to_fill.set_body(&fields, false);
     }
 
-    fn build_union(&mut self, layout: &Union, to_fill: StructType<'ctx>, ctx: &Context<'ctx>) {
+    fn build_union(&mut self, layout: &Union, to_fill: StructType<'ctx>) {
         assert_eq!(layout.size % layout.alignment, 0);
-        let align_unit_ty = ctx
-            .llvm_ctx
+        let align_unit_ty = self
+            .ll_ctx
             .custom_width_int_type((layout.alignment * 8) as _);
         let body = align_unit_ty.array_type((layout.size / layout.alignment) as _);
         to_fill.set_body(&[body.into()], false);
     }
 
-    fn build_tagged_union(
-        &mut self, layout: &TaggedUnion, to_fill: StructType<'ctx>, ctx: &Context<'ctx>,
-    ) {
-        let tag_part = self.build_layout(layout.tag_layout, ctx).1.unwrap();
-        let union_part = self.build_layout(layout.union_layout, ctx).1.unwrap();
+    fn build_tagged_union(&mut self, layout: &TaggedUnion, to_fill: StructType<'ctx>) {
+        let tag_part = self.build_layout(layout.tag_layout).1.unwrap();
+        let union_part = self.build_layout(layout.union_layout).1.unwrap();
         to_fill.set_body(&[tag_part.into(), union_part.into()], false);
     }
 }

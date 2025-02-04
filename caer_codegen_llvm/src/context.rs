@@ -29,22 +29,18 @@ pub type ExMod = <ExRuntime as PinionModule>::TFuncs;
 /// Not really needed currently while using explicit forms- set to same as normal
 //pub const GC_ADDRESS_SPACE: inkwell::AddressSpace = inkwell::AddressSpace::default();
 
-type TestType<'a> = Box<inkwell::module::Module<'a>>;
-
-// Verify that `TestType` is covariant.
-fn test_covariance<'short, 'long: 'short>() {
+fn test_covariance<'short, 'long: 'short, T>() {
+    type TestType<'a> = Context<'a>;
+    fn make<T>() -> T {
+        unimplemented!()
+    }
     let long: TestType<'long> = make();
     let short: TestType<'short> = long;
-}
-fn make<T>() -> T {
-    unimplemented!()
 }
 
 #[derive(Debug)]
 pub struct Context<'ctx> {
     pub llvm_ctx: &'ctx inkwell::context::Context,
-    // Module contains a RefCell, which makes it invariant over 'ctx. Using an Rc gets around
-    // needing another lifetime. (somehow??? builder also needs one)
     pub builder: inkwell::builder::Builder<'ctx>,
     pub module: inkwell::module::Module<'ctx>,
 
@@ -63,7 +59,7 @@ impl<'ctx> Context<'ctx> {
         llctx: &'ctx inkwell::context::Context, llmod: inkwell::module::Module<'ctx>,
         llbuild: inkwell::builder::Builder<'ctx>,
     ) -> Self {
-        let mut repr_manager = ReprManager::new();
+        let repr_manager = ReprManager::new(llctx);
 
         // is this.. OK?
         let target_data = get_target_data(&llmod);

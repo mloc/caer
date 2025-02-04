@@ -185,16 +185,14 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
             }*/
         } else {
             let param_locals_arr = self.ctx.builder.build_array_alloca(
-                self.ctx
-                    .get_tagged_union::<Val>()
-                    .ty
-                    .ptr_type(inkwell::AddressSpace::Generic),
+                self.ctx.r
+                    .get_llvm_type::<*const Val>(),
                 self.ctx
                     .llvm_ctx
                     .i64_type()
                     .const_int(self.ir_func.params.len() as u64, false),
                 "param_locals",
-            );
+            ).unwrap();
 
             for (i, var_id) in self.ir_func.params.iter().enumerate() {
                 let alloc = &self.var_allocs[*var_id];
@@ -211,7 +209,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
             let argpack_local = self.ll_func.get_params()[0];
 
             self.build_call(
-                self.ctx.get_func(ExFunc::rt_arg_pack_unpack_into),
+                self.ctx.r.get_func(ExFunc::rt_arg_pack_unpack_into),
                 &[
                     argpack_local.into(),
                     param_locals_arr.into(),

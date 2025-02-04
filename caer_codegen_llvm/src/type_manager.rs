@@ -31,16 +31,6 @@ impl<'ctx> TypeManager<'ctx> {
         }
     }
 
-    pub fn get_external_funcs(
-        &self,
-    ) -> impl Iterator<Item = (ExFunc, (layout::Func, FunctionType<'ctx>))> {
-        self.repr_manager
-            .borrow_mut()
-            .get_all_funcs::<ExRuntime>(self.ctx)
-            .into_iter()
-            .map(|(_, (func, func_ty), func_enum)| (func_enum, (func, func_ty)))
-    }
-
     // TODO: collapse the monomorphing here..? it's nice for the API but bad for code size
     pub fn get_struct<T: PinionStruct>(&self) -> Rc<StructRepr<'ctx>> {
         self.repr_manager.borrow_mut().get_struct::<T>(self.ctx)

@@ -48,14 +48,12 @@ pub struct ProgEmit<'ctx> {
     pub string_allocs: IndexVec<StringId, BrandedValue<'ctx, Option<NonNull<RtString>>>>,
 
     pub sym: SymbolTable<'ctx>,
-    pub tys: TypeManager<'ctx>,
 }
 
 impl<'ctx> ProgEmit<'ctx> {
-    pub fn new<'ir: 'ctx, 'inctx: 'ctx>(ctx: &'inctx Context<'inctx>, env: &'ir Module) -> Self {
-        let ctx: &'ctx Context<'ctx> = ctx;
-        let tys = TypeManager::new(ctx);
-        let sym = SymbolTable::new(ctx, &tys, env);
+    pub fn new<'ir: 'ctx, 'inctx: 'ctx>(ctx: &'inctx mut Context<'inctx>, env: &'ir Module) -> Self {
+        let ctx: &'ctx mut Context<'ctx> = ctx;
+        let sym = SymbolTable::new(ctx, env);
 
         Self {
             ctx,
@@ -70,7 +68,6 @@ impl<'ctx> ProgEmit<'ctx> {
             string_allocs: IndexVec::new(),
 
             sym,
-            tys,
         }
     }
 
@@ -268,7 +265,7 @@ impl<'ctx> ProgEmit<'ctx> {
                 ]);
                 let asg = self.ctx.module.add_global(
                     string_repr.ty,
-                    Some(GC_ADDRESS_SPACE),
+                    Some(inkwell::AddressSpace::default()),
                     &format!("alloc_string_{}", id.raw()),
                 );
                 asg.set_initializer(&alloc_string);
@@ -495,7 +492,7 @@ impl<'ctx> ProgEmit<'ctx> {
     fn make_get_var_func(
         &mut self, ty: &InstanceType, index_func: FunctionValue<'ctx>,
     ) -> FunctionValue<'ctx> {
-        let datum_type_ptr = self.datum_types[ty.id].ptr_type(GC_ADDRESS_SPACE);
+        let datum_type_ptr = self.datum_types[ty.id].ptr_type(inkwell::AddressSpace::default());
         let func_ty = self.ctx.llvm_ctx.void_type().fn_type(
             &[
                 datum_type_ptr.into(),
