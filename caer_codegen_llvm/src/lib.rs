@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 mod const_value;
 mod context;
 mod emit_type;
@@ -15,25 +13,27 @@ pub fn emit(ir: &caer_ir::module::Module) {
         .unwrap();
 
     let llctx = inkwell::context::Context::create();
-    let llmod = llctx.create_module("main");
-    let llbuild = llctx.create_builder();
 
-    sub(&llctx, llmod, llbuild, ir)
+    sub(&llctx, ir);
 }
 
 fn sub<'ctx, 'ir: 'ctx>(
-    llctx: &'ctx inkwell::context::Context, llmod: inkwell::module::Module<'ctx>,
-    llbuild: inkwell::builder::Builder<'ctx>, ir: &'ir caer_ir::module::Module,
+    llctx: &'ctx inkwell::context::Context,
+    ir: &'ir caer_ir::module::Module,
 ) {
-    let emit_ctx = context::Context::new(llctx, llmod, llbuild);
+    let llmod = llctx.create_module("main");
+    let llbuild = llctx.create_builder();
+    let emit_ctx = context::Context::new(&llctx, llmod, llbuild);
 
     {
-        let mut builder = prog::ProgEmit::new(&emit_ctx, ir);
+        let mut builder = prog::ProgEmit::new(emit_ctx, ir);
 
         builder.emit();
 
         // not really run, just prints out crap
         // TODO: expose seperately, don't hardcode paths
         builder.run(true);
+
+        std::mem::drop(builder);
     }
 }

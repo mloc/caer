@@ -34,7 +34,7 @@ use crate::value::BrandedValue;
 
 #[derive(Debug)]
 pub struct ProgEmit<'ctx> {
-    pub ctx: &'ctx Context<'ctx>,
+    pub ctx: Context<'ctx>,
     pub env: &'ctx Module,
     pub funcs: Vec<(&'ctx Function, FunctionValue<'ctx>)>,
     pub rt_global: inkwell::values::GlobalValue<'ctx>,
@@ -48,12 +48,13 @@ pub struct ProgEmit<'ctx> {
     pub string_allocs: IndexVec<StringId, BrandedValue<'ctx, Option<NonNull<RtString>>>>,
 
     pub sym: SymbolTable<'ctx>,
+
+    _invariant: std::marker::PhantomData<&'ctx mut ()>,
 }
 
 impl<'ctx> ProgEmit<'ctx> {
-    pub fn new<'ir: 'ctx, 'inctx: 'ctx>(ctx: &'inctx mut Context<'inctx>, env: &'ir Module) -> Self {
-        let ctx: &'ctx mut Context<'ctx> = ctx;
-        let sym = SymbolTable::new(ctx, env);
+    pub fn new<'ir: 'ctx>(ctx: Context<'ctx>, env: &'ir Module) -> Self {
+        let sym = SymbolTable::new(&ctx, env);
 
         Self {
             ctx,
@@ -68,6 +69,7 @@ impl<'ctx> ProgEmit<'ctx> {
             string_allocs: IndexVec::new(),
 
             sym,
+            _invariant: std::marker::PhantomData,
         }
     }
 
@@ -87,8 +89,7 @@ impl<'ctx> ProgEmit<'ctx> {
             // TODO no
             println!("EMITTING {:?}", ir_func.id);
             let walker = CFGWalker::build(ir_func);
-            let ctx = self.ctx.clone();
-            let mut func_emit = FuncEmit::new(&ctx, self.env, &self.sym, ir_func, ll_func);
+            let mut func_emit = FuncEmit::new(&self.ctx, self.env, &self.sym, ir_func, ll_func);
             walker.walk(ir_func, &mut func_emit);
         }
         let main_proc = self
@@ -192,7 +193,7 @@ impl<'ctx> ProgEmit<'ctx> {
     fn populate_datum_types(&mut self) {
         for ty in self.env.instances.iter() {
             let vars_field_ty = self
-                .tys
+                .ctx.r
                 .get_llvm_type::<Val>()
                 .array_type(ty.pty.vars.len() as u32);
             let datum_ty = self
@@ -200,7 +201,7 @@ impl<'ctx> ProgEmit<'ctx> {
                 .llvm_ctx
                 .opaque_struct_type(&format!("datum_{}", ty.id.index()));
             datum_ty.set_body(
-                &[self.tys.get_llvm_type::<Datum>(), vars_field_ty.into()],
+                &[self.ctx.r.get_llvm_type::<Datum>(), vars_field_ty.into()],
                 false,
             );
             assert_eq!(ty.id.index(), self.datum_types.len());
@@ -209,9 +210,9 @@ impl<'ctx> ProgEmit<'ctx> {
     }
 
     fn emit_string_table(&mut self) {
-        let string_repr = self.tys.get_struct::<RtString>();
-        let hh_repr = self.tys.get_struct::<HeapHeader>();
-        let gcm_repr = self.tys.get_enum::<GcMarker>();
+        let string_repr = self.ctx.r.get_struct::<RtString>();
+        let hh_repr = self.ctx.r.get_struct::<HeapHeader>();
+        let gcm_repr = self.ctx.r.get_enum::<GcMarker>();
 
         let string_globals: IndexVec<StringId, _> = self
             .env
@@ -276,7 +277,7 @@ impl<'ctx> ProgEmit<'ctx> {
     }
 
     fn emit_ftable(&mut self) {
-        let funcptr_ty = self.tys.get_llvm_type::<FuncPtr>().into_pointer_type();
+        let funcptr_ty = self.ctx.r.get_llvm_type::<FuncPtr>().into_pointer_type();
 
         let ft_entries: Vec<_> = self
             .sym
@@ -292,7 +293,7 @@ impl<'ctx> ProgEmit<'ctx> {
     }
 
     fn emit_vtable(&mut self) {
-        let vt_entry_ty = self.tys.get_struct::<vtable::Entry>().ty;
+        let vt_entry_ty = self.ctx.r.get_struct::<vtable::Entry>().ty;
         let mut vt_entries = Vec::new();
         for instance in self.env.instances.iter() {
             let size_val = self.datum_types[instance.id]
@@ -497,7 +498,7 @@ impl<'ctx> ProgEmit<'ctx> {
             &[
                 datum_type_ptr.into(),
                 self.ctx.llvm_ctx.i64_type().into(),
-                self.tys.get_llvm_type_ptr::<Val>().into(),
+                self.ctx.r.get_llvm_type::<*mut Val>().into(),
             ],
             false,
         );
@@ -555,7 +556,7 @@ impl<'ctx> ProgEmit<'ctx> {
             &[
                 datum_type_ptr.into(),
                 self.ctx.llvm_ctx.i64_type().into(),
-                self.tys.get_llvm_type_ptr::<Val>().into(),
+                self.ctx.r.get_llvm_type::<*mut Val>().into(),
             ],
             false,
         );

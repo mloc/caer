@@ -209,7 +209,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
             let argpack_local = self.ll_func.get_params()[0];
 
             self.build_call(
-                self.ctx.r.get_func(ExFunc::rt_arg_pack_unpack_into),
+                self.sym.get_func(ExFunc::rt_arg_pack_unpack_into),
                 &[
                     argpack_local.into(),
                     param_locals_arr.into(),
@@ -445,12 +445,11 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
 
     fn bitcast_ptr<T: PinionData>(&self, ptr: PointerValue<'ctx>) -> PointerValue<'ctx> {
         let dest_ty = self
-            .ctx
-            .get_llvm_type::<T>()
-            .ptr_type(inkwell::AddressSpace::Generic);
+            .ctx.r
+            .get_llvm_type::<*mut T>();
         self.ctx
             .builder
-            .build_bit_cast(ptr, dest_ty, "")
+            .build_bit_cast(ptr, dest_ty, "").unwrap()
             .into_pointer_value()
     }
 
@@ -870,7 +869,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                         self.sym.vt_global.as_pointer_value(),
                         &[self.ctx.llvm_ctx.i32_type().const_zero(), ty_id_val],
                         "vt_ptr",
-                    );
+                    ).unwrap();
                     BrandedValue::<*mut Entry>::materialize(self.ctx, ptr.into())
                 };
 
@@ -889,7 +888,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                 let datum_ptr = self
                     .build_call_catching(
                         block,
-                        self.ctx.get_func(ExFunc::rt_runtime_alloc_datum),
+                        self.sym.get_func(ExFunc::rt_runtime_alloc_datum),
                         &[
                             self.sym.rt_global.as_basic_value_enum(),
                             self.ctx
@@ -1059,7 +1058,8 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
 
             Op::Throw(exception_local) => {
                 let exception_val = self.get_local_any_ro(*exception_local);
-                self.build_call_catching(block, self.ctx.rt.rt_throw, &[exception_val.val]);
+                //self.build_call_catching(block, self.ctx.rt.rt_throw, &[exception_val.val]);
+                todo!()
             },
 
             Op::CatchException(maybe_except_var) => {
@@ -1071,8 +1071,8 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                     .ctx
                     .builder
                     .build_landing_pad(
-                        self.ctx.rt.ty.landingpad_type,
-                        self.ctx.rt.dm_eh_personality,
+                        self.sym.landingpad_type,
+                        self.sym.dm_eh_personality,
                         &[],
                         true,
                         "lp",
@@ -1089,13 +1089,14 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                         .get_ty(self.ir_func.vars[*except_var].ty)
                         .get_layout()
                         .is_val());
-                    self.build_call(
+                    todo!();
+                    /*self.build_call(
                         self.ctx.rt.rt_exception_get_val,
                         &[
                             exception_container.into(),
                             self.var_allocs[*except_var].as_bve().unwrap().into(),
                         ],
-                    );
+                    );*/
                 }
             },
 
@@ -1166,7 +1167,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                 let local = self.get_local(*delay);
                 println!("{:?}", walker.get_cur_lifetimes());
                 self.build_call(
-                    self.ctx.get_func(ExFunc::rt_runtime_suspend),
+                    self.sym.get_func(ExFunc::rt_runtime_suspend),
                     &[
                         self.sym.rt_global.as_pointer_value().into(),
                         local.as_val().unwrap().val.into(),
@@ -1224,7 +1225,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                         let ret = self
                             .build_call_catching(
                                 block,
-                                self.ctx.get_func(ExFunc::rt_val_to_switch_disc),
+                                self.sym.get_func(ExFunc::rt_val_to_switch_disc),
                                 &[disc_val.val],
                             )
                             .unwrap();
@@ -1289,7 +1290,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
             let res = self
                 .build_call_catching(
                     block,
-                    self.ctx.get_func(ExFunc::rt_runtime_concat_strings),
+                    self.sym.get_func(ExFunc::rt_runtime_concat_strings),
                     &[
                         self.sym.rt_global.as_basic_value_enum(),
                         lhs.as_string().unwrap().build_load(self.ctx).val,

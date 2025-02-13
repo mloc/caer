@@ -22,7 +22,7 @@ pub struct TypeManager<'ctx> {
 
 impl<'ctx> TypeManager<'ctx> {
     pub fn new(ctx: &'ctx Context<'ctx>) -> Self {
-        let mut repr_manager = ReprManager::new();
+        let mut repr_manager = ReprManager::new(&ctx.llvm_ctx);
         let rt = RtFuncs::new(ctx, &mut repr_manager);
         Self {
             ctx,
@@ -33,21 +33,21 @@ impl<'ctx> TypeManager<'ctx> {
 
     // TODO: collapse the monomorphing here..? it's nice for the API but bad for code size
     pub fn get_struct<T: PinionStruct>(&self) -> Rc<StructRepr<'ctx>> {
-        self.repr_manager.borrow_mut().get_struct::<T>(self.ctx)
+        self.repr_manager.borrow_mut().get_struct::<T>()
     }
 
     pub fn get_enum<T: PinionEnum>(&self) -> Rc<EnumRepr<'ctx>> {
-        self.repr_manager.borrow_mut().get_enum::<T>(self.ctx)
+        self.repr_manager.borrow_mut().get_enum::<T>()
     }
 
     pub fn get_tagged_union<T: PinionTaggedUnion>(&self) -> Rc<TaggedUnionRepr<'ctx>> {
         self.repr_manager
             .borrow_mut()
-            .get_tagged_union::<T>(self.ctx)
+            .get_tagged_union::<T>()
     }
 
     pub fn get_type<T: PinionData>(&self) -> EmitType<'ctx> {
-        self.repr_manager.borrow_mut().get_type::<T>(self.ctx)
+        self.repr_manager.borrow_mut().get_type::<T>()
     }
 
     pub fn get_llvm_type<T: PinionData>(&self) -> BasicTypeEnum<'ctx> {
@@ -80,16 +80,16 @@ pub struct RtFuncTyBundle<'ctx> {
 
 impl<'ctx> RtFuncTyBundle<'ctx> {
     fn new(ctx: &'ctx Context<'ctx>, rm: &mut ReprManager<'ctx>) -> Self {
-        let val_type = rm.get_type::<Val>(ctx).get_ty().unwrap().into_struct_type();
+        let val_type = rm.get_type::<Val>().get_ty().unwrap().into_struct_type();
         let val_type_ptr = val_type.ptr_type(inkwell::AddressSpace::default());
 
         let opaque_type = rm
-            .get_type::<c_void>(ctx)
+            .get_type::<c_void>()
             .get_ty()
             .unwrap()
             .into_struct_type();
 
-        let rt_type = rm.get_type::<Runtime>(ctx).get_ty().unwrap();
+        let rt_type = rm.get_type::<Runtime>().get_ty().unwrap();
         let closure_type = ctx.llvm_ctx.void_type().fn_type(
             &[
                 val_type_ptr.into(),

@@ -11,7 +11,7 @@ use caer_runtime::val::Val;
 use caer_runtime::vtable::{self, FuncPtr};
 use caer_types::id::{FuncId, StringId};
 use index_vec::IndexVec;
-use inkwell::types::{BasicType, FunctionType};
+use inkwell::types::{BasicType, FunctionType, StructType};
 use inkwell::values::{FunctionValue, GlobalValue};
 
 use crate::context::{Context, ExFunc, ExRuntime};
@@ -29,6 +29,7 @@ pub struct SymbolTable<'ctx> {
     pub proc_type: FunctionType<'ctx>,
     pub closure_type: FunctionType<'ctx>,
     pub dm_eh_personality: FunctionValue<'ctx>,
+    pub landingpad_type: StructType<'ctx>,
 
     // TODO: maybe move these out too, they're not exactly "symbols"
     pub rt_global: GlobalValue<'ctx>,
@@ -40,7 +41,7 @@ pub struct SymbolTable<'ctx> {
 }
 
 impl<'ctx> SymbolTable<'ctx> {
-    pub fn new(ctx: &mut Context<'ctx>, ir_env: &'ctx Module) -> Self {
+    pub fn new(ctx: &Context<'ctx>, ir_env: &'ctx Module) -> Self {
         let ir_funcs = ir_env.funcs.iter().collect();
 
         let val_ptr_type = ctx.r.get_llvm_type::<*mut Val>();
@@ -77,6 +78,14 @@ impl<'ctx> SymbolTable<'ctx> {
             false,
         );
         let dm_eh_personality = ctx.module.add_function("dm_eh_personality", dm_eh_personality_ty, None);
+        let landingpad_type = ctx.llvm_ctx.opaque_struct_type("landingpad");
+        landingpad_type.set_body(
+            &[
+                opaque_ptr_type.into(),
+                ctx.llvm_ctx.i32_type().into(),
+            ],
+            false,
+        );
 
         let rt_type = ctx.r.get_llvm_type::<Runtime>();
         let funcptr_ty = ctx.r.get_llvm_type::<FuncPtr>();
@@ -109,6 +118,7 @@ impl<'ctx> SymbolTable<'ctx> {
             proc_type,
             closure_type,
             dm_eh_personality,
+            landingpad_type,
             rt_global,
             rt_global_val,
             vt_global,
@@ -144,7 +154,7 @@ impl<'ctx> SymbolTable<'ctx> {
     }
 
     fn initialize_external_funcs(
-        ctx: &mut Context<'ctx>,
+        ctx: &Context<'ctx>,
     ) -> HashMap<ExFunc, FunctionValue<'ctx>> {
         ctx.r.get_all_funcs::<ExRuntime>().into_iter()
             .map(|(_, (layout, ty), func_enum)| {
@@ -155,7 +165,7 @@ impl<'ctx> SymbolTable<'ctx> {
     }
 
     fn initialize_string_table(
-        ctx: &mut Context<'ctx>, ir_env: &'ctx Module,
+        ctx: &Context<'ctx>, ir_env: &'ctx Module,
     ) -> IndexVec<StringId, BrandedValue<'ctx, Option<NonNull<RtString>>>> {
         let string_repr = ctx.r.get_struct::<RtString>();
         let hh_repr = ctx.r.get_struct::<HeapHeader>();

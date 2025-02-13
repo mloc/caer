@@ -29,15 +29,6 @@ pub type ExMod = <ExRuntime as PinionModule>::TFuncs;
 /// Not really needed currently while using explicit forms- set to same as normal
 //pub const GC_ADDRESS_SPACE: inkwell::AddressSpace = inkwell::AddressSpace::default();
 
-fn test_covariance<'short, 'long: 'short, T>() {
-    type TestType<'a> = Context<'a>;
-    fn make<T>() -> T {
-        unimplemented!()
-    }
-    let long: TestType<'long> = make();
-    let short: TestType<'short> = long;
-}
-
 #[derive(Debug)]
 pub struct Context<'ctx> {
     pub llvm_ctx: &'ctx inkwell::context::Context,
@@ -59,7 +50,7 @@ impl<'ctx> Context<'ctx> {
         llctx: &'ctx inkwell::context::Context, llmod: inkwell::module::Module<'ctx>,
         llbuild: inkwell::builder::Builder<'ctx>,
     ) -> Self {
-        let repr_manager = ReprManager::new(llctx);
+        let repr_manager = ReprManager::new(&llctx);
 
         // is this.. OK?
         let target_data = get_target_data(&llmod);
@@ -146,6 +137,11 @@ impl<'ctx> Context<'ctx> {
             ],
             "",
         );
+    }
+
+    pub fn get_store_size<T: PinionData>(&self) -> u64 {
+        let ty = self.r.get_llvm_type::<T>();
+        self.target_data.get_store_size(&ty)
     }
 
     // TODO: there's a lot of monomorph in this chain :( there's also a lot of borrow_mut thrashing

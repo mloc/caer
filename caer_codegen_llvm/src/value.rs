@@ -138,7 +138,7 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
     // Data is uninitialized
     pub fn build_as_alloca(ctx: &Context<'ctx>) -> Self {
         let elem_ty = ctx.r.get_llvm_type::<T::Element>();
-        let alloca = ctx.builder.build_alloca(elem_ty, "");
+        let alloca = ctx.builder.build_alloca(elem_ty, "").unwrap();
         // Safety: alloca creates a raw pointer to appropriate memory
         unsafe { Self::materialize(ctx, alloca.into()) }
     }
@@ -146,7 +146,7 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
     pub fn build_as_alloca_array(ctx: &Context<'ctx>, n: u64) -> Self {
         let elem_ty = ctx.r.get_llvm_type::<T::Element>();
         let n_val = ctx.llvm_ctx.i64_type().const_int(n, false);
-        let alloca = ctx.builder.build_array_alloca(elem_ty, n_val, "");
+        let alloca = ctx.builder.build_array_alloca(elem_ty, n_val, "").unwrap();
         // Safety: array alloca creates a raw pointer to appropriate memory
         unsafe { Self::materialize(ctx, alloca.into()) }
     }
@@ -154,7 +154,7 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
     pub fn copy(ctx: &Context<'ctx>, src: Self, dest: Self) {
         assert_eq!(src.val.get_type(), dest.val.get_type());
 
-        let size = ctx.r.get_store_size::<T>();
+        let size = ctx.get_store_size::<T>();
 
         let memcpy_intrinsic = ctx
             .get_intrinsic_raw(
@@ -194,7 +194,7 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
 
     pub fn build_load(self, ctx: &Context<'ctx>) -> BrandedValue<'ctx, T::Element> {
         // TODO: maybe a check to find uses of FCAs?
-        let val = ctx.builder.build_load(self.ptr_val(), "");
+        let val = ctx.builder.build_load(self.ptr_val(), "").unwrap();
         // Safety: value loaded from a pointer to type E should be of type E
         unsafe { BrandedValue::materialize(ctx, val) }
     }
@@ -225,7 +225,7 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
     ) -> BrandedValue<'ctx, O> {
         let cast = ctx
             .builder
-            .build_bitcast(self.val, ctx.r.get_llvm_type::<O>(), "");
+            .build_bit_cast(self.val, ctx.r.get_llvm_type::<O>(), "").unwrap();
         // Safety: inherently unsafe, so fn is unsafe
         BrandedValue::materialize(ctx, cast)
     }
@@ -282,7 +282,7 @@ impl<'ctx> BrandedValue<'ctx, f32> {
             self.val,
             ctx.llvm_ctx.i32_type(),
             "",
-        );
+        ).unwrap();
         // Safety: The FPToSI cast is configured to produce a signed int32.
         // TODO: freeze, or handle poison values in some other way
         unsafe { BrandedValue::materialize(ctx, cast_maybe) }
