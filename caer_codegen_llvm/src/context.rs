@@ -75,7 +75,7 @@ impl<'ctx> Context<'ctx> {
     }
 
     // TODO: most callers of this should be using catch machinery
-    pub fn build_call<const N: usize, F: PinionFuncInstance<ExRuntime>, R>(
+    /*pub fn build_call<const N: usize, F: PinionFuncInstance<ExRuntime>, R>(
         &self, cb: PinionCallBundle<N, ExRuntime, F, R, BasicValueEnum<'ctx>>,
     ) -> MaybeRet<'ctx, R> {
         /*let func_typeid = TypeId::of::<F>();
@@ -89,7 +89,7 @@ impl<'ctx> Context<'ctx> {
             .left();
         MaybeRet::create(ret)*/
         todo!()
-    }
+    }*/
 
     pub fn get_intrinsic(&self, intrinsic: prog::Intrinsic) -> FunctionValue<'ctx> {
         // TODO: cache?

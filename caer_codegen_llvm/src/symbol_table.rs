@@ -200,16 +200,12 @@ impl<'ctx> SymbolTable<'ctx> {
                         .into(),
                     ctx.llvm_ctx.i64_type().const_int(len as _, false).into(),
                     unsafe {
-                        ctx.builder
-                            .build_in_bounds_gep(
-                                string_global.as_pointer_value(),
+                        string_global.as_pointer_value().const_in_bounds_gep(
                                 &[
                                     ctx.llvm_ctx.i32_type().const_zero(),
                                     ctx.llvm_ctx.i32_type().const_zero(),
                                 ],
-                                "",
                             )
-                            .unwrap()
                     }
                     .into(),
                 ]);
@@ -236,6 +232,14 @@ impl<'ctx> SymbolTable<'ctx> {
 
     pub fn get_ir_llvm_func(&self, id: FuncId) -> Option<FunctionValue<'ctx>> {
         self.ir_llvm_funcs.get(id).copied()
+    }
+
+    pub fn get_ir_func(&self, id: FuncId) -> Option<&'ctx Function> {
+        self.ir_funcs.get(id).map(|v| &**v)
+    }
+
+    pub fn iter_func_ids(&self) -> impl Iterator<Item = FuncId> {
+        self.ir_llvm_funcs.indices()
     }
 
     pub fn iter_ir_llvm_funcs(&'ctx self) -> impl Iterator<Item = (FuncId, FunctionValue<'ctx>)> {

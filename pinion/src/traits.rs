@@ -92,7 +92,7 @@ pub trait PinionModuleFuncs {
 // Must be bound to a specific module M.
 // TODO: maybe make M an associated type. this complicates derivation: the export macro needs to
 // somehow be aware of the arguments.
-pub trait PinionFuncInstance<M: PinionModule>: PinionFunc + 'static {
+pub trait PinionFuncInstance<M: PinionModule>: PinionFunc {
     fn create() -> Self;
 }
 

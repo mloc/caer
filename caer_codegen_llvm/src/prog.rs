@@ -36,7 +36,7 @@ use crate::value::BrandedValue;
 pub struct ProgEmit<'ctx> {
     pub ctx: Context<'ctx>,
     pub env: &'ctx Module,
-    pub funcs: Vec<(&'ctx Function, FunctionValue<'ctx>)>,
+    funcs: Vec<(&'ctx Function, FunctionValue<'ctx>)>,
     pub rt_global: inkwell::values::GlobalValue<'ctx>,
     pub rt_global_val: BrandedValue<'ctx, *mut Runtime>,
     // vtable global
@@ -85,11 +85,15 @@ impl<'ctx> ProgEmit<'ctx> {
         self.emit_string_table();
         let main_block = self.emit_main();
 
-        for (ir_func, ll_func) in self.funcs.drain(..).collect::<Vec<_>>() {
+        let funcs: Vec<_> = self.sym.iter_func_ids().collect();
+        for func_id in funcs {
+            let ir_func = self.sym.get_ir_func(func_id).unwrap();
+            let ll_func = self.sym.get_ir_llvm_func(func_id).unwrap();
             // TODO no
             println!("EMITTING {:?}", ir_func.id);
             let walker = CFGWalker::build(ir_func);
-            let mut func_emit = FuncEmit::new(&self.ctx, self.env, &self.sym, ir_func, ll_func);
+            let env: &'ctx _ = self.env;
+            let mut func_emit = FuncEmit::new(&self.ctx, env, &self.sym, ir_func, ll_func);
             walker.walk(ir_func, &mut func_emit);
         }
         let main_proc = self

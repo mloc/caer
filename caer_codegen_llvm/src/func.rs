@@ -20,13 +20,13 @@ use index_vec::IndexVec;
 use inkwell::basic_block::BasicBlock;
 use inkwell::types::BasicType;
 use inkwell::values::*;
-use pinion::{PinionData, PinionPointerType, PinionStruct, PinionTaggedUnion};
+use pinion::{PinionCallBundle, PinionData, PinionFuncInstance, PinionModule, PinionModuleIdForFunc, PinionPointerType, PinionStruct, PinionTaggedUnion};
 use ty::Type;
 
-use crate::context::{Context, ExFunc, ExMod};
+use crate::context::{Context, ExFunc, ExMod, ExRuntime};
 use crate::prog::{Intrinsic, ProgEmit};
 use crate::symbol_table::SymbolTable;
-use crate::value::{BrandedStackValue, BrandedValue};
+use crate::value::{BrandedStackValue, BrandedValue, MaybeRet};
 
 #[derive(Debug)]
 pub struct FuncEmit<'a, 'ctx> {
@@ -470,6 +470,22 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
         self.ctx.builder.build_store(ptr.ptr_val(), val.val);
     }
 
+    // TODO: most callers of this should be using catch machinery
+    pub fn build_call_p<const N: usize, F: PinionFuncInstance<ExRuntime>, R>(
+        &self, cb: PinionCallBundle<N, ExRuntime, F, R, BasicValueEnum<'ctx>>,
+    ) -> MaybeRet<'ctx, R> where ExRuntime: PinionModuleIdForFunc<F> {
+        let id = ExRuntime::get_bundle_func(&cb);
+        let func_val = self.sym.get_func(id);
+        // TODO: use BMVE in call bundles
+        let args_bmve: Vec<_> = cb.args.iter().copied().map(Into::into).collect();
+        let ret = self
+            .ctx.builder
+            .build_call(func_val, &args_bmve, "").unwrap()
+            .try_as_basic_value()
+            .left();
+        MaybeRet::create(ret)
+    }
+
     fn build_call_internal<F>(
         &self, func: F, args: &[BasicMetadataValueEnum<'ctx>],
     ) -> Option<BasicValueEnum<'ctx>>
@@ -785,7 +801,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
 
                 let cb =
                     ExMod::rt_val_print().bind(norm.cast_ptr(self.ctx), self.sym.rt_global_val);
-                self.ctx.build_call(cb);
+                self.build_call_p(cb);
             },
 
             Op::Binary(id, op, lhs, rhs) => {
@@ -803,7 +819,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                     rhs_ref.cast_ptr(self.ctx),
                     res,
                 );
-                self.ctx.build_call(cb);
+                self.build_call_p(cb);
 
                 self.set_local(*id, res.into());
             },
@@ -851,7 +867,7 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                 let cb = ExMod::rt_val_cast_string_val()
                     .bind(src.cast_ptr(self.ctx), self.sym.rt_global_val);
                 let res: BrandedValue<Option<NonNull<RtString>>> =
-                    self.ctx.build_call(cb).result(self.ctx).cast_ptr(self.ctx);
+                    self.build_call_p(cb).result(self.ctx).cast_ptr(self.ctx);
 
                 let res_alloca = res.alloca_emplace(self.ctx);
                 self.set_local(*dst, res_alloca.into());
