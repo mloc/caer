@@ -521,6 +521,11 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
     ) -> Option<BasicValueEnum<'ctx>> {
         // TODO: NEEDS TO USE OP BUNDLES FOR LLVM 12+
 
+        // don't do statepoints for now. need to change how GC works
+        let margs: Vec<_> = args.iter().map(|v| v.clone().into()).collect();
+        let cv: CallableValue<'ctx> = func.try_into().unwrap();
+        return self.build_call_internal(cv, &margs);
+
         let sp_intrinsic = self
             .ctx
             .get_intrinsic_raw("llvm.experimental.gc.statepoint", &[func.get_type().into()])
