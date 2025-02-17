@@ -17,9 +17,9 @@
         llvm = pkgs.llvmPackages_12;
       in {
         devShells.default = pkgs.mkShell {
-          buildInputs = [ tc f.rust-analyzer llvm.llvm llvm.clang llvm.libclang pkgs.libffi pkgs.libxml2 ];
+          buildInputs = [ tc f.rust-analyzer llvm.llvm llvm.clang llvm.libclang pkgs.libffi pkgs.libxml2 pkgs.xdot ];
           LIBCLANG_PATH = "${llvm.libclang.lib}/lib/";
-          LD_LIBRARY_PATH = "${with pkgs; lib.makeLibraryPath [stdenv.cc.cc.lib libffi libz ncurses]}";
+          LD_LIBRARY_PATH = "${with pkgs; lib.makeLibraryPath [stdenv.cc.cc.lib libffi zlib ncurses]}";
         };
       });
 }

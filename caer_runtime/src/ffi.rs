@@ -57,13 +57,13 @@ where
 {
     #[inline]
     pub fn as_slice(&self) -> &[T] {
-        unsafe {
-            from_raw_parts(
-                self.data.as_ptr(),
-                self.len
-                    .try_into()
-                    .expect("array size too big to cast to usize"),
-            )
+        let len: usize = self
+            .len
+            .try_into()
+            .expect("array size too big to cast to usize");
+        if len == 0 {
+            return &[];
         }
+        unsafe { from_raw_parts(self.data.as_ptr(), len) }
     }
 }

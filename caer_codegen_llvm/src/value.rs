@@ -225,7 +225,8 @@ impl<'ctx, T: PinionPointerType> BrandedValue<'ctx, T> {
     ) -> BrandedValue<'ctx, O> {
         let cast = ctx
             .builder
-            .build_bit_cast(self.val, ctx.r.get_llvm_type::<O>(), "").unwrap();
+            .build_bit_cast(self.val, ctx.r.get_llvm_type::<O>(), "")
+            .unwrap();
         // Safety: inherently unsafe, so fn is unsafe
         BrandedValue::materialize(ctx, cast)
     }
@@ -277,12 +278,15 @@ where
 
 impl<'ctx> BrandedValue<'ctx, f32> {
     pub fn cast_f32_to_i32(self, ctx: &Context<'ctx>) -> BrandedValue<'ctx, i32> {
-        let cast_maybe = ctx.builder.build_cast(
-            InstructionOpcode::FPToSI,
-            self.val,
-            ctx.llvm_ctx.i32_type(),
-            "",
-        ).unwrap();
+        let cast_maybe = ctx
+            .builder
+            .build_cast(
+                InstructionOpcode::FPToSI,
+                self.val,
+                ctx.llvm_ctx.i32_type(),
+                "",
+            )
+            .unwrap();
         // Safety: The FPToSI cast is configured to produce a signed int32.
         // TODO: freeze, or handle poison values in some other way
         unsafe { BrandedValue::materialize(ctx, cast_maybe) }

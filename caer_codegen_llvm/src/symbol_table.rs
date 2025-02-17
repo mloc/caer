@@ -45,8 +45,7 @@ impl<'ctx> SymbolTable<'ctx> {
         let ir_funcs = ir_env.funcs.iter().collect();
 
         let val_ptr_type = ctx.r.get_llvm_type::<*mut Val>();
-        let opaque_ptr_type = ctx.r
-            .get_llvm_type::<*mut std::ffi::c_void>();
+        let opaque_ptr_type = ctx.r.get_llvm_type::<*mut std::ffi::c_void>();
         let proc_type = {
             let argpack_ptr_type = ctx.r.get_llvm_type::<*const ProcPack>();
             let rt_ptr_type = ctx.r.get_llvm_type::<*mut Runtime>();
@@ -77,13 +76,12 @@ impl<'ctx> SymbolTable<'ctx> {
             ],
             false,
         );
-        let dm_eh_personality = ctx.module.add_function("dm_eh_personality", dm_eh_personality_ty, None);
+        let dm_eh_personality =
+            ctx.module
+                .add_function("dm_eh_personality", dm_eh_personality_ty, None);
         let landingpad_type = ctx.llvm_ctx.opaque_struct_type("landingpad");
         landingpad_type.set_body(
-            &[
-                opaque_ptr_type.into(),
-                ctx.llvm_ctx.i32_type().into(),
-            ],
+            &[opaque_ptr_type.into(), ctx.llvm_ctx.i32_type().into()],
             false,
         );
 
@@ -98,7 +96,8 @@ impl<'ctx> SymbolTable<'ctx> {
         };
 
         // TODO: don't dig so deep into env?
-        let vt_global_ty = ctx.r
+        let vt_global_ty = ctx
+            .r
             .get_llvm_type::<vtable::Entry>()
             .array_type(ir_env.type_tree.len() as u32);
         let vt_global = ctx.module.add_global(vt_global_ty, None, "vtable");
@@ -113,7 +112,13 @@ impl<'ctx> SymbolTable<'ctx> {
         Self {
             ir_env,
             ir_funcs,
-            ir_llvm_funcs: Self::initialize_ir_funcs(ctx, ir_env, proc_type, closure_type, dm_eh_personality),
+            ir_llvm_funcs: Self::initialize_ir_funcs(
+                ctx,
+                ir_env,
+                proc_type,
+                closure_type,
+                dm_eh_personality,
+            ),
             external_llvm_funcs: Self::initialize_external_funcs(ctx),
             proc_type,
             closure_type,
@@ -129,8 +134,8 @@ impl<'ctx> SymbolTable<'ctx> {
 
     // These could probably live somewhere else
     fn initialize_ir_funcs(
-        ctx: &Context<'ctx>, ir_env: &'ctx Module,
-        proc_type: FunctionType<'ctx>, closure_type: FunctionType<'ctx>, dm_eh_personality: FunctionValue<'ctx>
+        ctx: &Context<'ctx>, ir_env: &'ctx Module, proc_type: FunctionType<'ctx>,
+        closure_type: FunctionType<'ctx>, dm_eh_personality: FunctionValue<'ctx>,
     ) -> IndexVec<FuncId, FunctionValue<'ctx>> {
         ir_env
             .funcs
@@ -153,10 +158,10 @@ impl<'ctx> SymbolTable<'ctx> {
             .collect()
     }
 
-    fn initialize_external_funcs(
-        ctx: &Context<'ctx>,
-    ) -> HashMap<ExFunc, FunctionValue<'ctx>> {
-        ctx.r.get_all_funcs::<ExRuntime>().into_iter()
+    fn initialize_external_funcs(ctx: &Context<'ctx>) -> HashMap<ExFunc, FunctionValue<'ctx>> {
+        ctx.r
+            .get_all_funcs::<ExRuntime>()
+            .into_iter()
             .map(|(_, (layout, ty), func_enum)| {
                 let val = ctx.module.add_function(layout.name, ty, None);
                 (func_enum, val)
@@ -200,12 +205,10 @@ impl<'ctx> SymbolTable<'ctx> {
                         .into(),
                     ctx.llvm_ctx.i64_type().const_int(len as _, false).into(),
                     unsafe {
-                        string_global.as_pointer_value().const_in_bounds_gep(
-                                &[
-                                    ctx.llvm_ctx.i32_type().const_zero(),
-                                    ctx.llvm_ctx.i32_type().const_zero(),
-                                ],
-                            )
+                        string_global.as_pointer_value().const_in_bounds_gep(&[
+                            ctx.llvm_ctx.i32_type().const_zero(),
+                            ctx.llvm_ctx.i32_type().const_zero(),
+                        ])
                     }
                     .into(),
                 ]);

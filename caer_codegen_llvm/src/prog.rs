@@ -197,7 +197,8 @@ impl<'ctx> ProgEmit<'ctx> {
     fn populate_datum_types(&mut self) {
         for ty in self.env.instances.iter() {
             let vars_field_ty = self
-                .ctx.r
+                .ctx
+                .r
                 .get_llvm_type::<Val>()
                 .array_type(ty.pty.vars.len() as u32);
             let datum_ty = self

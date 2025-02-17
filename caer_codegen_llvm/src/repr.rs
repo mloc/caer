@@ -1,8 +1,8 @@
 use std::any::TypeId;
 use std::borrow::Borrow;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::cell::RefCell;
 
 use inkwell::types::{BasicType, BasicTypeEnum, FunctionType, IntType, StructType};
 use pinion::layout::{Enum, Func, Layout, StructLayout, TaggedUnion, Union};
@@ -107,7 +107,8 @@ impl<'ctx> ReprManager<'ctx> {
         &self,
     ) -> Vec<(TypeId, (Func, FunctionType<'ctx>), T::Funcs)> {
         let mod_funcs = T::get_funcs(&mut self.layout_ctx.borrow_mut());
-        mod_funcs.into_iter()
+        mod_funcs
+            .into_iter()
             .map(|(id, typeid, layout)| {
                 let func = self.build_func(&layout);
                 (typeid, (layout, func), id)
@@ -207,8 +208,8 @@ impl<'ctx> ReprManager<'ctx> {
     fn build_layout(&self, id: LayoutId) -> (Rc<Layout>, Option<BasicTypeEnum<'ctx>>) {
         let layout = self.layout_ctx.borrow().get(id).unwrap();
         if let Some(bty) = self.basic_types.borrow().get(&id) {
-            return (layout, *bty)
-        } 
+            return (layout, *bty);
+        }
         let bty = self.build_bty_stage1(&layout);
         self.basic_types.borrow_mut().insert(id, bty);
         if let Some(bty) = bty {

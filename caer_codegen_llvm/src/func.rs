@@ -20,7 +20,10 @@ use index_vec::IndexVec;
 use inkwell::basic_block::BasicBlock;
 use inkwell::types::BasicType;
 use inkwell::values::*;
-use pinion::{PinionCallBundle, PinionData, PinionFuncInstance, PinionModule, PinionModuleIdForFunc, PinionPointerType, PinionStruct, PinionTaggedUnion};
+use pinion::{
+    PinionCallBundle, PinionData, PinionFuncInstance, PinionModule, PinionModuleIdForFunc,
+    PinionPointerType, PinionStruct, PinionTaggedUnion,
+};
 use ty::Type;
 
 use crate::context::{Context, ExFunc, ExMod, ExRuntime};
@@ -184,15 +187,18 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                 self.copy_val(ptr, self.var_allocs[var_id].val);
             }*/
         } else {
-            let param_locals_arr = self.ctx.builder.build_array_alloca(
-                self.ctx.r
-                    .get_llvm_type::<*const Val>(),
-                self.ctx
-                    .llvm_ctx
-                    .i64_type()
-                    .const_int(self.ir_func.params.len() as u64, false),
-                "param_locals",
-            ).unwrap();
+            let param_locals_arr = self
+                .ctx
+                .builder
+                .build_array_alloca(
+                    self.ctx.r.get_llvm_type::<*const Val>(),
+                    self.ctx
+                        .llvm_ctx
+                        .i64_type()
+                        .const_int(self.ir_func.params.len() as u64, false),
+                    "param_locals",
+                )
+                .unwrap();
 
             for (i, var_id) in self.ir_func.params.iter().enumerate() {
                 let alloc = &self.var_allocs[*var_id];
@@ -444,12 +450,11 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
     */
 
     fn bitcast_ptr<T: PinionData>(&self, ptr: PointerValue<'ctx>) -> PointerValue<'ctx> {
-        let dest_ty = self
-            .ctx.r
-            .get_llvm_type::<*mut T>();
+        let dest_ty = self.ctx.r.get_llvm_type::<*mut T>();
         self.ctx
             .builder
-            .build_bit_cast(ptr, dest_ty, "").unwrap()
+            .build_bit_cast(ptr, dest_ty, "")
+            .unwrap()
             .into_pointer_value()
     }
 
@@ -473,14 +478,19 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
     // TODO: most callers of this should be using catch machinery
     pub fn build_call_p<const N: usize, F: PinionFuncInstance<ExRuntime>, R>(
         &self, cb: PinionCallBundle<N, ExRuntime, F, R, BasicValueEnum<'ctx>>,
-    ) -> MaybeRet<'ctx, R> where ExRuntime: PinionModuleIdForFunc<F> {
+    ) -> MaybeRet<'ctx, R>
+    where
+        ExRuntime: PinionModuleIdForFunc<F>,
+    {
         let id = ExRuntime::get_bundle_func(&cb);
         let func_val = self.sym.get_func(id);
         // TODO: use BMVE in call bundles
         let args_bmve: Vec<_> = cb.args.iter().copied().map(Into::into).collect();
         let ret = self
-            .ctx.builder
-            .build_call(func_val, &args_bmve, "").unwrap()
+            .ctx
+            .builder
+            .build_call(func_val, &args_bmve, "")
+            .unwrap()
             .try_as_basic_value()
             .left();
         MaybeRet::create(ret)
@@ -886,11 +896,15 @@ impl<'a, 'ctx> FuncEmit<'a, 'ctx> {
                     .i32_type()
                     .const_int(ity_id.raw() as u64, false);
                 let vt_ptr = unsafe {
-                    let ptr = self.ctx.builder.build_in_bounds_gep(
-                        self.sym.vt_global.as_pointer_value(),
-                        &[self.ctx.llvm_ctx.i32_type().const_zero(), ty_id_val],
-                        "vt_ptr",
-                    ).unwrap();
+                    let ptr = self
+                        .ctx
+                        .builder
+                        .build_in_bounds_gep(
+                            self.sym.vt_global.as_pointer_value(),
+                            &[self.ctx.llvm_ctx.i32_type().const_zero(), ty_id_val],
+                            "vt_ptr",
+                        )
+                        .unwrap();
                     BrandedValue::<*mut Entry>::materialize(self.ctx, ptr.into())
                 };
 

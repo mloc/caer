@@ -41,9 +41,7 @@ impl<'ctx> TypeManager<'ctx> {
     }
 
     pub fn get_tagged_union<T: PinionTaggedUnion>(&self) -> Rc<TaggedUnionRepr<'ctx>> {
-        self.repr_manager
-            .borrow_mut()
-            .get_tagged_union::<T>()
+        self.repr_manager.borrow_mut().get_tagged_union::<T>()
     }
 
     pub fn get_type<T: PinionData>(&self) -> EmitType<'ctx> {
@@ -83,11 +81,7 @@ impl<'ctx> RtFuncTyBundle<'ctx> {
         let val_type = rm.get_type::<Val>().get_ty().unwrap().into_struct_type();
         let val_type_ptr = val_type.ptr_type(inkwell::AddressSpace::default());
 
-        let opaque_type = rm
-            .get_type::<c_void>()
-            .get_ty()
-            .unwrap()
-            .into_struct_type();
+        let opaque_type = rm.get_type::<c_void>().get_ty().unwrap().into_struct_type();
 
         let rt_type = rm.get_type::<Runtime>().get_ty().unwrap();
         let closure_type = ctx.llvm_ctx.void_type().fn_type(

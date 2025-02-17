@@ -17,10 +17,7 @@ pub fn emit(ir: &caer_ir::module::Module) {
     sub(&llctx, ir);
 }
 
-fn sub<'ctx, 'ir: 'ctx>(
-    llctx: &'ctx inkwell::context::Context,
-    ir: &'ir caer_ir::module::Module,
-) {
+fn sub<'ctx, 'ir: 'ctx>(llctx: &'ctx inkwell::context::Context, ir: &'ir caer_ir::module::Module) {
     let llmod = llctx.create_module("main");
     let llbuild = llctx.create_builder();
     let emit_ctx = context::Context::new(&llctx, llmod, llbuild);
